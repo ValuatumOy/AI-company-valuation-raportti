@@ -1,0 +1,8 @@
+# Railway build. Context = repo root so scripts/ + template/ are in the image.
+[build]
+builder = "dockerfile"
+dockerfilePath = "pipeline-runner/Dockerfile"
+
+[deploy]
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
