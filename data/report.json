@@ -1,0 +1,556 @@
+{
+  "meta": {
+    "brandName": "Valuatum",
+    "company": "Valuatum Oy",
+    "businessId": "1612398-8",
+    "date": "12.6.2026",
+    "reportTitle": "AI-Arvonmääritysraportti",
+    "headerRight": "Valuatum Oy · 1612398-8 · 12.6.2026"
+  },
+  "cover": {
+    "tagline": "AI-Arvonmääritysraportti",
+    "title": "AI-Arvonmääritysraportti",
+    "company": "Valuatum Oy",
+    "metaLines": ["Y-tunnus 1612398-8 · 12.6.2026", "Toimiala: ei ilmoitettu input-datassa"],
+    "headline": {
+      "big": "Ei määritettävissä",
+      "unit": "luotettavasti",
+      "caption": "Oman pääoman arvo annetulla datalla",
+      "size": "30pt"
+    }
+  },
+  "snapshot": {
+    "label": "02 Snapshot",
+    "title": "Snapshot",
+    "subtitle": "Avainluvut · johtopäätös · lukuohje",
+    "blocks": [
+      {
+        "type": "metrics",
+        "columns": 2,
+        "style": "margin-bottom:14px;",
+        "cards": [
+          { "value": "−36,0 / 5,25", "label": "NOPLAT 2024 / 2028e (tEUR)", "valueSize": "16pt" },
+          { "value": "−56,7…−72,8", "label": "Pääoman kustannus / vuosi (tEUR)", "valueSize": "16pt" },
+          { "value": "−32,8 / −105,0 / −77,4 / −68,6 / −59,1 / −51,4", "label": "EVA / vuosi 2023–2028e (tEUR)", "valueSize": "10.5pt" },
+          { "value": "604,0", "label": "PV of TRM EVA (tEUR)", "valueSize": "16pt" }
+        ]
+      },
+      {
+        "type": "kv",
+        "rows": [
+          { "k": "PV of cap. base change (tEUR)", "v": "−219,0" },
+          { "k": "Sijoitettu pääoma (tEUR)", "v": "601,0" },
+          { "k": "− Korolliset velat (tEUR)", "v": "−259,0" },
+          { "k": "+ Rahavarat (tEUR)", "v": "41,2" },
+          { "k": "Oman pääoman arvo, EVA (tEUR)", "v": "0,18", "bold": true }
+        ]
+      },
+      {
+        "type": "callout",
+        "variant": "kill",
+        "title": "Mikä kaataisi tämän arvion",
+        "paragraphs": ["Arvio menettää perustansa, jos 462 tEUR:n konsernisaaminen osoittautuu kokonaan tai osittain perintäkelvottomaksi, jos tappiollisuus jatkuu ennustetulla uralla ja syö jäljellä olevan oman pääoman, tai jos 94 tEUR:n \"muu vaihto-omaisuus\" -erä ei ole realisoitavissa tasearvostaan."]
+      }
+    ]
+  },
+  "toc": {
+    "noteTitle": "Näin raporttia luetaan",
+    "note": "Kaikki luvut perustuvat toimitettuun input-dataan ja Valuatumin deterministiseen laskentaan silloin, kun kyseiset luvut on toimitettu lähtöaineistossa. Tekoälyn rooli on rajattu lukujen tulkintaan, menetelmien soveltuvuuden arviointiin ja analyysitekstin tuottamiseen."
+  },
+  "sections": [
+    {
+      "id": "1-tiivistelma",
+      "number": "1",
+      "title": "TIIVISTELMÄ",
+      "blocks": [
+        { "type": "h", "text": "Avainluvut (metric cards)" },
+        {
+          "type": "table",
+          "headers": ["Mittari", "Arvo"],
+          "rows": [
+            ["Oman pääoman arvo (estimaatti)", "**DCF 274 tEUR · EVA 0,18 tEUR — yhtä pistearvoa ei voida antaa luotettavasti**"],
+            ["Yritysarvo (estimaatti)", "**DCF-pohjainen implisiittinen yritysarvo n. 492 tEUR (274 + 259 − 41,2); EVA-pohjainen olennaisesti nolla omalle pääomalle**"],
+            ["Arvostusväli", "**Menetelmien hajonta 0–274 tEUR; varsinaista arvostusväliä ei toimitettu**"],
+            ["Arvion luottamustaso", "**Matala**"],
+            ["Käytetyt menetelmät", "DCF ja EVA (painoja ei toimitettu)"],
+            ["Hylätyt menetelmät", "3 (P/E, EV/EBITDA, substanssiarvo) — ks. osio 6"]
+          ]
+        },
+        { "type": "h", "text": "Yhteenveto" },
+        { "type": "p", "text": "Tämä on sanottava suoraan: toimitettu valuaatiomoottorin output antaa kahdelle hyväksyttävissä olevalle menetelmälle lähes vastakkaiset tulokset. DCF-laskelma tuottaa omalle pääomalle arvon 274 tEUR, kun taas saman ennusteen ja saman 9,5 %:n WACC:n pohjalta laskettu EVA-malli antaa omalle pääomalle käytännössä nollan (0,18 tEUR). Näin suuri hajonta kahden samaan dataan nojaavan menetelmän välillä tarkoittaa, että arvo on mallirakenteen ja terminaalioletusten, ei nykyliiketoiminnan, varassa. Yhtä luotettavaa pistearvoa ei voida antaa; rehellinen luenta on, että oman pääoman arvo asettuu välille 0–274 tEUR ja painopiste riippuu siitä, uskooko lukija ennustejakson jälkeiseen kannattavuuteen." },
+        { "type": "p", "text": "Arvostus nojaa käytännössä yhteen oletukseen: liikevoitto kääntyy positiiviseksi vuonna 2028 (6,6 tEUR, 1,9 % liikevaihdosta) ja tämä taso kantaa terminaaliin — samaan aikaan kun liikevaihto supistuu ennusteessa joka vuosi 2025 jälkeen (428 → 341 tEUR). Historia ei tue oletusta yksiselitteisesti: vuonna 2023 yhtiö teki 40 tEUR liikevoittoa (6,9 %), mutta 2024 liikevaihto putosi 28,0 % ja tulos kääntyi −36 tEUR tappiolle. Kahden historiavuoden perusteella ei voida erottaa, kumpi vuosi kuvaa yhtiön rakenteellista tasoa." },
+        { "type": "p", "text": "Arvoa rasittavat tekijät ovat taseessa. Oma pääoma (pl. pääomalainat) sulaa ennusteessa 235 tEUR:sta (2023) 57,8 tEUR:iin (2028e) samalla kun korolliset velat kasvavat 245 tEUR:sta 293 tEUR:iin. Omavaraisuusaste pysyy koko jakson 15,6–19,5 %:n haarukassa ja korollisten velkojen suhde omaan pääomaan nousee noin 1,4-kertaisesta noin 5,1-kertaiseksi vuoteen 2028 mennessä. Nettovelka on 2025e-tasolla noin 218 tEUR (259 − 41,2), eli moninkertainen suhteessa parhaan ennustevuoden liikevoittoon. Tase ei kestä käänteen viivästymistä montaa vuotta." },
+        { "type": "p", "text": "Arvoa tukevat tekijät ovat ohuet mutta todelliset: yhtiö on osoittanut kykenevänsä kannattavuuteen (2023), ennustejakson vapaat kassavirrat kääntyvät positiivisiksi 2026e–2028e (10,7 / 8,4 / 11,2 tEUR) ja investointitarve on hyvin pieni (alle 7 tEUR vuodessa), mikä on tyypillistä ohjelmistoliiketoiminnalle." },
+        { "type": "p", "text": "Arviosta tulisi olennaisesti liian korkea, jos vuoden 2028 marginaalikäänne ei toteudu tai jää kertaluonteiseksi: koko DCF-arvo muodostuu käytännössä terminaalista, koska eksplisiittisen jakson 2025e–2028e nominaaliset vapaat kassavirrat ovat yhteensä vain noin 21 tEUR. EVA-malli kertoo saman asian toisin päin — yhtiön ROI (parhaimmillaan 2,0 % vuonna 2028e) jää koko ennustejakson selvästi alle 9,5 %:n pääoman kustannuksen, eli yhtiö tuhoaa mallin mukaan arvoa jokaisena ennustevuonna." },
+        { "type": "h", "text": "Keskeiset havainnot" },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "**Kaksi hyväksyttyä menetelmää antaa arvoiksi 274 tEUR ja 0 tEUR — hajonta on itse päähavainto.** DCF (274 tEUR) ja EVA (0,18 tEUR) nojaavat samaan ennusteeseen ja samaan WACC:iin, joten ero syntyy menetelmien tavasta käsitellä terminaalia ja sitoutunutta pääomaa. Menetelmien hajonta ei hajauta riskiä, vaan paljastaa, että arvo riippuu kokonaan ennustejakson jälkeisistä oletuksista. Raportin käyttäjän on ymmärrettävä, että pistearvo 274 tEUR on hajonnan optimistinen pää, ei keskikohta.",
+            "**Liikevaihto on erittäin volatiili eikä ennuste sisällä kasvua.** Kasvu oli +47,1 % (2023), −28,0 % (2024), ja ennusteessa liikevaihto supistuu 428 tEUR:sta 341 tEUR:iin 2025e–2028e. Tämä heikentää kaikkien tulevaisuuteen nojaavien menetelmien luotettavuutta: kun kahden historiavuoden heilunta on lähes 80 prosenttiyksikköä, ±10 %:n virhe ennusteen liikevaihtotasossa on täysin mahdollinen ja riittää viemään 2028e:n 1,9 %:n liikevoittomarginaalin takaisin tappiolle.",
+            "**Tase heikkenee koko ennustejakson, vaikka tulos paranee.** Oma pääoma laskee 159 tEUR (2024) → 57,8 tEUR (2028e) ja korolliset velat nousevat 225 → 293 tEUR. Käänne ei siis ennusteessakaan ehdi korjata pääomarakennetta, vaan velkaantuminen syvenee. Tämä näkyy luvuissa siten, että omavaraisuusaste jää 2028e:ssäkin 19,5 %:iin ja oman pääoman puskuri on alle viidesosa korollisista veloista.",
+            "**Tuotto sitoutuneelle pääomalle jää koko jakson alle pääoman kustannuksen.** ROI on parhaimmillaan 2,0 % (2028e) ja WACC 9,5 %. EVA on negatiivinen jokaisena vuonna (−105 tEUR 2024 → −51,4 tEUR 2028e). Tämä ei tarkoita, että yhtiö olisi arvoton, vaan että going concern -arvo edellyttää ennustejakson jälkeistä, dataan kirjaamatonta parannusta.",
+            "**Historian kassavirta on käyttöpääoma- ja tase-erävetoista, ei operatiivista.** Käyttöpääoman muutokset olivat −225 tEUR (2023) ja +434 tEUR (2024) ja bruttoinvestointirivit −400 / +474 tEUR — erät ovat moninkertaisia liikevoittoon nähden, eikä toimitettu data kerro, mistä ne koostuvat. Vuoden 2024 positiivinen operatiivinen kassavirta (398 tEUR) ei kuvaa liiketoiminnan tuloksentekokykyä, vaan taseen purkautumista. Tämä heikentää arvion luotettavuutta."
+          ]
+        },
+        { "type": "h", "text": "Mistä arvio riippuu eniten" },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "**Kannattavuuskäänteen toteutuminen ja pysyvyys.** Liikevoiton on noustava −36 tEUR:sta (2024) +6,6 tEUR:iin (2028e) supistuvalla liikevaihdolla, ja tason on kannettava terminaaliin — käytännössä koko 274 tEUR:n DCF-arvo lepää tämän varassa.",
+            "**Rahoituksen riittävyys käänteeseen asti.** Korolliset velat kasvavat ennusteessa 293 tEUR:iin ja oma pääoma ohenee 57,8 tEUR:iin; jos rahoittajien kärsivällisyys tai lisärahoituksen saatavuus pettää ennen 2027–2028, going concern -pohjainen arvo ei toteudu.",
+            "**Pääoman tuottovaatimus.** Arvo muodostuu terminaalista, joten se on erittäin herkkä 9,5 %:n WACC:lle ja 11,8 %:n oman pääoman kustannukselle; toimitettu data ei sisällä herkkyyslaskelmia, joilla tämän voisi kvantifioida."
+          ]
+        },
+        { "type": "h", "text": "Mikä kaataisi tämän arvion (callout-laatikko)" },
+        { "type": "p", "text": "Arvio menettää perustansa, jos (1) liikevoitto ei käänny positiiviseksi vuoteen 2028 mennessä tai käänne jää yhden vuoden ilmiöksi, (2) liikevaihdon lasku jatkuu ennustettua jyrkempänä — jo muutaman kymmenen tEUR:n lisäpudotus 341 tEUR:n tasolta vie 1,9 %:n marginaalin takaisin tappiolle — tai (3) yhtiö ei kykene rahoittamaan tappiovuosia 2025–2026, jolloin oman pääoman 57,8–123 tEUR:n puskuri ja kasvava 259–293 tEUR:n velkataakka pakottavat going concern -oletuksen kyseenalaiseksi ja arvonmäärityksen lähtökohdaksi tulee likvidaatiologiikka." }
+      ]
+    },
+    {
+      "id": "2-datan-laatu-ja-kaytetyt-lahteet",
+      "number": "2",
+      "title": "DATAN LAATU JA KÄYTETYT LÄHTEET",
+      "blocks": [
+        { "type": "p", "text": "**Datan laatuluokka: Kohtalainen.**" },
+        { "type": "p", "text": "Luokitusta nostaa se, että käytössä on tuloslaskelman ja taseen päärivit, vuosittainen kassavirtalaskelma, neljän vuoden ennustejakso sekä valuaatiomoottorin output (DCF, EVA, WACC-parametrit). Luokitusta painaa se, että historiaa on vain kaksi tilikautta (2023–2024), tuloslaskelmasta puuttuu nettotulosrivi, taseesta puuttuu erittely (mm. saamiset, kassa vuosittain, velkojen rakenne), eikä toimialavertailua, herkkyyslaskelmia tai normalisointioikaisuja ole toimitettu. Kahden vuoden historia ei riitä erottamaan trendiä satunnaisvaihtelusta yhtiössä, jonka liikevaihto heilahti −28,0 % yhdessä vuodessa." },
+        { "type": "h", "text": "Mitä käytettiin" },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Tilikaudet 2023 ja 2024 (tulos- ja tasepääluvut, tEUR)",
+            "Ennustejakso 2025e–2028e (liikevaihto, käyttökate, liikevoitto, tase-erät)",
+            "Kassavirtalaskelma 2023–2028e sekä rahavarat 41,2 tEUR (DCF-laskelman tasekohta)",
+            "Valuaatiomoottorin output: DCF-laskelma (oman pääoman arvo 274 tEUR) ja EVA-laskelma (oman pääoman arvo 0,18 tEUR)",
+            "WACC-parametrit: riskitön korko 3,00 %, riskipreemio 6,00 %, likviditeettipreemio 1,00 %, beta 1,30, oman pääoman kustannus 11,80 %, WACC 9,50 %",
+            "Ennusteparametrit (kasvu, marginaali, investoinnit, käyttöpääomasuhteet, vero 20 %)",
+            "Julkiset lähteet liiketoimintaprofiiliin (yhtiön verkkosivut ja yritystietopalvelut, ks. osio 3)"
+          ]
+        },
+        { "type": "h", "text": "Tunnistetut rajoitteet — nämä vaikuttavat arvion luotettavuuteen" },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "Historiadataa on vain kaksi tilikautta, ja ne ovat keskenään lähes vastakkaiset (kasvu +47,1 % / −28,0 %; EBIT +40 / −36 tEUR). Trendipäätelmät ovat tällä pohjalla heikkoja.",
+            "Nettotulosta ei ole toimitettu rivinä; nettotulospohjaisia tunnuslukuja ei voida laskea suoraan, ja ROE-luvut on otettava annettuina.",
+            "Kassavirtalaskelman poistot ovat 0 kaikkina vuosina, vaikka käyttökatteen ja liikevoiton ero (3–9 tEUR/v) osoittaa poistoja olevan. Sisäinen epäjohdonmukaisuus heikentää kassavirtapohjaisen laskennan läpinäkyvyyttä.",
+            "Vuosien 2023–2024 käyttöpääoma- ja investointirivit (−225/+434 ja −400/+474 tEUR) ovat moninkertaisia liikevaihtoon nähden, eikä niiden sisältöä ole eritelty. Historian kassavirtaa ei voida tulkita luotettavasti.",
+            "Ennusteessa maksetaan veroja (esim. 9,08 tEUR 2025e) tappiollisina vuosina, eikä verotappioiden käsittelyä ole avattu. Tämä viittaa mekaaniseen laskentaan ja rasittaa ennustejakson kassavirtoja epäselvällä tavalla.",
+            "Toimialavertailua, herkkyysmatriisia, menetelmäpainoja ja arvostusväliä ei toimitettu.",
+            "Omistajapalkkaoikaisua, kertaluonteisten erien erittelyä tai konsernirakennetietoa ei ole; pienessä yhtiössä nämä voivat muuttaa normalisoitua tulosta olennaisesti."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "3-yhtion-liiketoimintaprofiili",
+      "number": "3",
+      "title": "YHTIÖN LIIKETOIMINTAPROFIILI",
+      "blocks": [
+        { "type": "p", "class": "intro-note", "text": "*Tämä osio yhdistää tilinpäätösanalyysin käytettävissä oleviin liiketoimintatietoihin. Ulkoisista lähteistä peräisin olevat tiedot kuvaavat yhtiön omaa tai kolmannen osapuolen julkaisemaa tietoa, eivät tilintarkastettua dataa.*" },
+        { "type": "h", "text": "Mitä yhtiö tekee" },
+        { "type": "p", "text": "Valuatum Oy on helsinkiläinen, vuonna 2000 perustettu rahoitusalan ohjelmistoyritys. Yhtiö toimittaa yritysten arvonmäärityksen, osaketutkimuksen ja luottoriskin hallinnan ohjelmistoratkaisuja finanssialan toimijoille, kuten luottolaitoksille, investointipankeille, varainhoitajille ja pääomasijoittajille [valuatum.com; b2bsuomi.fi, haettu 12.6.2026]. Referenssiasiakkaiksi yhtiö mainitsee mm. Evlin, Garantian, Dun & Bradstreetin ja Aspon [valuatum.com, haettu 12.6.2026]. Lisäksi yhtiöllä on Suomeen suunnattu Valuatum Aarre -palvelu pk-yritysten ja tilitoimistojen tarpeisiin [b2bsuomi.fi, haettu 12.6.2026]. Yritystietopalvelun mukaan henkilöstömäärä oli 5 tilikaudella 2024 [vainu.com, haettu 12.6.2026]. Liiketoimintamalli on ohjelmistolisensointiin ja asiantuntijapalveluun perustuva B2B-malli *(päätelmä, ei varmennettu tieto)*." },
+        { "type": "h", "text": "Miten tämä selittää tilinpäätöksen rakenteen" },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "**Asset-light-profiili sopii ohjelmistoliiketoimintaan.** Aineelliset hyödykkeet ovat vain 9–27 tEUR eli 1,6–6,5 % liikevaihdosta, ja ennustetut investoinnit ovat alle 7 tEUR vuodessa. Liiketoiminta ei sido käyttöomaisuutta, joten arvon on synnyttävä kassavirrasta, ei taseesta.",
+            "**Liikevaihdon volatiliteetti (+47,1 % / −28,0 %) viittaa pieneen asiakaspohjaan tai projekti- ja lisenssikauppojen ajoitusherkkyyteen** *(päätelmä, ei varmennettu tieto)*. Viiden hengen B2B-ohjelmistoyhtiössä yksittäisen asiakkuuden tai toimituksen siirtymä riittää selittämään tämän kokoluokan heilunnan.",
+            "**Kulurakenne on pääosin kiinteä.** Kun liikevaihto putosi 2024 162 tEUR, liikevoitto heikkeni 76 tEUR — noin 47 % liikevaihdon pudotuksesta valui suoraan tulokseen. Henkilöstövetoisessa ohjelmistoyhtiössä kulut eivät jousta myynnin mukana, mikä tekee tuloksesta vipuvartisen molempiin suuntiin.",
+            "**Taseen loppusumma (679–792 tEUR) on suuri suhteessa liikevaihtoon ja aineellisiin hyödykkeisiin.** Pääoman kiertonopeus on vain 0,57–0,80. Toimitettu data ei erittele, mistä tase koostuu aineellisten hyödykkeiden (27 tEUR 2024) ulkopuolella; tämä on olennainen aukko, koska EVA-laskelman 601 tEUR:n sijoitettu pääoma rasittaa arvoa täysimääräisesti.",
+            "**Korollinen velka (225–293 tEUR) on poikkeuksellisen suuri asset-light-yhtiölle**, jonka aineelliset hyödykkeet ovat alle 30 tEUR. Velka rahoittaa jotain muuta kuin käyttöomaisuutta, ja sen hoito nojaa kokonaan tulevaan kassavirtaan."
+          ]
+        },
+        { "type": "h", "text": "Vaikutus arvonmääritykseen (callout)" },
+        { "type": "p", "text": "Yhtiö on tällä hetkellä tappiollinen asset-light-ohjelmistoyhtiö, jolla on raskas velkataakka. Tästä seuraa suoraan arvonmäärityslogiikka: arvo ei voi perustua nykyiseen tulokseen (negatiivinen) eikä taseeseen (aineelliset hyödykkeet 27 tEUR, oma pääoma ohenee), vaan ainoastaan tulevaan kannattavuuskäänteeseen. Kassavirta- ja lisäarvopohjaiset menetelmät (DCF, EVA) ovat ainoat periaatteessa soveltuvat, mutta niiden tulos riippuu lähes kokonaan terminaalioletuksista." },
+        { "type": "p", "text": "Pieni henkilöstömäärä lisää avainhenkilöriskiä: viiden hengen asiantuntijayhtiössä osaaminen ja asiakassuhteet ovat harvojen henkilöiden varassa, mikä ostajan näkökulmasta perustelee arvonalennusta tai sitouttamisehtoja *(päätelmä, ei varmennettu tieto)*. Raportin käyttäjän on ymmärrettävä, että automaattinen malli ei hinnoittele tätä riskiä erikseen." },
+        { "type": "h", "text": "Lähderekisteri (osio 3)" },
+        {
+          "type": "table",
+          "headers": ["Lähde", "Tieto", "Haettu"],
+          "rows": [
+            ["valuatum.com (yhtiön verkkosivut)", "Liiketoiminta: arvonmääritys-, osaketutkimus- ja luottoriskiratkaisut; referenssiasiakkaat", "12.6.2026"],
+            ["b2bsuomi.fi", "Perustamisvuosi 2000, asiakassegmentit, Valuatum Aarre -palvelu", "12.6.2026"],
+            ["vainu.com", "Kotipaikka Helsinki, henkilöstömäärä 5 (2024)", "12.6.2026"]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4-historiallinen-taloudellinen-kehitys",
+      "number": "4",
+      "title": "HISTORIALLINEN TALOUDELLINEN KEHITYS",
+      "blocks": [
+        { "type": "h", "text": "Avainluvut 2023–2028e (tEUR)" },
+        {
+          "type": "table",
+          "headers": ["", "2023", "2024", "2025e", "2026e", "2027e", "2028e"],
+          "rows": [
+            ["Liikevaihto", "578,0", "416,0", "428,0", "368,0", "347,0", "341,0"],
+            ["Liikevaihdon kasvu", "47,1 %", "−28,0 %", "2,9 %", "−13,9 %", "−5,9 %", "−1,7 %"],
+            ["Käyttökate (EBITDA)", "43,0", "−27,0", "−15,5", "−6,3", "2,2", "11,7"],
+            ["EBITDA-%", "7,4 %", "−6,5 %", "−3,6 %", "−1,7 %", "0,6 %", "3,4 %"],
+            ["Liikevoitto (EBIT)", "40,0", "−36,0", "−22,3", "−11,4", "−2,2", "6,6"],
+            ["EBIT-%", "6,9 %", "−8,7 %", "−5,2 %", "−3,1 %", "−0,6 %", "1,9 %"],
+            ["Oma pääoma (pl. pääomalainat)", "235,0", "159,0", "123,0", "94,5", "72,9", "57,8"],
+            ["Korolliset velat", "245,0", "225,0", "259,0", "267,0", "280,0", "293,0"],
+            ["Taseen loppusumma", "792,0", "679,0", "677,0", "652,0", "643,0", "641,0"],
+            ["Omavaraisuusaste", "24,6 %", "17,6 %", "15,6 %", "16,4 %", "17,6 %", "19,5 %"],
+            ["ROE", "21,8 %", "−36,3 %", "−12,0 %", "1,2 %", "5,9 %", "9,5 %"]
+          ]
+        },
+        { "type": "p", "text": "Nettotulosta, henkilöstöriviä, bruttotulosta ja vuosittaista kassasarjaa ei toimitettu, joten niitä ei esitetä." },
+        { "type": "h", "text": "Analyysi" },
+        { "type": "p", "text": "Kaksivuotinen historia jakautuu kahteen vastakkaiseen vuoteen. 2023 oli vahva: liikevaihto kasvoi 47,1 % 578 tEUR:iin, liikevoitto oli 40 tEUR (6,9 %) ja ROE 21,8 %. 2024 oli romahdusvuosi: liikevaihto putosi 28,0 % 416 tEUR:iin ja liikevoitto kääntyi −36 tEUR:iin (−8,7 %). Olennaisin rakenteellinen havainto on tulosvipu: 162 tEUR:n liikevaihdon pudotus söi liikevoittoa 76 tEUR, eli noin 47 senttiä jokaisesta menetetystä liikevaihtoeurosta. Kulurakenne ei joustanut, mikä kertoo kiinteäkulupainotteisesta henkilöstövetoisesta liiketoiminnasta." },
+        { "type": "p", "text": "Tämän vivun kääntöpuoli on, että karkea nollatulostaso on arvioitavissa. **Kriittisen pisteen laskelma:** kahden historiavuoden pisteistä (578 tEUR → +40 tEUR; 416 tEUR → −36 tEUR) johdettu lineaarinen tulosvipu antaa nollatuloksen noin 490–495 tEUR:n liikevaihdolla nykyisellä kulurakenteella. Ennusteen liikevaihto (341–428 tEUR) jää koko jakson selvästi tämän alle, joten ennusteen sisäinen logiikka edellyttää kulurakenteen sopeutusta — ennusteparametreissa kannattavuus paranee marginaalioletuksella (−5,2 % → +1,9 %), ei myynnin kasvulla. Tämä on raportin keskeinen jännite: käänne nojaa kulujen leikkaamiseen, jonka toteutumisesta data ei anna näyttöä." },
+        { "type": "p", "text": "Tase heikkenee tulosta nopeammin. Oma pääoma puolittui jo 2023–2024 (235 → 159 tEUR), ja ennusteessa se ohenee edelleen 57,8 tEUR:iin 2028e. Korolliset velat eivät lyhene vaan kasvavat 225 tEUR:sta 293 tEUR:iin — eli ennusteen positiiviset vapaat kassavirrat 2026e–2028e (yhteensä 30,3 tEUR) eivät riitä velanhoitoon, vaan tase tasataan lisävelalla. Omavaraisuusaste pohjaa 15,6 %:ssa 2025e. Tämä on sanottava suoraan: edes ennusteen mukainen käänne ei korjaa pääomarakennetta, vaan jättää yhtiön 2028e:ssä velkaisemmaksi kuin se on nyt." },
+        { "type": "p", "text": "Uusin toteutunut vuosi (2024) heikentää arvonmääritystä kaikilla mittareilla: kasvu, kannattavuus, oma pääoma ja omavaraisuus heikkenivät samanaikaisesti. Kahden vuoden datalla ei voida sanoa, onko 2023 vai 2024 yhtiön \"normaali\" vuosi — ja juuri tämä epävarmuus on syy, miksi arvion luottamustaso on matala." },
+        { "type": "h", "text": "Normalisointihuomiot" },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Kassavirtalaskelman poistot ovat 0 kaikkina vuosina, vaikka EBITDA:n ja EBIT:n ero (3,0–9,2 tEUR/v) osoittaa poistoja kirjattavan. Epäjohdonmukaisuus on pieni euroissa mutta heikentää laskennan läpinäkyvyyttä.",
+            "Käyttöpääoman muutokset −225 tEUR (2023) ja +434 tEUR (2024) sekä bruttoinvestointirivit −400/+474 tEUR ovat poikkeuksellisia suhteessa liiketoiminnan kokoon; ne dominoivat historian kassavirtaa, eikä niiden sisältöä voida arvioida toimitetusta datasta.",
+            "Ennusteparametreissa vuodelle 2024 on kirjattu 80 %:n osingonjakosuhde tappiovuonna; osinkojen tosiasiallista vaikutusta ei voida varmentaa, mutta oman pääoman 76 tEUR:n pudotus 2024 on linjassa lähinnä tilikauden tappion kanssa.",
+            "Ennusteessa maksetaan veroja tappiollisina vuosina (9,08 tEUR 2025e; 7,06 tEUR 2026e) ilman selitystä; verotappioiden hyödyntämistä ei voida arvioida.",
+            "Omistajapalkkaoikaisua ei ole toimitettu; viiden hengen yhtiössä tämä voi muuttaa normalisoitua tulosta olennaisesti kumpaankin suuntaan."
+          ]
+        },
+        {
+          "type": "chart",
+          "kind": "combo",
+          "title": "KUVAAJA 4.1 — Liikevaihto ja EBIT-% 2023–2028e",
+          "labels": ["2023", "2024", "2025e", "2026e", "2027e", "2028e"],
+          "bars": { "name": "Liikevaihto (tEUR)", "values": [578.0, 416.0, 428.0, 368.0, 347.0, 341.0] },
+          "line": { "name": "EBIT-%", "values": [6.9, -8.7, -5.2, -3.1, -0.6, 1.9], "percent": true },
+          "caption": "Pylväät = liikevaihto (tEUR, vasen akseli), viiva = EBIT-% (oikea akseli).",
+          "legend": [
+            { "type": "bar", "label": "Liikevaihto (tEUR)", "color": "#2E4B3C" },
+            { "type": "line", "label": "EBIT-%", "color": "#8FB525" }
+          ]
+        },
+        { "type": "h", "text": "KUVAAJA 4.2 — Kassa vs. korolliset velat" },
+        { "type": "p", "text": "Kuvaajaa ei voida muodostaa luotettavasti, koska rahavarat on toimitettu vain yhdelle ajankohdalle (41,2 tEUR, DCF-laskelman tasekohta). Korollisten velkojen sarja on 245 / 225 / 259 / 267 / 280 / 293 tEUR (2023–2028e). Toimitetun kassatiedon perusteella nettovelka on noin 218 tEUR (259 − 41,2) 2025e-tasolla." }
+      ]
+    },
+    {
+      "id": "5-ennusteet",
+      "number": "5",
+      "title": "ENNUSTEET",
+      "blocks": [
+        { "type": "p", "text": "Ennusteet ovat järjestelmän deterministisiä ennusteita (ennusteparametrit toimitettu). \"Ennusteet on tuotettu järjestelmän deterministisillä ennustesäännöillä; tekoäly ei ole muuttanut lukuja, vaan sen rooli on arvioida ennusteen uskottavuus.\"" },
+        { "type": "h", "text": "Ennuste 2025e–2028e (tEUR)" },
+        {
+          "type": "table",
+          "headers": ["", "2025e", "2026e", "2027e", "2028e"],
+          "rows": [
+            ["Liikevaihto", "428,0", "368,0", "347,0", "341,0"],
+            ["Liikevaihdon kasvu", "2,9 %", "−13,9 %", "−5,9 %", "−1,7 %"],
+            ["Käyttökate (EBITDA)", "−15,5", "−6,3", "2,2", "11,7"],
+            ["Liikevoitto (EBIT)", "−22,3", "−11,4", "−2,2", "6,6"],
+            ["EBIT-%", "−5,2 %", "−3,1 %", "−0,6 %", "1,9 %"],
+            ["Vapaa kassavirta", "−9,1", "10,7", "8,4", "11,2"],
+            ["Bruttoinvestoinnit", "−6,6", "−2,8", "−1,0", "−0,3"]
+          ]
+        },
+        { "type": "h", "text": "Tekoälyn arvio ennusteen uskottavuudesta" },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "**Ennuste on rehellinen liikevaihdon osalta mutta optimistinen marginaalin osalta.** Liikevaihdon annetaan supistua (428 → 341 tEUR), mikä on linjassa 2024:n heikkouden kanssa. Sen sijaan EBIT-% paranee mekaanisesti −5,2 %:sta +1,9 %:iin ilman, että data osoittaa, mistä noin 29 tEUR:n tulosparannus supistuvalla liikevaihdolla syntyy. Historiallinen tulosvipu toimi 2024 päinvastaiseen suuntaan: liikevaihdon lasku heikensi marginaalia, ei parantanut sitä.",
+            "**Käänne on parametrioletus, ei dataan perustuva ennuste.** Liikevoitto-% on syötetty ennusteparametrina vuosittain; kyse on deterministisestä polusta kohti 1,9 %:n tasoa. Tämä on tärkeää, koska koko DCF-arvo lepää juuri tämän polun päätepisteen varassa.",
+            "**Verokäsittely rasittaa ennustejakson kassavirtaa epäuskottavasti.** Malli maksattaa yhtiöllä veroja tappiollisina vuosina (9,08 / 7,06 / 5,38 tEUR 2025e–2027e) eikä huomioi verotappioita. Tämä tekee ennusteen kassavirroista mekaanisia; suunta tosin on konservatiivinen (alentaa arvoa).",
+            "**ROE:n kääntyminen positiiviseksi 2026e (1,2 %) liikevoiton ollessa yhä −11,4 tEUR ei selity toimitetuilla riveillä.** Joko rahoituserissä tai laskentamekaniikassa on jotain, mitä data ei näytä. Tämä heikentää ennustekokonaisuuden sisäistä johdonmukaisuutta ja siten arvion luotettavuutta."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6-valuaatiopolun-valinta",
+      "number": "6",
+      "title": "VALUAATIOPOLUN VALINTA",
+      "blocks": [
+        { "type": "p", "text": "Tekoäly pisteyttää jokaisen käytettävissä olevan menetelmän soveltuvuuden (0–100) yhtiön taloudellisen profiilin perusteella. Painokertoimet muodostetaan normalisoimalla hyväksyttyjen menetelmien pisteet sataan prosenttiin. Hylkäys on aina perusteltu." },
+        { "type": "p", "text": "Inputissa ei ollut valmiita menetelmäpisteitä eikä painoja, joten soveltuvuus arvioidaan alla laadullisesti. Menetelmäkohtaisina arvoina käytetään vain toimitettuja lukuja (DCF 274 tEUR, EVA 0,18 tEUR) sekä suoraan datasta luettavaa oman pääoman tasearvoa." },
+        { "type": "h", "text": "Menetelmien soveltuvuus" },
+        {
+          "type": "table",
+          "headers": ["Menetelmä", "Soveltuvuus", "Paino", "Arvo (tEUR)", "Perustelu"],
+          "rows": [
+            ["Diskontattu kassavirta (DCF)", "Käyttökelpoinen varauksin", "ei toimitettu", "274", "Ainoa menetelmä, joka hinnoittelee ennustetun käänteen; arvo muodostuu kuitenkin lähes kokonaan terminaalista ja on siksi herkkä oletuksille."],
+            ["EVA-lisäarvomalli", "Käyttökelpoinen varauksin", "ei toimitettu", "0,18", "Sama ennustepohja kuin DCF; rankaisee siitä, että ROI jää koko jakson alle 9,5 %:n WACC:n. Tulos käytännössä nolla."],
+            ["Oman pääoman tasearvo", "Heikko viitearvo", "—", "123–159", "Tasearvo (159 tEUR 2024; 123 tEUR 2025e) on vain vertailupiste; se ei kuvaa going concern -arvoa eikä huomioi tappioennustetta, joka syö sitä vuosittain."],
+            ["P/E", "Hylätty", "—", "—", "Tulos on negatiivinen (ROE −36,3 % 2024) eikä nettotulosriviä toimitettu; kerroin ei ole määriteltävissä."],
+            ["EV/EBITDA", "Hylätty", "—", "—", "EBITDA on negatiivinen 2024–2026e (−27,0 / −15,5 / −6,3 tEUR); kerroin ei ole mielekäs."],
+            ["EV/Sales, EBIT-% vs P/Sales", "Hylätty", "—", "—", "Toimialakertoimia tai vertailudataa ei toimitettu; ilman niitä menetelmä tuottaisi keksityn arvon."],
+            ["Substanssiarvo / likvidaatioarvo", "Hylätty", "—", "—", "Tase-erittelyä ei toimitettu; aineelliset hyödykkeet ovat vain 27 tEUR ja korolliset velat 225–259 tEUR, joten likvidaatiossa omalle pääomalle jäävä arvo riippuisi erittelemättömistä eristä, joita ei voida arvioida."]
+          ]
+        },
+        { "type": "p", "text": "Käytetyt menetelmät eivät hajauta arvonmääritysriskiä aidosti. DCF ja EVA nojaavat täsmälleen samaan ennusteeseen, samaan WACC:iin ja samaan terminaalilogiikkaan — niiden 274 tEUR:n ero ei synny eri näkemyksistä vaan siitä, miten ankarasti menetelmä käsittelee sitoutunutta pääomaa ja terminaalia. Kun kaksi samaan oletukseen nojaavaa menetelmää antaa näin eri tuloksen, oikea johtopäätös ei ole keskiarvo vaan toteamus, että arvo on heikosti määritettävissä." }
+      ]
+    },
+    {
+      "id": "7-arvonmaaritys",
+      "number": "7",
+      "title": "ARVONMÄÄRITYS",
+      "blocks": [
+        { "type": "h", "text": "Painotettu lopputulos" },
+        { "type": "p", "text": "Painotettua lopputulosta ei voida muodostaa luotettavasti, koska input-data ei sisällä menetelmäpainoja. Toimitetut menetelmäkohtaiset arvot ovat:" },
+        {
+          "type": "table",
+          "headers": ["Menetelmä", "Arvo (tEUR)", "Paino", "Kontribuutio (tEUR)"],
+          "rows": [
+            ["DCF", "274,0", "ei toimitettu", "—"],
+            ["EVA", "0,18", "ei toimitettu", "—"],
+            ["**Oman pääoman arvo**", "", "**100 %**", "**ei määritettävissä luotettavasti annetulla datalla**"]
+          ]
+        },
+        { "type": "p", "text": "Laadullinen päätelmä: oman pääoman arvo asettuu toimitettujen laskelmien perusteella välille 0–274 tEUR. Alapää (EVA ≈ 0) kuvaa yhtiötä, joka ei ennustejaksolla eikä terminaalissa ansaitse pääomansa kustannusta; yläpää (DCF 274 tEUR) kuvaa yhtiötä, jonka terminaalikassavirta toteutuu täysimääräisesti. Nykyinen toteutunut tuloskunto (EBIT −36 tEUR, omavaraisuus 17,6 %) ei itsessään tue yläpäätä — yläpää on kokonaan ennusteen varassa. Varovainen lukija painottaa haarukan alapuoliskoa." },
+        { "type": "h", "text": "Arvostusväli" },
+        { "type": "p", "text": "Arvostusväliä ei toimitettu, eikä sitä voida johtaa luotettavasti ilman herkkyyslaskelmia. Menetelmien hajonta 0–274 tEUR toimii epävarmuuden kuvaajana, mutta se ei ole varsinainen arvostusväli. Hajonta on leveä seuraavista syistä: yhtiö on tappiollinen (EBIT −36 tEUR 2024, käänne vasta 2028e), liikevaihto on volatiili (+47,1 % / −28,0 %), nettovelka on suuri suhteessa tuloksentekokykyyn (n. 218 tEUR vs. paras ennustettu EBIT 6,6 tEUR), ja molemmat menetelmät korreloivat täysin saman ennusteen kanssa." },
+        { "type": "h", "text": "Nettovelan ja ohenevan oman pääoman käsittely (callout — tärkeä lukuohje)" },
+        { "type": "p", "text": "Toimitetussa DCF-sillassa yritysarvosta vähennetään korolliset velat 259 tEUR ja lisätään rahavarat 41,2 tEUR, eli nettovelka noin 218 tEUR. Raportin käyttäjän on ymmärrettävä kaksi asiaa. Ensinnäkin nettovelka on noin 33-kertainen parhaan ennustevuoden liikevoittoon (6,6 tEUR) nähden — oman pääoman arvo on siksi äärimmäisen herkkä yritysarvon muutoksille: jo noin −45 %:n muutos implisiittisessä yritysarvossa (n. 492 tEUR) nollaisi oman pääoman arvon kokonaan. Toiseksi oma pääoma ohenee ennusteessa 57,8 tEUR:iin samalla kun velat kasvavat 293 tEUR:iin; jos ennusteura toteutuu heikompana, oma pääoma voi painua negatiiviseksi ennustejakson sisällä, jolloin going concern -pohjainen arvonmääritys menettää pohjansa ja velkojien asema ohittaa omistajien." },
+        {
+          "type": "chart",
+          "kind": "hbars",
+          "title": "KUVAAJA 7.1 — Menetelmien arvot ja painotettu lopputulos",
+          "items": [
+            { "label": "DCF", "value": 274.0 },
+            { "label": "EVA", "value": 0.18 },
+            { "label": "Oman pääoman tasearvo (2024)", "value": 159.0, "muted": true },
+            { "label": "P/E", "status": "hylätty (negat. tulos)" },
+            { "label": "EV/EBITDA", "status": "hylätty (negat. EBITDA)" },
+            { "label": "EV/Sales", "status": "hylätty (ei vertailudataa)" },
+            { "label": "Substanssi-/likvidaatioarvo", "status": "hylätty (ei tase-erittelyä)" },
+            { "label": "Painotettu lopputulos", "status": "ei määritettävissä (ei painoja)" }
+          ],
+          "caption": "Vaakapylväät (tEUR); hylätyt menetelmät ilman arvopylvästä. Menetelmähajonta 0–274 tEUR; painotettua arvoa ei esitetä, koska painoja ei toimitettu."
+        }
+      ]
+    },
+    {
+      "id": "8-diskontattu-kassavirta",
+      "number": "8",
+      "title": "DISKONTATTU KASSAVIRTA",
+      "blocks": [
+        { "type": "h", "text": "Keskeiset oletukset" },
+        {
+          "type": "table",
+          "headers": ["Parametri", "Arvo"],
+          "rows": [
+            ["Riskitön korko", "3,00 %"],
+            ["Markkinoiden riskipreemio", "6,00 %"],
+            ["Likviditeettipreemio", "1,00 %"],
+            ["Equity beta", "1,30"],
+            ["Oman pääoman kustannus", "11,80 %"],
+            ["Vieraan pääoman kustannus", "5,00 %"],
+            ["Veroaste (WACC)", "20,00 %"],
+            ["Tavoitepääomarakenne D/(D+E)", "30,00 %"],
+            ["WACC", "9,50 %"],
+            ["Terminaalikasvu / terminaalimarginaali", "ei toimitettu erikseen"]
+          ]
+        },
+        { "type": "h", "text": "Vapaa kassavirta (FCFF) ja diskontatut arvot, tEUR" },
+        {
+          "type": "table",
+          "headers": ["Vuosi", "FCFF", "Diskontattu FCFF (järjestelmän rivi)"],
+          "rows": [
+            ["2023", "215,0", "−8,75"],
+            ["2024", "−76,0", "9,35"],
+            ["2025e", "−9,1", "6,71"],
+            ["2026e", "10,7", "8,21"],
+            ["2027e", "8,4", "10,40"],
+            ["2028e", "11,2", "12,90"]
+          ]
+        },
+        { "type": "p", "text": "Järjestelmän diskontattujen kassavirtojen rivi ei vastaa nominaalisia FCFF-arvoja vuosi vuodelta, mikä viittaa siihen, että rivit kuvaavat eri jaksotusta tai sisältävät terminaalikomponentteja; tätä ei voida varmentaa toimitetusta datasta. Diskontattu kumulatiivinen vapaa kassavirta on 415–449 tEUR, ja silta omaan pääomaan on: yritysarvo − korolliset velat 259,0 + rahavarat 41,2 = **oman pääoman arvo 274 tEUR**." },
+        { "type": "p", "text": "DCF-menetelmän tulos: **274 tEUR**." },
+        { "type": "h", "text": "Todellisuustarkistus (callout — raportin tärkein laatikko)" },
+        {
+          "type": "callout",
+          "variant": "reality",
+          "title": "Todellisuustarkistus",
+          "ordered": true,
+          "items": [
+            "**Eksplisiittisen jakson kassavirrat eivät kanna arvoa.** Nominaaliset vapaat kassavirrat 2025e–2028e ovat yhteensä noin 21,2 tEUR — alle 8 % oman pääoman 274 tEUR:n arvosta. Arvo muodostuu käytännössä kokonaan ennustejakson jälkeisestä terminaalista, jonka kasvu- ja marginaalioletuksia ei ole toimitettu erikseen. Arvio menettää perustansa, jos 2028e:n 1,9 %:n liikevoittomarginaali ei ole pysyvä taso.",
+            "**Historian positiivinen kassavirta ei ole operatiivista.** Vuoden 2023 FCFF (215 tEUR) ja 2024 operatiivinen kassavirta (398 tEUR) syntyivät käyttöpääoman ja tase-erien liikkeistä (−225/+434 tEUR), eivät tuloksesta. Näitä eriä ei voi ekstrapoloida, eikä niiden toistumiseen voi nojata.",
+            "**Terminaalin uskottavuus on heikko suhteessa EVA-laskelmaan.** Sama järjestelmä laskee terminaalin lisäarvon nykyarvoksi 604 tEUR (PV of TRM EVA) mutta päätyy EVA-sillassa omalle pääomalle nollaan, koska pääomapohjan muutos (−219 tEUR) ja ennustejakson negatiiviset EVA:t syövät sen. Kun ROI on parhaimmillaankin 2,0 % vastaan 9,5 %:n WACC, terminaaliin nojaava 274 tEUR edellyttää kannattavuutta, jota mikään toimitettu vuosi — toteutunut tai ennustettu — ei vielä osoita.",
+            "**Arvo on erittäin herkkä WACC:lle, mutta herkkyyttä ei voida kvantifioida**, koska input-data ei sisällä herkkyysmatriisia. Terminaalipainotteisessa laskelmassa jo 1–2 prosenttiyksikön muutos diskonttokorossa liikuttaa arvoa kymmeniä prosentteja; ohuen oman pääoman silta (nettovelka n. 218 tEUR) moninkertaistaa vaikutuksen omistaja-arvoon."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9-eva-menetelma-taloudellinen-lisaarvo",
+      "number": "9",
+      "title": "EVA-MENETELMÄ (TALOUDELLINEN LISÄARVO)",
+      "blocks": [
+        { "type": "p", "text": "EVA mittaa, ylittääkö liiketoiminnan tuotto sitoutuneen pääoman kustannuksen: NOPLAT miinus pääoman kustannus (sijoitettu pääoma × WACC). Menetelmä sopii tähän tilanteeseen poikkeuksellisen hyvin juuri siksi, että se paljastaa DCF:n sokean pisteen — yhtiön tase (sijoitettu pääoma 601 tEUR) on suuri suhteessa tuloksentekokykyyn, ja EVA laskuttaa tästä pääomasta 9,5 % joka vuosi." },
+        { "type": "p", "text": "Menetelmän edellyttämä oletus on, että sijoitettu pääoma 601 tEUR on oikein mitattu ja liiketoiminnan käytössä. Menetelmän rajoite on sama kuin DCF:n: terminaalikomponentti (PV of TRM EVA 604 tEUR) nojaa toimittamattomiin oletuksiin, ja tase-erittelyn puuttuessa sijoitetun pääoman laatua ei voida arvioida." },
+        {
+          "type": "table",
+          "headers": ["Komponentti", "Arvo"],
+          "rows": [
+            ["NOPLAT 2024 / 2028e (tEUR)", "−36,0 / 5,25"],
+            ["Pääoman kustannus / vuosi (tEUR)", "−56,7…−72,8"],
+            ["EVA / vuosi 2023–2028e (tEUR)", "−32,8 / −105,0 / −77,4 / −68,6 / −59,1 / −51,4"],
+            ["PV of TRM EVA (tEUR)", "604,0"],
+            ["PV of cap. base change (tEUR)", "−219,0"],
+            ["Sijoitettu pääoma (tEUR)", "601,0"],
+            ["− Korolliset velat (tEUR)", "−259,0"],
+            ["+ Rahavarat (tEUR)", "41,2"],
+            ["**Oman pääoman arvo, EVA (tEUR)**", "**0,18**"]
+          ]
+        },
+        { "type": "p", "text": "Tulos on käytännössä nolla, ja se on raportin epämukavin yksittäinen luku: mallin omilla oletuksilla yhtiö tuhoaa lisäarvoa jokaisena vuonna 2023–2028e (EVA −32,8…−105,0 tEUR), eikä terminaalin positiivinen lisäarvo riitä kattamaan ennustejakson arvontuhoa ja nettovelkaa. EVA ei väitä, että yhtiö olisi myyntikelvoton — se väittää, että nykyisellä ennusteuralla omalle pääomalle ei jää lisäarvoa pääoman kustannuksen jälkeen." }
+      ]
+    },
+    {
+      "id": "10-herkkyysanalyysi-ja-skenaariot",
+      "number": "10",
+      "title": "HERKKYYSANALYYSI JA SKENAARIOT",
+      "blocks": [
+        { "type": "h", "text": "KUVAAJA 10.1 — Herkkyysanalyysi" },
+        { "type": "p", "text": "Herkkyysmatriisia ei voida muodostaa, koska input-data ei sisällä valmiita herkkyyslaskelmia." },
+        { "type": "p", "text": "Ilman matriisiakin rakenteesta voidaan sanoa kaksi asiaa. Ensinnäkin arvoa liikuttavat eniten terminaalioletukset ja WACC, koska eksplisiittisen jakson kassavirrat (yht. n. 21 tEUR 2025e–2028e) ovat marginaalisia 274 tEUR:n arvoon nähden. Toiseksi vaikutus omistaja-arvoon on epäsymmetrinen alaspäin: noin 218 tEUR:n nettovelka on kiinteä vähennyserä, joten yritysarvon lasku valuu omaan pääomaan vivutettuna — noin 45 %:n lasku implisiittisessä yritysarvossa nollaa oman pääoman arvon kokonaan, kun vastaava nousu ei kohtaa mitään kattoa. Arvoa pitää tästä syystä lukea välinä eikä pisteenä, ja välin alapää on nolla." },
+        { "type": "h", "text": "Skenaariot" },
+        { "type": "p", "text": "Skenaariolaskelmia ei toimitettu; alla laadullinen kuvaus ilman keksittyjä arvoja." },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "**Heikko skenaario:** liikevaihdon lasku jatkuu 2024:n kaltaisena tai marginaalikäänne viivästyy; tappiot syövät 57,8–123 tEUR:n oman pääoman puskurin, velat (259–293 tEUR) erääntyvät heikossa neuvotteluasemassa ja arvonmäärityksen lähtökohdaksi tulee likvidaatiologiikka, jossa omalle pääomalle jäävä arvo on toimitetun datan valossa lähellä nollaa.",
+            "**Perusskenaario:** ennusteura toteutuu — liikevaihto vakiintuu n. 341 tEUR:iin ja EBIT-% nousee 1,9 %:iin 2028e. Tällöinkin ROI (2,0 %) jää alle WACC:n (9,5 %), ja arvo jää DCF:n ja EVA:n haarukkaan 0–274 tEUR painottuen siihen, miten terminaali hinnoitellaan.",
+            "**Vahva skenaario:** liikevaihto palautuu kohti 2023:n 578 tEUR:n tasoa, jolloin kriittisen pisteen laskelman perusteella (nollatulos n. 490–495 tEUR:n liikevaihdolla) tulos kääntyy selvästi positiiviseksi ja DCF:n 274 tEUR alkaa saada tukea myös eksplisiittisistä kassavirroista. Toimitettu ennuste ei sisällä tätä uraa."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "11-arvon-ajurit",
+      "number": "11",
+      "title": "ARVON AJURIT",
+      "blocks": [
+        { "type": "h", "text": "KUVAAJA 11.1 — Tornado: vaikutus painotettuun arvoon" },
+        { "type": "p", "text": "Tarkkaa eurovaikutteista tornado-taulukkoa ei voida muodostaa, koska input-data ei sisältänyt herkkyyslaskelmia." },
+        { "type": "h", "text": "Arvoa nostavat tekijät" },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Liikevaihdon palautuminen kohti vuoden 2023 tasoa (578 tEUR): jokainen liikevaihtoeuro nykyrakenteella tuo historian tulosvivun perusteella karkeasti 45–50 senttiä liikevoittoa, joten jo n. 150 tEUR:n palautuminen 341 tEUR:n tasolta veisi tuloksen selvästi plussalle.",
+            "Marginaalikäänteen toteutuminen ennustettua aiemmin: EBIT-%:n nousu nollaan jo 2026e (ennusteen −3,1 %:n sijaan) toisi kaksi lisävuotta positiivista kassavirtaa ja vahvistaisi terminaalioletuksen uskottavuutta.",
+            "Korollisten velkojen lyhentäminen: nettovelan (n. 218 tEUR) supistuminen siirtyy euro eurosta oman pääoman arvoon DCF-sillassa.",
+            "Pieni investointitarve (0,3–6,6 tEUR/v) tarkoittaa, että jokainen ansaittu tuloseuro on lähes kokonaan vapaata kassavirtaa — asset-light-rakenne vivuttaa käänteen arvoksi tehokkaasti.",
+            "Taseen erittely ja \"ylimääräisten\" erien tunnistaminen: jos 679 tEUR:n taseesta osoittautuu olevan liiketoimintaan sitoutumatonta omaisuutta, EVA-laskelman pääomarasite (601 tEUR × 9,5 %) kevenee ja menetelmien haarukka kapenee ylöspäin."
+          ]
+        },
+        { "type": "h", "text": "Arvoa laskevat tekijät" },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Tappiollinen nykytila ja kolme tappiollista ennustevuotta: kumulatiivinen EBIT 2024–2027e on −71,9 tEUR, joka rahoitetaan ohenevasta omasta pääomasta ja kasvavasta velasta.",
+            "Velkaantumisen syveneminen: korolliset velat kasvavat ennusteessa 225 → 293 tEUR ja velat/oma pääoma nousee n. 1,4-kertaisesta n. 5,1-kertaiseksi 2028e.",
+            "Liikevaihdon volatiliteetti (+47,1 % / −28,0 %) tekee jokaisesta ennustevuodesta epävarman ja leventää arvostushaarukkaa erityisesti alaspäin.",
+            "ROI < WACC koko jakson (enimmillään 2,0 % vs. 9,5 %): pääoma ei ansaitse kustannustaan, mikä painaa EVA-arvon nollaan.",
+            "Datan sisäiset epäjohdonmukaisuudet (poistot 0, verot tappiovuosina, selittämättömät −400/+474 tEUR:n tase-erät) laskevat arvion luottamustasoa ja perustelevat ostajan näkökulmasta lisäalennusta."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "12-riskit",
+      "number": "12",
+      "title": "RISKIT",
+      "blocks": [
+        {
+          "type": "table",
+          "headers": ["#", "Riski", "Miten näkyy luvuissa", "Vaikutus arvonmääritykseen"],
+          "rows": [
+            ["1", "Kannattavuuskäänteen pettäminen", "EBIT −36,0 tEUR (2024) → +6,6 tEUR (2028e) on parametriura, ei toteumaa; käänne nojaa kulusopeutukseen supistuvalla liikevaihdolla", "Koko DCF-arvo (274 tEUR) muodostuu terminaalista; ilman käännettä arvo lähestyy EVA:n nollaa"],
+            ["2", "Rahoituksen riittävyys", "Oma pääoma 123 → 57,8 tEUR ja velat 259 → 293 tEUR 2025e–2028e; FCF 2025e −9,1 tEUR", "Going concern -oletus voi murtua ennen käännettä; tällöin omalle pääomalle jäävä arvo on lähellä nollaa"],
+            ["3", "Liikevaihdon volatiliteetti", "Kasvu +47,1 % / −28,0 % kahtena historiavuonna", "Ennustevirheen todennäköisyys suuri; 1,9 %:n terminaalimarginaali kestää vain pienen liikevaihtopoikkeaman"],
+            ["4", "Velkavipu omistaja-arvossa", "Nettovelka n. 218 tEUR vs. implisiittinen yritysarvo n. 492 tEUR", "N. −45 %:n muutos yritysarvossa nollaa oman pääoman arvon; epäsymmetria alaspäin"],
+            ["5", "Pääoman tuotto alle kustannuksen", "ROI enimmillään 2,0 % vs. WACC 9,5 %; EVA −51,4…−105,0 tEUR/v", "EVA-arvo 0,18 tEUR; menetelmähaarukan alapää on nolla"],
+            ["6", "Käyttöpääoma- ja tase-eräriski", "Muutokset −225/+434 tEUR ja investointirivit −400/+474 tEUR ilman erittelyä", "Historian kassavirta ei ole tulkittavissa; sijoitetun pääoman (601 tEUR) laatu epävarma"],
+            ["7", "Datan laatu ja sisäinen ristiriitaisuus", "Poistot 0 vs. EBITDA−EBIT-ero 3–9 tEUR; verot 9,08 tEUR tappiovuonna; ROE positiivinen 2026e EBIT:n ollessa −11,4 tEUR", "Laskee luottamustason matalaksi; pistearvojen tarkkuus on näennäistä"],
+            ["8", "Menetelmäriski", "DCF 274 tEUR ja EVA 0,18 tEUR samasta datasta", "Menetelmät eivät hajauta riskiä; arvostusjohtopäätös riippuu menetelmävalinnasta enemmän kuin datasta"]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "13-toimenpiteet-arvon-kasvattamiseksi",
+      "number": "13",
+      "title": "TOIMENPITEET ARVON KASVATTAMISEKSI",
+      "blocks": [
+        { "type": "p", "text": "Seuraavat vaikutukset on johdettu arvostusmallin herkkyyksistä tai tilinpäätösanalyysin osoittamista arvon ajureista — ne kertovat, mitkä muutokset liikuttaisivat tämän mallin tuottamaa arvoa, eivät takaa liiketoiminnallista lopputulosta." },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "**Kannattavuus ennen kasvua: aikaista marginaalikäännettä.** Ennuste pitää yhtiön tappiollisena vielä 2025e–2027e (EBIT yht. −35,9 tEUR). Jokainen vuosi, jolla nollatulos saavutetaan ennustettua aiemmin, vähentää oman pääoman kulumista ja lisävelan tarvetta suoraan vastaavalla summalla.",
+            "**Kiinteiden kulujen sopeutus liikevaihtotasoon 341–428 tEUR.** Kriittisen pisteen laskelman mukaan nykyrakenne vaatii n. 490–495 tEUR:n liikevaihdon nollatulokseen; ennusteen liikevaihto ei sinne yllä, joten käänne edellyttää kulurakenteen pysyvää keventämistä karkeasti 25–35 tEUR:lla — sama suuruusluokka kuin 2025e:n tappio.",
+            "**Velkojen lyhennysohjelma heti kassavirran kääntyessä.** Ennusteessa velat kasvavat 293 tEUR:iin, vaikka FCF on positiivinen 2026e–2028e (yht. 30,3 tEUR). Kassavirran ohjaaminen velan lyhennykseen siirtyisi DCF-sillassa euro eurosta omaan pääomaan ja pienentäisi riskin nro 4 vipua.",
+            "**Taseen erittely ja sitoutumattoman pääoman tunnistaminen.** Tase (677–679 tEUR) on lähes kaksinkertainen liikevaihtoon nähden ja sijoitettu pääoma 601 tEUR rasittaa EVA-arvoa 57 tEUR/v. Erien läpikäynti ja mahdollisen liiketoimintaan kuulumattoman omaisuuden erottaminen voi kaventaa 0–274 tEUR:n menetelmähaarukkaa olennaisesti.",
+            "**Raportoinnin täydentäminen: nettotulos, vuosittainen kassa, poistot ja verotappiot.** Nykyinen data sisältää sisäisiä ristiriitoja (poistot 0, verot tappiovuosina), jotka pakottavat matalan luottamustason. Ostajakelpoinen aineisto nostaisi arvion luotettavuutta ilman, että liiketoiminnassa muuttuu mitään.",
+            "**Liikevaihdon ennustettavuuden parantaminen jatkuvalaskutteisella sopimusrakenteella** *(sidottu volatiliteettiin, ei toimitettuun sopimusdataan)*: +47,1 %/−28,0 %:n heilunta on arvostushaarukan leveyden pääsyy; toistuvaislaskutuksen osuuden todentaminen kaventaisi haarukkaa, vaikka euromääräinen taso ei muuttuisi."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "14-tilinpaatostaulukot-liite",
+      "number": "14",
+      "title": "TILINPÄÄTÖSTAULUKOT (LIITE)",
+      "blocks": [
+        { "type": "p", "text": "Taittoon liitetään järjestelmästä seuraavat taulukot sellaisenaan, 2023–2024 + ennusteet 2025e–2028e:" },
+        {
+          "type": "list",
+          "ordered": true,
+          "items": [
+            "Tuloslaskelma (tEUR)",
+            "Tase — Vastaavaa (tEUR)",
+            "Tase — Vastattavaa (tEUR)",
+            "Tunnusluvut: kannattavuus, vakavaraisuus, maksuvalmius ja pääoman tehokkuus",
+            "Toimialavertailu — ei saatavilla toimitetussa datassa"
+          ]
+        },
+        { "type": "h", "text": "KUVAAJA 14.1 — Toimialavertailu: EBIT-% ja liikevaihdon kasvu (yhtiö vs. mediaani)" },
+        { "type": "p", "text": "Toimialavertailukuvaajaa ei voida muodostaa, koska input-data ei sisältänyt toimialan mediaani- tai kvartiilitietoja." }
+      ]
+    },
+    {
+      "id": "15-metodologia-tekoalyn-rooli-ja-rajoitukset",
+      "number": "15",
+      "title": "METODOLOGIA, TEKOÄLYN ROOLI JA RAJOITUKSET",
+      "blocks": [
+        { "type": "h", "text": "Työnjako: deterministinen laskenta ja tekoäly" },
+        { "type": "p", "text": "Kaikki tämän raportin luvut — menetelmäkohtaiset arvot, ennusteet, herkkyystaulukot ja tunnusluvut — perustuvat toimitettuun input-dataan ja Valuatumin deterministiseen laskentaan silloin, kun kyseiset luvut on toimitettu raportin lähtöaineistossa. Tekoälyn rooli on rajattu lukujen tulkintaan, menetelmien soveltuvuuden sanalliseen arviointiin, datan laadun arviointiin ja tämän raportin analyysitekstin tuottamiseen. Tekoäly ei korvaa varsinaista due diligence -tarkastusta, johdon haastattelua, tilintarkastusta tai neuvottelutilanteessa tehtävää erillistä arvonmääritystä." },
+        { "type": "h", "text": "Keskeiset rajoitukset" },
+        {
+          "type": "list",
+          "ordered": false,
+          "items": [
+            "Arvio perustuu toimitettuun tulos-, tase-, kassavirta- ja ennustedataan; historiaa on vain kaksi tilikautta.",
+            "Tilauskantaa, asiakassopimuksia tai toistuvaislaskutuksen osuutta ei ole huomioitu, koska niitä ei toimitettu.",
+            "Nettotulosriviä, vuosittaista kassasarjaa ja tase-erittelyä ei toimitettu; osa tunnusluvuista on otettu annettuina ilman varmennusmahdollisuutta.",
+            "Toimialavertailua, herkkyysmatriisia, menetelmäpainoja ja arvostusväliä ei toimitettu; arvostusjohtopäätös esitetään siksi menetelmähajontana (0–274 tEUR), ei pistearvona.",
+            "Automaattinen arvonmääritys ei tunnista kertaluonteisia eriä, omistajapalkkaoikaisuja eikä avainhenkilöriskiä euromääräisesti.",
+            "Raportti nojaa going concern -oletukseen; oheneva oma pääoma ja kasvava velka tekevät oletuksesta tavallista ehdollisemman.",
+            "Toteutuva kauppahinta voi poiketa olennaisesti tässä esitetyistä arvoista muun muassa neuvotteluaseman, ehtojen ja due diligence -löydösten vuoksi."
+          ]
+        },
+        { "type": "h", "text": "Vastuuvapaus" },
+        { "type": "p", "text": "Tämä raportti on tuotettu automaattisesti yleiseen tietoon perustuvana analyysinä. Se ei ole sijoitusneuvontaa, tilintarkastusta, käyvän arvon lausunto (fairness opinion) eikä sellaisenaan sovellu vero- tai oikeusriitojen perusteeksi ilman asiantuntijan erillistä arviota. Valuatum Oy ei vastaa raportin perusteella tehdyistä päätöksistä." }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+# Generated reports (sisältävät asiakaskohtaista dataa) — generoi paikallisesti
+outputs/
+*.pdf
+
+# Syöte-JSONit (mallin outputit) pidetään repon ulkopuolella
+/inputs/
+
+node_modules/
+.DS_Store
