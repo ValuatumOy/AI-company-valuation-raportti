@@ -52,6 +52,20 @@ export default function App() {
   }
 
   useEffect(() => {
+    // Magic link: a shared URL with ?token=... logs the device in automatically,
+    // then the token is stripped from the address bar. After the first open it
+    // persists in localStorage, so the CEO just opens the link and enters a name+FID.
+    try {
+      const u = new URL(window.location.href);
+      const t = u.searchParams.get("token");
+      if (t) {
+        setToken(t.trim());
+        u.searchParams.delete("token");
+        window.history.replaceState({}, "", u.pathname + u.search + u.hash);
+      }
+    } catch {
+      /* no-op */
+    }
     api.health()
       .then((h) => {
         if (h.auth && !getToken()) setNeedToken(true);
