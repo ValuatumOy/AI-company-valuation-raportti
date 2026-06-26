@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
-import type { ModelInfo, Stage } from "../types";
+import type { ModelInfo, SavedCompany, Stage } from "../types";
 import { DATA_FETCHER_MODEL } from "../types";
 import { ModelSelect } from "./ModelSelect";
 import { api, streamRun } from "../api";
@@ -273,6 +273,12 @@ function Stage0Fetcher({
   const [pasteErr, setPasteErr] = useState<string | null>(null);
   const [pasteOk, setPasteOk] = useState(false);
 
+  // Remembered companies (name + FID + last fetched data) — so the user never
+  // has to look up a FID or wait for a fresh fetch just to run again.
+  const [saved, setSaved] = useState<SavedCompany[]>([]);
+  const reloadSaved = () => api.companies().then(setSaved).catch(() => {});
+  useEffect(() => { reloadSaved(); }, []);
+
   useEffect(() => {
     setPasteText(inputData ? JSON.stringify(inputData, null, 2) : "");
   }, [inputData]);
@@ -297,8 +303,16 @@ function Stage0Fetcher({
     return () => clearTimeout(t);
   }, [pasteText, showPaste]);
 
-  async function fetchValuatum() {
-    if (!name.trim() || !fid.trim()) return;
+  async function fetchValuatum(override?: {
+    name?: string; fid?: string; actuals?: number; estimates?: number; code?: string;
+  }) {
+    const nm = (override?.name ?? name).trim();
+    const fd = (override?.fid ?? fid).trim();
+    if (!nm || !fd) return;
+    const act = override?.actuals ?? actuals;
+    const est = override?.estimates ?? estimates;
+    const code =
+      override?.code ?? (showAdvanced && codeOverride.trim() ? codeOverride.trim() : "");
     setPhase("running");
     setStatus("Fetching modeldata…");
     setError(null);
@@ -315,23 +329,67 @@ function Stage0Fetcher({
             setPhase("done");
             setWarnings(e.warnings ?? []);
             onSetInputData(e.json);
+            reloadSaved(); // the just-fetched company is now remembered
           } else if (e.step === "error") {
             setError(e.message);
             setPhase("error");
           }
         },
         {
-          company_name: name.trim(),
-          fid: Number(fid),
-          actuals,
-          estimates,
-          company_code_override: showAdvanced && codeOverride.trim() ? codeOverride.trim() : null,
+          company_name: nm,
+          fid: Number(fd),
+          actuals: act,
+          estimates: est,
+          company_code_override: code || null,
         }
       );
     } catch (err: any) {
       setError(String(err));
       setPhase("error");
     }
+  }
+
+  // Instant reuse: load the company's last fetched data straight from the DB —
+  // no Valuatum round-trip — so the user can just press Run again.
+  async function useCompany(c: SavedCompany) {
+    setName(c.company_name);
+    setFid(String(c.fid));
+    setActuals(c.actuals);
+    setEstimates(c.estimates);
+    if (!c.has_data) return refetchCompany(c);
+    setPhase("running");
+    setStatus("Loading saved data…");
+    setError(null);
+    setWarnings([]);
+    try {
+      const full = await api.company(c.fid);
+      onSetInputData(full.input_data);
+      setStatus("Done");
+      setPhase("done");
+    } catch (err: any) {
+      setError(String(err));
+      setPhase("error");
+    }
+  }
+
+  // Pull fresh numbers from Valuatum for a remembered company.
+  function refetchCompany(c: SavedCompany) {
+    setName(c.company_name);
+    setFid(String(c.fid));
+    setActuals(c.actuals);
+    setEstimates(c.estimates);
+    fetchValuatum({
+      name: c.company_name,
+      fid: String(c.fid),
+      actuals: c.actuals,
+      estimates: c.estimates,
+      code: c.company_code ?? "",
+    });
+  }
+
+  async function removeCompany(c: SavedCompany) {
+    await api.deleteCompany(c.fid).catch(() => {});
+    reloadSaved();
   }
 
   function applyPaste() {
@@ -351,6 +409,49 @@ function Stage0Fetcher({
 
   return (
     <div className="space-y-4">
+      {/* Saved companies — one click reuses a remembered name + FID. */}
+      {saved.length > 0 && (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 space-y-2">
+          <div className="text-xs text-neutral-500 uppercase tracking-wide mb-1">
+            Saved companies — click to load (no refetch needed)
+          </div>
+          <div className="space-y-1.5">
+            {saved.map((c) => (
+              <div
+                key={c.fid}
+                className="flex items-center gap-2 bg-neutral-850 border border-neutral-800 rounded px-2 py-1.5"
+              >
+                <button
+                  onClick={() => useCompany(c)}
+                  disabled={phase === "running"}
+                  title={c.has_data ? "Load saved data instantly — ready to run" : "No saved data — will refetch"}
+                  className="flex-1 text-left min-w-0 disabled:opacity-50"
+                >
+                  <span className="text-sm text-neutral-200 truncate">{c.company_name}</span>
+                  <span className="ml-2 text-xs font-mono text-neutral-500">FID {c.fid}</span>
+                  {!c.has_data && <span className="ml-2 text-[10px] text-amber-400">refetch</span>}
+                </button>
+                <button
+                  onClick={() => refetchCompany(c)}
+                  disabled={phase === "running"}
+                  title="Refetch fresh numbers from Valuatum"
+                  className="text-xs px-1.5 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 disabled:opacity-50"
+                >
+                  ↻
+                </button>
+                <button
+                  onClick={() => removeCompany(c)}
+                  title="Forget this company"
+                  className="text-xs px-1.5 py-0.5 rounded text-neutral-500 hover:text-red-400"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Valuatum fetch form */}
       <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 space-y-3">
         <div className="text-xs text-neutral-500 uppercase tracking-wide mb-1">Fetch from Valuatum</div>
@@ -413,7 +514,7 @@ function Stage0Fetcher({
         )}
 
         <button
-          onClick={fetchValuatum}
+          onClick={() => fetchValuatum()}
           disabled={phase === "running" || !name.trim() || !fid.trim()}
           className="w-full py-2 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-sm font-medium"
         >

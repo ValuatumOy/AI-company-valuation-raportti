@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS runs (
     total_cost_usd REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS companies (
+    fid INTEGER PRIMARY KEY,
+    company_name TEXT NOT NULL,
+    company_code TEXT,
+    actuals INTEGER NOT NULL DEFAULT 5,
+    estimates INTEGER NOT NULL DEFAULT 10,
+    input_data TEXT,
+    last_run_id TEXT,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS stage_results (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,

@@ -257,6 +257,63 @@ def list_runs(limit=100):
     return out
 
 
+# ---- companies (remembered name + FID for one-click reuse) ------------------
+
+def upsert_company(fid, company_name, company_code=None, actuals=5,
+                   estimates=10, input_data=None, last_run_id=None):
+    """Remember a fetched company keyed by its Valuatum FID. The FID is typed at
+    fetch time and lives nowhere else (input_data.meta only has y_tunnus), so we
+    capture it here. input_data is stored too, enabling instant re-run without a
+    fresh Valuatum fetch."""
+    exists = db.query_one("SELECT fid FROM companies WHERE fid=?", (fid,))
+    if exists:
+        db.execute(
+            "UPDATE companies SET company_name=?,company_code=?,actuals=?,"
+            "estimates=?,input_data=?,last_run_id=COALESCE(?,last_run_id),"
+            "updated_at=? WHERE fid=?",
+            (company_name, company_code, actuals, estimates,
+             db.jdump(input_data), last_run_id, _now(), fid),
+        )
+    else:
+        db.execute(
+            "INSERT INTO companies(fid,company_name,company_code,actuals,"
+            "estimates,input_data,last_run_id,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (fid, company_name, company_code, actuals, estimates,
+             db.jdump(input_data), last_run_id, _now()),
+        )
+
+
+def list_companies(limit=200):
+    rows = db.query(
+        "SELECT fid,company_name,company_code,actuals,estimates,updated_at,"
+        "CASE WHEN input_data IS NULL OR input_data='' THEN 0 ELSE 1 END AS has_data "
+        "FROM companies ORDER BY updated_at DESC LIMIT ?",
+        (limit,),
+    )
+    return [{
+        "fid": r["fid"],
+        "company_name": r["company_name"],
+        "company_code": r["company_code"],
+        "actuals": r["actuals"],
+        "estimates": r["estimates"],
+        "updated_at": r["updated_at"],
+        "has_data": bool(r["has_data"]),
+    } for r in rows]
+
+
+def get_company(fid):
+    r = db.query_one("SELECT * FROM companies WHERE fid=?", (fid,))
+    if not r:
+        return None
+    r["input_data"] = db.jload(r["input_data"])
+    return r
+
+
+def delete_company(fid):
+    db.execute("DELETE FROM companies WHERE fid=?", (fid,))
+
+
 def final_report_json(rid):
     """The JSON to feed the report generator: assembled wrapper + sections."""
     from . import assemble

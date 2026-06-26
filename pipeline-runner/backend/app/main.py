@@ -169,10 +169,51 @@ async def valuatum_company_json(body: ValuatumExportIn):
             estimates=body.estimates,
             company_code_override=body.company_code_override,
         ):
+            # On success, remember the company (name + FID + fetched data) so the
+            # user never has to look up the FID or refetch to run again.
+            if ev.get("step") == "ready":
+                try:
+                    meta = (ev.get("json") or {}).get("meta") or {}
+                    code = (
+                        body.company_code_override
+                        or (meta.get("y_tunnus") or "").replace("-", "").strip()
+                        or None
+                    )
+                    store.upsert_company(
+                        fid=body.fid,
+                        company_name=body.company_name,
+                        company_code=code,
+                        actuals=body.actuals,
+                        estimates=body.estimates,
+                        input_data=ev.get("json"),
+                    )
+                except Exception:
+                    pass
             yield {"data": json.dumps(ev, ensure_ascii=False)}
 
     # ping=20 keeps the SSE connection alive while the subprocess runs (up to 180 s)
     return EventSourceResponse(gen(), ping=20)
+
+
+# ---- saved companies (remembered name + FID, instant re-run) ----------------
+
+@app.get("/api/companies")
+def get_companies():
+    return store.list_companies()
+
+
+@app.get("/api/companies/{fid}")
+def get_company_one(fid: int):
+    c = store.get_company(fid)
+    if not c:
+        raise HTTPException(404, "company not found")
+    return c
+
+
+@app.delete("/api/companies/{fid}")
+def del_company(fid: int):
+    store.delete_company(fid)
+    return {"ok": True}
 
 
 @app.get("/api/sample-input-data")

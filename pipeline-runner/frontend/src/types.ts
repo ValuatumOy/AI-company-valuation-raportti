@@ -76,6 +76,16 @@ export interface Run {
   results: StageResult[];
 }
 
+export interface SavedCompany {
+  fid: number;
+  company_name: string;
+  company_code: string | null;
+  actuals: number;
+  estimates: number;
+  updated_at: string;
+  has_data: boolean;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;

@@ -1,4 +1,6 @@
-import type { ModelInfo, Pipeline, Run, Stage, ValidatorReport } from "./types";
+import type {
+  ModelInfo, Pipeline, Run, SavedCompany, Stage, ValidatorReport,
+} from "./types";
 
 // Empty in dev (Vite proxies /api → :8000). On Vercel set VITE_API_BASE to the
 // hosted backend origin, e.g. https://valu-pipeline.fly.dev
@@ -108,6 +110,13 @@ export const api = {
 
   runs: () => req("/api/runs").then((r) => j<any[]>(r)),
   run: (id: string) => req(`/api/runs/${id}`).then((r) => j<Run>(r)),
+
+  // Saved companies: remembered name + FID + last fetched data, for instant reuse.
+  companies: () => req("/api/companies").then((r) => j<SavedCompany[]>(r)),
+  company: (fid: number) =>
+    req(`/api/companies/${fid}`).then((r) => j<SavedCompany & { input_data: any }>(r)),
+  deleteCompany: (fid: number) =>
+    req(`/api/companies/${fid}`, { method: "DELETE" }).then((r) => j(r)),
 
   compare: (rid: string, order: number, models: string[]) =>
     req(`/api/runs/${rid}/stages/${order}/compare`, {
