@@ -126,8 +126,9 @@ def validate(output: dict, context: dict) -> dict:
     # --- 1. Orphan numbers in prose -----------------------------------------
     orphans = []
     for path, v in _walk(output):
-        if not isinstance(v, str) or len(v) < 12:
-            continue  # treat short strings as labels, not prose
+        if not isinstance(v, str) or len(v) < 4:
+            continue  # only 1-3 char strings are pure labels; sweep short
+            # metric-card / table values like "12,4x" and "18 %" too
         for m in _NUM_RE.findall(v):
             val, is_pct = _parse(m)
             if val is None or _is_structural(val, is_pct):
@@ -144,8 +145,13 @@ def validate(output: dict, context: dict) -> dict:
             True, f"all prose numbers reconcile{note}")
 
     # --- 2. Discounting sanity ----------------------------------------------
-    dcf = _find_block(output, {"dcf"}) or {}
-    wacc = _find_first(output, {"wacc", "wacc_pct"})
+    # The DCF lives in input_data.valuation_engine.dcf — NOT in the stage-3
+    # output (which is scoring + sections). Reading it from `output` made these
+    # checks silently skip every run. Source from the verified input instead.
+    ve = (input_data.get("valuation_engine") or {}) if isinstance(input_data, dict) else {}
+    dcf = ve.get("dcf") if isinstance(ve.get("dcf"), dict) else {}
+    wp = ve.get("wacc_parameters") if isinstance(ve.get("wacc_parameters"), dict) else {}
+    wacc = wp.get("wacc_pct") if wp.get("wacc_pct") is not None else _find_first(ve, {"wacc", "wacc_pct"})
     disc = dcf.get("discounted_fcff")
     nom = dcf.get("nominal_fcff") or dcf.get("fcff")
     years = dcf.get("years")
@@ -166,10 +172,11 @@ def validate(output: dict, context: dict) -> dict:
     # --- 3. DCF bridge reconciles -------------------------------------------
     bridge = dcf.get("bridge", dcf) if isinstance(dcf, dict) else {}
     sd = sum(x for x in (disc or []) if isinstance(x, (int, float)))
-    tv = _find_first(dcf, {"terminal_value", "tv"})
-    nd = _find_first(bridge, {"net_debt"})
-    cash = _find_first(bridge, {"cash"})
-    stated = _find_first(dcf, {"equity_value_before_floor"})
+    tv = _find_first(dcf, {"terminal_value", "tv"}) or _find_first(ve, {"terminal_value", "tv"})
+    nd = _find_first(bridge, {"net_debt"}) or _find_first(ve, {"net_debt"})
+    cash = _find_first(bridge, {"cash"}) or _find_first(ve, {"cash"})
+    stated = (_find_first(dcf, {"equity_value_before_floor"})
+              or _find_first(ve, {"equity_value_before_floor"}))
     if disc and tv is not None and stated is not None:
         computed = sd + tv - (nd or 0.0) + (cash or 0.0)
         tol = max(2.0, 0.01 * abs(stated))

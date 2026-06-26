@@ -125,4 +125,16 @@ def validate(output: dict, context: dict) -> dict:
     chk("every scenario has a non-empty probability_rationale", not missing_rat,
         f"missing: {', '.join(missing_rat)}" if missing_rat else "all justified")
 
+    # --- 7. realistic base case anchors to stage-3 weighted base case --------
+    # The cover/section-11 anchor (stage 4) must not contradict the weighted base
+    # case computed in stage 3 (section 8) of the same report.
+    scoring = (context or {}).get("scoring", {}) or {}
+    wbc = _num(scoring.get("weighted_base_case_teur")) if isinstance(scoring, dict) else None
+    if rbc is not None and wbc is not None:
+        chk("realistic_base_case_teur == scoring.weighted_base_case_teur (±1 tEUR)",
+            abs(rbc - wbc) <= 1.0, f"stage4 {rbc} vs stage3 weighted {wbc}")
+    else:
+        chk("realistic_base_case anchors to stage-3 weighted base case", True,
+            "skipped: scoring.weighted_base_case_teur not available")
+
     return {"passed": all(c["passed"] for c in checks), "checks": checks}

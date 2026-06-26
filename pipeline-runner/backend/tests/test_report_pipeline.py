@@ -9,11 +9,22 @@ import pytest
 from app import assemble, render, validators
 
 VDIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
+FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
 
 def _v(name):
     with open(os.path.join(VDIR, name), encoding="utf-8") as f:
         return f.read()
+
+
+def _golden():
+    with open(os.path.join(FIXTURES, "sample_report.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+# Minimal section 16 the stage-6 validator now requires.
+_DISCLAIMER_SEC = {"id": "16", "title": "Vastuuvapaus", "blocks": [
+    {"type": "paragraph", "text": "Tämä ei ole sijoitusneuvontaa. Valuatum Oy ei vastaa."}]}
 
 
 def _report():
@@ -136,7 +147,7 @@ def test_stage6_validator_passes_nbsp_formatted_cover():
     ctx = {"scenarios": {"expected_value_teur": 1598, "realistic_base_case_teur": 1000}}
     out = {"cover": {"headline_value": "1 598 tEUR", "base_case_value": "1 000 tEUR"},
            "machine_readable": {"expected_value": 1598, "base": 1000},
-           "sections": []}
+           "sections": [_DISCLAIMER_SEC]}
     r = validators.run_validator(_v("stage6_final.py"), out, ctx)
     assert r["passed"], r
 
@@ -147,6 +158,7 @@ def test_stage6_validator_requires_both_cover_figures():
             "machine_readable": {"expected_value": 1400, "base": 1000},
             "sections": [{"id": "1", "blocks": [
                 {"type": "paragraph", "text": "Odotusarvo 1 400 tEUR ja base case 1 000 tEUR."}]}]}
+    good["sections"].append(_DISCLAIMER_SEC)
     assert validators.run_validator(_v("stage6_final.py"), good, ctx)["passed"]
     missing = json.loads(json.dumps(good))
     missing["cover"].pop("base_case_value")
@@ -194,3 +206,62 @@ def test_render_pdf_smoke(tmp_path):
     assert os.path.getsize(out) > 1000
     with open(out, "rb") as f:
         assert f.read(5) == b"%PDF-"
+
+
+# --------------------------------------------------------------- golden report
+def test_golden_renders_signature_visuals_and_markdown():
+    h = render.render_html(_golden())
+    lo = h.lower()
+    # inline markdown emphasis must not leak raw asterisks to the client
+    assert "<strong>oman pääoman arvo</strong>" in lo
+    assert "<em>kannattava kasvu</em>" in lo
+    assert "**" not in render._strip_tags(h)
+    # signature derived visuals now live in section 8 (Snapshot page removed)
+    assert "Menetelmäpainot" in h and "Menetelmien arvot" in h
+    assert "Snapshot" not in h
+    # legal disclaimer always present
+    assert "sijoitusneuvo" in lo
+
+
+def test_disclaimer_injected_when_section_16_missing():
+    rep = _golden()
+    rep["sections"] = [s for s in rep["sections"] if str(s.get("id")) != "16"]
+    h = render.render_html(rep)
+    assert "Vastuuvapaus" in h
+    assert "Valuatum Oy ei vastaa" in h
+
+
+def _pdf_page_count(path):
+    import re
+    data = open(path, "rb").read()
+    return len(re.findall(rb"/Type\s*/Page(?![s])", data))
+
+
+def test_deliver_gate_blocks_unhealthy_run_unless_forced():
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    pid = store.list_pipelines()[0]["id"]
+    rid = store.create_run(pid, {"meta": {"company_name": "X"}}, True)
+    store.upsert_result(rid, {"order": 6, "name": "s6", "status": "ok", "parsed_json": {
+        "report_type": "ai_valuation_report", "cover": {"headline_value": "1 tEUR"},
+        "machine_readable": {}, "sections": [{"id": "1", "title": "T", "blocks": [
+            {"type": "paragraph", "text": "ok"}]}]}})
+    store.upsert_result(rid, {"order": 3, "name": "s3", "status": "validation_failed",
+                              "parsed_json": {"sections": []}})
+    store.set_run_status(rid, "error")
+    with TestClient(main.app) as c:
+        assert c.get(f"/api/runs/{rid}/readiness").json()["ready"] is False
+        assert c.get(f"/api/runs/{rid}/report.html").status_code == 409   # gated
+        assert c.get(f"/api/runs/{rid}/report.html?force=1").status_code == 200  # override
+
+
+@pytest.mark.skipif(not render.pdf_available(), reason="no local Chromium")
+def test_golden_pdf_has_no_blank_pages(tmp_path):
+    rep = _golden()
+    out = str(tmp_path / "g.pdf")
+    render.render_pdf(rep, out)
+    n_sections = len(render._ensure_disclaimer(render._ordered_sections(rep)))
+    # cover + TOC + one page per section, and crucially NO trailing blank pages
+    assert _pdf_page_count(out) == n_sections + 2

@@ -85,6 +85,19 @@ def _esc(s):
     return html.escape(_clean(s))
 
 
+_MD_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
+_MD_ITALIC = re.compile(r"(?<![\*\w])\*([^*\n]+)\*(?!\w)")
+
+
+def _inline(s):
+    """Escape, then render the markdown emphasis the prompt contract promises
+    (**lihava**, *kursiivi*) — otherwise raw asterisks reach the client PDF."""
+    t = _esc(s)
+    t = _MD_BOLD.sub(r"<strong>\1</strong>", t)
+    t = _MD_ITALIC.sub(r"<em>\1</em>", t)
+    return t
+
+
 def _short(v):
     """Cover figure for display: clean + drop a trailing parenthetical the model
     sometimes appends (e.g. '2 693 tEUR (realistinen base case)')."""
@@ -529,7 +542,7 @@ def _block_heading(b):
 
 
 def _block_paragraph(b):
-    return f'<p>{_esc(b.get("text"))}</p>'
+    return f'<p>{_inline(b.get("text"))}</p>'
 
 
 def _callout_variant(v):
@@ -541,7 +554,7 @@ def _block_callout(b):
     title = b.get("title")
     th = (f'<div class="co-t"><span class="co-badge"></span>{_esc(title)}</div>'
           if title else "")
-    return f'<div class="callout {variant}">{th}<p>{_esc(b.get("text"))}</p></div>'
+    return f'<div class="callout {variant}">{th}<p>{_inline(b.get("text"))}</p></div>'
 
 
 def _block_metric_cards(b):
@@ -678,16 +691,15 @@ def _brandmark():
     return '<span class="brandmark"><i></i>Valuatum</span>'
 
 
+# Running header/footer + page numbers are now CSS @page margin boxes (see
+# _page_css) so they repeat on every page including continuations. The old
+# baked-in HTML header/footer would only appear on a section's first page.
 def _header(report):
-    meta = report.get("meta") or {}
-    bits = [meta.get("company_name"), meta.get("y_tunnus"), meta.get("report_date")]
-    right = " · ".join(_esc(x) for x in bits if x)
-    return f'<div class="phead">{_brandmark()}<span>{right}</span></div>'
+    return ""
 
 
 def _footer():
-    return ('<div class="pfoot"><span>Valuatum · AI-Arvonmääritysraportti</span>'
-            '<span class="pf-r"></span></div>')
+    return ""
 
 
 def _cover(report, derived):
@@ -771,8 +783,7 @@ def _snapshot(report, derived):
 def _toc(report, sections):
     rows = "".join(
         f'<div class="toc-row"><span class="tn">{_esc(s.get("id"))}</span>'
-        f'<span class="tt">{_esc(s.get("title"))}</span>'
-        '<span class="td"></span><span class="tp"></span></div>'
+        f'<span class="tt">{_esc(s.get("title"))}</span></div>'
         for s in sections)
     return (
         '<section class="page">'
@@ -785,8 +796,29 @@ def _toc(report, sections):
     )
 
 
-def _section(report, sec):
-    blocks = "".join(_render_block(b) for b in (sec.get("blocks") or []))
+def _method_visuals(derived):
+    """Weights donut + method-value bars — the signature derived visuals. The
+    standalone Snapshot page is no longer generated (per the design contract),
+    so these live in the method-selection section instead."""
+    donut = (derived or {}).get("weights_donut")
+    methods = (derived or {}).get("methods")
+    if not (donut or methods):
+        return ""
+    left = (f'<div><h4 class="blk">Menetelmäpainot</h4><div style="max-width:150px">'
+            f'{_svg_donut(donut)}</div></div>') if donut else "<div></div>"
+    right = (f'<div><h4 class="blk">Menetelmien arvot</h4>{_svg_hbars(methods)}</div>'
+             if methods else "<div></div>")
+    return ('<div class="two-col" style="margin-top:10px;grid-template-columns:0.7fr 1.3fr">'
+            f'{left}{right}</div>')
+
+
+def _section(report, sec, derived=None):
+    blocks = "".join(x for x in (_render_block(b) for b in (sec.get("blocks") or [])) if x)
+    if str(sec.get("id")) == "8" and derived:
+        blocks += _method_visuals(derived)
+    if not blocks.strip():
+        blocks = ('<p class="muted" style="font-style:italic">'
+                  'Tietoa ei ollut saatavilla tähän osioon.</p>')
     return (
         '<section class="page report-section">'
         f'{_header(report)}'
@@ -801,6 +833,34 @@ def _section(report, sec):
 # --------------------------------------------------------------------------- #
 # cover guard + assembly
 # --------------------------------------------------------------------------- #
+# Mandatory legal disclaimer (master spec §16, exact text). Guaranteed into the
+# PDF even if the stage-6 model drops section 16 — selling an automated valuation
+# with no "ei sijoitusneuvontaa" notice is real legal exposure.
+_DISCLAIMER_TEXT = (
+    "Tämä raportti on tuotettu automaattisesti yleiseen tietoon perustuvana "
+    "analyysinä. Se ei ole sijoitusneuvontaa, tilintarkastusta, käyvän arvon "
+    "lausunto (fairness opinion) eikä sellaisenaan sovellu vero- tai "
+    "oikeusriitojen perusteeksi ilman asiantuntijan erillistä arviota. "
+    "Valuatum Oy ei vastaa raportin perusteella tehdyistä päätöksistä."
+)
+
+
+def _disclaimer_section():
+    return {"id": "16", "title": "Vastuuvapaus", "blocks": [
+        {"type": "paragraph", "text": _DISCLAIMER_TEXT}]}
+
+
+def _ensure_disclaimer(sections):
+    """Guarantee a section 16 carrying the legal disclaimer text."""
+    out = list(sections)
+    s16 = next((s for s in out if str(s.get("id")) == "16"), None)
+    if s16 is None:
+        out.append(_disclaimer_section())
+    elif "sijoitusneuvo" not in str(s16).lower():
+        out[out.index(s16)] = _disclaimer_section()
+    return out
+
+
 def _cover_guard(report, derived):
     cover = report.get("cover") or {}
     text = _norm_ws(_strip_tags(_cover(report, derived)))
@@ -833,14 +893,31 @@ def _font_style():
     return _FONT_CSS
 
 
+def _css_str(v):
+    """Sanitise a value for use inside a CSS `content:"..."` string."""
+    return (str(v or "").replace("\\", "").replace('"', "'")
+            .replace("<", "").replace(">", ""))
+
+
 def _page_css(report):
     meta = report.get("meta") or {}
-    foot = (str(meta.get("company_name") or "").replace("\\", "").replace('"', "")
-            .replace("<", "").replace(">", ""))
+    bits = [meta.get("company_name"), meta.get("y_tunnus"), meta.get("report_date")]
+    head_right = _css_str(" · ".join(str(x) for x in bits if x))
+    # Running header/footer + page numbers live in @page margin boxes so they
+    # repeat on EVERY page — including section continuations — which the baked-in
+    # HTML header could not do. Suppressed on the full-bleed cover.
     return f"""
-@page {{ size: A4; margin: 16mm 15mm 14mm; }}
-@page cover {{ margin: 0; }}
-@media print {{ .phead, .pfoot {{ position: running(none); }} }}
+@page {{ size: A4; margin: 15mm 15mm 15mm;
+  @top-left {{ content: "Valuatum · AI-Arvonmääritysraportti"; font-family: {SANS};
+    font-size: 7.4pt; color: {C['gray']}; }}
+  @top-right {{ content: "{head_right}"; font-family: {SANS}; font-size: 7.4pt; color: {C['gray']}; }}
+  @bottom-left {{ content: "Valuatum Oy"; font-family: {SANS}; font-size: 7.2pt; color: {C['gray']}; }}
+  @bottom-right {{ content: counter(page); font-family: {SANS}; font-size: 8pt; color: {C['gray']}; }}
+}}
+@page cover {{ margin: 0;
+  @top-left {{ content: none; }} @top-right {{ content: none; }}
+  @bottom-left {{ content: none; }} @bottom-right {{ content: none; }}
+}}
 """
 
 
@@ -848,11 +925,16 @@ def render_html(report):
     if not isinstance(report, dict):
         raise ValueError("report ei ole objekti")
     derived = _derive(report)
-    _cover_guard(report, derived)
-    sections = _ordered_sections(report)
-    body = (_cover(report, derived) + _snapshot(report, derived)
+    try:
+        _cover_guard(report, derived)
+    except CoverGuardError:
+        pass  # non-fatal: render with whatever the cover carries, never 500
+    sections = _ensure_disclaimer(_ordered_sections(report))
+    # Snapshot page intentionally omitted (design contract — section 1 TIIVISTELMÄ
+    # carries the key figures; its derived visuals now live in section 8).
+    body = (_cover(report, derived)
             + _toc(report, sections)
-            + "".join(_section(report, s) for s in sections))
+            + "".join(_section(report, s, derived) for s in sections))
     meta = report.get("meta") or {}
     title = _esc(meta.get("company_name") or "AI-Arvonmääritysraportti")
     fonts = _font_style()
@@ -906,7 +988,7 @@ _STATIC_CSS = """
 *{ box-sizing:border-box; }
 html,body{ margin:0; padding:0; }
 body{ background:#fff; color:var(--ink); font-family:var(--sans); font-size:9.6pt; line-height:1.5; }
-.page{ position:relative; min-height:268mm; padding:0; page-break-after:always; display:flex; flex-direction:column; }
+.page{ position:relative; min-height:255mm; padding:0; page-break-after:always; display:flex; flex-direction:column; }
 .report-section, .page{ page-break-inside:auto; }
 .pbody{ flex:1 1 auto; padding-top:9px; }
 .phead{ display:flex; justify-content:space-between; align-items:center; font-size:8pt; color:var(--gray);
@@ -981,7 +1063,7 @@ table.tbl tbody tr:nth-child(even) td{ background:#FAFBFA; }
 .toc-row .td{ flex:1 1 auto; border-bottom:1px dotted var(--line-strong); margin:0 4px 3px; }
 
 /* cover */
-.cover{ padding:24mm 22mm; justify-content:flex-start; min-height:297mm; }
+.cover{ page:cover; padding:24mm 22mm; justify-content:flex-start; min-height:297mm; }
 .cover .cv-top{ display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:10px; }
 .cv-brand{ display:flex; align-items:center; gap:9px; font-family:var(--head); font-weight:700; font-size:13pt; color:var(--green); letter-spacing:.02em; }
 .cv-brand i{ width:16px; height:16px; background:var(--lime); display:inline-block; }

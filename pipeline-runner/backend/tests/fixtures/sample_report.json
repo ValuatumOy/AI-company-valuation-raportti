@@ -1,0 +1,120 @@
+{
+  "report_type": "ai_valuation_report",
+  "meta": {
+    "company_name": "Esimerkki Teollisuus Oy",
+    "y_tunnus": "2345678-9",
+    "industry": "Teollisuuspalvelut",
+    "report_date": "2026-06-26",
+    "unit": "tEUR",
+    "level": "konserni"
+  },
+  "cover": {
+    "headline_label": "Skenaarioiden odotusarvo",
+    "headline_value": "2 693 tEUR",
+    "base_case_value": "2 450 tEUR (realistinen base case)",
+    "secondary_lines": ["Luottamustaso: Kohtalainen"]
+  },
+  "confidence": {
+    "level": "Kohtalainen",
+    "deciding_rule": "Ennusteet perustuvat kolmen vuoden toteutuneeseen dataan; toimialan syklisyys laskee luottamustasoa."
+  },
+  "data_quality": {"class": "B"},
+  "machine_readable": {
+    "expected_value": 2693,
+    "base_case": 2450,
+    "range_low": 1200,
+    "range_high": 4100,
+    "revenue_latest": 8200,
+    "ebit_latest": 980,
+    "wacc_pct": 11.5
+  },
+  "_scoring": {
+    "weighted_base_case_teur": 2450,
+    "method_scoring": [
+      {"method": "DCF", "status": "hyväksytty", "value_teur": 2620, "weight_pct": 50},
+      {"method": "Verrokkikertoimet (EV/EBIT)", "status": "hyväksytty", "value_teur": 2180, "weight_pct": 35},
+      {"method": "Substanssiarvo", "status": "hyväksytty", "value_teur": 1650, "weight_pct": 15},
+      {"method": "Osinkoperusteinen", "status": "hylätty", "value_teur": null, "weight_pct": 0}
+    ]
+  },
+  "_scenarios": {
+    "expected_value_teur": 2693,
+    "realistic_base_case_teur": 2450,
+    "scenarios": [
+      {"name": "optimistinen", "value_teur": 4100, "probability_pct": 25, "probability_rationale": "Markkina kasvaa ja uudet sopimukset toteutuvat."},
+      {"name": "realistinen", "value_teur": 2450, "probability_pct": 55, "probability_rationale": "Nykyinen kasvuvauhti jatkuu maltillisena."},
+      {"name": "pessimistinen", "value_teur": 1200, "probability_pct": 20, "probability_rationale": "Kysyntä heikkenee ja katteet supistuvat."}
+    ]
+  },
+  "sections": [
+    {"id": "1", "title": "TIIVISTELMÄ", "blocks": [
+      {"type": "metric_cards", "cards": [
+        {"value": "2 693 tEUR", "label": "Skenaarioiden odotusarvo", "emphasis": true},
+        {"value": "2 450 tEUR", "label": "Realistinen base case"},
+        {"value": "1 200–4 100 tEUR", "label": "Arvostusväli"},
+        {"value": "Kohtalainen", "label": "Luottamustaso"}
+      ]},
+      {"type": "paragraph", "text": "Yhtiön **oman pääoman arvo** on noin 2 450 tEUR realistisessa base casessa. Liikevaihto oli viimeisimpänä vuonna 8 200 tEUR ja liikevoitto 980 tEUR. Arvon keskeisin ajuri on *kannattava kasvu* teollisuuspalveluissa."}
+    ]},
+    {"id": "2", "title": "YHTIÖPROFIILI", "blocks": [
+      {"type": "paragraph", "text": "Esimerkki Teollisuus Oy tarjoaa kunnossapito- ja asennuspalveluita teollisuusasiakkaille."},
+      {"type": "key_value", "title": "Perustiedot", "items": [
+        {"key": "Liikevaihto (2025)", "value": "8 200 tEUR", "source": "tilinpäätös"},
+        {"key": "Henkilöstö", "value": "62", "source": "tilinpäätös"}
+      ]}
+    ]},
+    {"id": "3", "title": "NUMERO-OSIOT (DCF/EVA)", "blocks": [
+      {"type": "chart", "title": "Liikevaihto ja EBIT-%", "chart_type": "bar_line", "unit": "tEUR / %",
+       "x_axis": ["2023", "2024", "2025", "2026e", "2027e"],
+       "series": [
+         {"type": "bar", "name": "Liikevaihto", "values": [6800, 7400, 8200, 8900, 9600]},
+         {"type": "line", "name": "EBIT-%", "values": [9.5, 10.8, 12.0, 12.4, 12.8]}
+       ]},
+      {"type": "table", "title": "DCF-yhteenveto", "unit": "tEUR",
+       "columns": ["Erä", "Arvo"],
+       "rows": [["Diskontatut kassavirrat", "1 540"], ["Päätearvo", "1 320"], ["Nettovelka", "-410"], ["Oman pääoman arvo", "2 450"]]}
+    ]},
+    {"id": "4", "title": "KASVU JA MARKKINA", "blocks": [
+      {"type": "paragraph", "text": "Toimialan kasvun odotetaan jatkuvan 4–6 % vuositasolla."}
+    ]},
+    {"id": "5", "title": "KANNATTAVUUS", "blocks": [
+      {"type": "paragraph", "text": "Käyttökate on parantunut kolmena peräkkäisenä vuonna."}
+    ]},
+    {"id": "6", "title": "TASE JA RAHOITUS", "blocks": [
+      {"type": "table", "title": "Avainluvut", "columns": ["Tunnusluku", "Arvo"],
+       "rows": [["Omavaraisuusaste", "48 %"], ["Nettovelka/EBITDA", "0,6x"]]}
+    ]},
+    {"id": "8", "title": "ARVOSTUSMENETELMÄT", "blocks": [
+      {"type": "paragraph", "text": "Arvo määritettiin painottamalla kolmea hyväksyttyä menetelmää."},
+      {"type": "callout", "variant": "key", "title": "Painotettu arvo", "text": "Menetelmien painotettu arvo on **2 450 tEUR**, jota käytetään realistisena base casena."}
+    ]},
+    {"id": "9", "title": "VERROKKIANALYYSI", "blocks": [
+      {"type": "table", "title": "Verrokit", "columns": ["Yhtiö", "EV/EBIT"],
+       "rows": [["Verrokki A", "11,2x"], ["Verrokki B", "13,8x"]]}
+    ]},
+    {"id": "10", "title": "HERKKYYS", "blocks": [
+      {"type": "paragraph", "text": "WACC:n nousu 1 %-yksiköllä laskee arvoa noin 8 %."}
+    ]},
+    {"id": "11", "title": "SKENAARIOT", "blocks": [
+      {"type": "scenario_table", "scenario": "realistinen", "value_teur": 2450, "probability_pct": 55,
+       "drivers": [{"key": "Kasvu-%", "value": "6 %"}, {"key": "EBIT-%", "value": "12 %"}],
+       "perusluvut": {"columns": ["Vuosi", "Liikevaihto"], "rows": [["2027e", "9 600"]]},
+       "avainluvut": {"columns": ["Kasvu", "EBIT-%"], "rows": [["6 %", "12 %"]]}}
+    ]},
+    {"id": "12", "title": "RISKIT", "blocks": [
+      {"type": "callout", "variant": "warning", "title": "Keskittymäriski", "text": "Suurin asiakas vastaa noin 22 % liikevaihdosta."}
+    ]},
+    {"id": "13", "title": "MAHDOLLISUUDET", "blocks": [
+      {"type": "paragraph", "text": "Huoltosopimusten laajentaminen kasvattaisi toistuvaa liikevaihtoa."}
+    ]},
+    {"id": "14", "title": "JOHTOPÄÄTÖKSET", "blocks": [
+      {"type": "paragraph", "text": "Yhtiön arvo on vakaa ja perustuu kannattavaan kasvuun."}
+    ]},
+    {"id": "15", "title": "MENETELMÄ JA LÄHTEET", "blocks": [
+      {"type": "paragraph", "text": "Arvonmääritys perustuu tilinpäätösdataan ja julkisiin lähteisiin."}
+    ]},
+    {"id": "16", "title": "Vastuuvapaus", "blocks": [
+      {"type": "paragraph", "text": "Tämä raportti on tuotettu automaattisesti yleiseen tietoon perustuvana analyysinä. Se ei ole sijoitusneuvontaa, tilintarkastusta, käyvän arvon lausunto (fairness opinion) eikä sellaisenaan sovellu vero- tai oikeusriitojen perusteeksi ilman asiantuntijan erillistä arviota. Valuatum Oy ei vastaa raportin perusteella tehdyistä päätöksistä."}
+    ]}
+  ]
+}

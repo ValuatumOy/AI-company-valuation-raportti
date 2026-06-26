@@ -35,6 +35,7 @@ export default function App() {
   const [showCosts, setShowCosts] = useState(false);
   const [reportCaps, setReportCaps] = useState({ generator: false, pdf: false });
   const [reportBusy, setReportBusy] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [needToken, setNeedToken] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
 
@@ -122,14 +123,47 @@ export default function App() {
     setSelectedId(pipeline?.stages.find((s) => s.order === 0)?.id ?? null);
   }
 
+  // Resolve a report URL, honouring the backend deliver-gate: on 409 the report
+  // failed its checks — surface the issues and let the operator deliver anyway
+  // only after an explicit confirm.
+  async function resolveReportUrl(format: "html" | "pdf"): Promise<string | null> {
+    try {
+      return await api.reportUrl(runId!, format);
+    } catch (e: any) {
+      if (e?.status === 409 && Array.isArray(e?.issues)) {
+        const ok = confirm(
+          "Raportti ei läpäissyt tarkistuksia:\n\n• " +
+            e.issues.join("\n• ") +
+            "\n\nTarkista luvut lähteestä. Toimita silti?"
+        );
+        if (!ok) return null;
+        return await api.reportUrl(runId!, format, true);
+      }
+      throw e;
+    }
+  }
+
   async function openReport(format: "html" | "pdf") {
     if (!runId) return;
     setReportBusy(true);
     try {
-      const url = await api.reportUrl(runId, format);
-      window.open(url, "_blank");
+      const url = await resolveReportUrl(format);
+      if (url) window.open(url, "_blank");
     } catch (e: any) {
       alert("Report generation failed:\n" + (e?.message || e));
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
+  async function openPreview() {
+    if (!runId) return;
+    setReportBusy(true);
+    try {
+      const url = await resolveReportUrl("html");
+      if (url) setPreviewUrl(url);
+    } catch (e: any) {
+      alert("Preview failed:\n" + (e?.message || e));
     } finally {
       setReportBusy(false);
     }
@@ -345,6 +379,20 @@ export default function App() {
   const pct = totalStages ? Math.round((doneCount / totalStages) * 100) : 0;
   const showProgress = busy || (runStartAt != null && doneCount < totalStages);
 
+  // Client-side health hint for the report buttons (the backend deliver-gate is
+  // the real enforcement). Any errored/validation-failed stage = review first.
+  const reportIssues = hasRun
+    ? runStages
+        .filter((s) =>
+          ["error", "validation_failed"].includes(results[s.order]?.status as string)
+        )
+        .map((s) =>
+          results[s.order]?.status === "error"
+            ? `Vaihe ${s.order} virhe`
+            : `Vaihe ${s.order} tarkistus hylätty`
+        )
+    : [];
+
   return (
     <div className="h-full flex flex-col">
       {/* ── top bar ── */}
@@ -415,6 +463,22 @@ export default function App() {
         {/* reports */}
         {reportCaps.generator && (
           <>
+            {hasRun && reportIssues.length > 0 && (
+              <span
+                title={"Tarkista ennen toimitusta:\n• " + reportIssues.join("\n• ")}
+                className="text-xs px-2 py-1 rounded bg-red-900/60 text-red-200 font-medium"
+              >
+                ⚠ {reportIssues.length} {reportIssues.length === 1 ? "ongelma" : "ongelmaa"} — tarkista
+              </span>
+            )}
+            <button
+              disabled={!runId || reportBusy}
+              onClick={openPreview}
+              className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40"
+              title="Esikatsele raportti sovelluksessa ennen toimitusta"
+            >
+              👁 Preview
+            </button>
             <button
               disabled={!runId || reportBusy}
               onClick={() => openReport("html")}
@@ -552,6 +616,44 @@ export default function App() {
       {showCosts && (
         <CostOverlay pipeline={pipeline} results={results} onClose={() => setShowCosts(false)} />
       )}
+      {previewUrl && (
+        <PreviewOverlay
+          url={previewUrl}
+          onClose={() => {
+            URL.revokeObjectURL(previewUrl);
+            setPreviewUrl(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PreviewOverlay({ url, onClose }: { url: string; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-6 z-50" onClick={onClose}>
+      <div
+        className="bg-white rounded-lg overflow-hidden w-[90vw] h-[92vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center px-3 py-2 bg-neutral-900 text-neutral-200 shrink-0">
+          <span className="text-sm font-semibold">Raportin esikatselu</span>
+          <div className="flex items-center gap-2">
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
+            >
+              Avaa uuteen välilehteen
+            </a>
+            <button onClick={onClose} className="text-neutral-400 hover:text-white text-lg leading-none">
+              ✕
+            </button>
+          </div>
+        </div>
+        <iframe title="report-preview" src={url} className="flex-1 w-full bg-white" />
+      </div>
     </div>
   );
 }

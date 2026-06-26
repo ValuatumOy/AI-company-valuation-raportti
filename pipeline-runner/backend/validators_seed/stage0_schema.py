@@ -50,4 +50,20 @@ def validate(output: dict, context: dict) -> dict:
     # unit must be explicit somewhere
     chk("unit explicit", bool(meta.get("unit")), "meta.unit required")
 
+    # Magnitude sanity: a tEUR field holding a raw-EUR value (1000x off) is a
+    # silent, fatal unit error. No company here has a single figure > 1e9 tEUR.
+    def _max_abs(block):
+        m = 0.0
+        if isinstance(block, dict):
+            for v in block.values():
+                if isinstance(v, list):
+                    for x in v:
+                        if isinstance(x, (int, float)) and not isinstance(x, bool):
+                            m = max(m, abs(x))
+        return m
+
+    big = max(_max_abs(output.get("actuals")), _max_abs(output.get("forecast")))
+    chk("figures within plausible magnitude (no EUR/tEUR unit slip)", big < 1e9,
+        f"largest figure {big:.0f} — likely a unit error" if big >= 1e9 else "ok")
+
     return {"passed": all(c["passed"] for c in checks), "checks": checks}

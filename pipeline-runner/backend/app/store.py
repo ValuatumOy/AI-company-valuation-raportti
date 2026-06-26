@@ -129,18 +129,32 @@ def reorder(pid, stage_ids):
 
 # ---- runs / results ---------------------------------------------------------
 
-def create_run(pid, input_data, stop_on_failure):
+def create_run(pid, input_data, stop_on_failure, identifier=None, params=None):
     rid = _uuid()
     db.execute(
         "INSERT INTO runs(id,pipeline_id,input_data,status,stop_on_failure,"
-        "total_cost_usd,created_at) VALUES(?,?,?,?,?,?,?)",
-        (rid, pid, db.jdump(input_data), "running", int(stop_on_failure), 0.0, _now()),
+        "total_cost_usd,created_at,identifier,params) VALUES(?,?,?,?,?,?,?,?,?)",
+        (rid, pid, db.jdump(input_data), "running", int(stop_on_failure), 0.0,
+         _now(), identifier, db.jdump(params or {})),
     )
     return rid
 
 
 def set_run_status(rid, status):
     db.execute("UPDATE runs SET status=? WHERE id=?", (status, rid))
+
+
+def reset_stale_runs():
+    """On startup, any run still marked 'running' is an orphan from a previous
+    process (a deploy/restart killed its background task). Flip to error so the
+    UI and history show a terminal state instead of a perpetual 'running'."""
+    db.execute("UPDATE runs SET status=? WHERE status=?", ("error", "running"))
+
+
+def usd_spent_today():
+    today = datetime.now(timezone.utc).date().isoformat()
+    rows = db.query("SELECT total_cost_usd FROM runs WHERE created_at >= ?", (today,))
+    return sum((r["total_cost_usd"] or 0.0) for r in rows)
 
 
 def add_run_cost(rid, delta):
@@ -227,11 +241,40 @@ def get_run(rid):
         return None
     run["input_data"] = db.jload(run["input_data"])
     run["stop_on_failure"] = bool(run["stop_on_failure"])
+    run["identifier"] = run.get("identifier")
+    run["params"] = db.jload(run.get("params")) or {}
     results = db.query(
         'SELECT * FROM stage_results WHERE run_id=? ORDER BY "order"', (rid,)
     )
     run["results"] = [_result_row(r) for r in results]
     return run
+
+
+def report_readiness(rid):
+    """Is this run safe to hand a client? Gate the report endpoints on it."""
+    from . import assemble
+    from .runner import SECTION_ORDER
+
+    run = get_run(rid)
+    if not run:
+        return {"ready": False, "issues": ["run not found"]}
+    issues = []
+    if run["status"] != "ok":
+        issues.append(f"run status is '{run['status']}', not 'ok'")
+    for r in run["results"]:
+        if r["order"] == 0:
+            continue
+        if r["status"] == "error":
+            issues.append(f"stage {r['order']} ({r['name']}) errored")
+        elif r["status"] == "validation_failed" or r.get("validator_passed") is False:
+            issues.append(f"stage {r['order']} ({r['name']}) failed its number/consistency checks")
+    rep = assemble.assemble(run)
+    present = {str(s.get("id")) for s in (rep or {}).get("sections", [])} if rep else set()
+    missing = [s for s in SECTION_ORDER if s not in present]
+    if missing:
+        issues.append(f"missing report sections: {', '.join(missing)}")
+    issues = list(dict.fromkeys(issues))
+    return {"ready": not issues, "issues": issues}
 
 
 def list_runs(limit=100):

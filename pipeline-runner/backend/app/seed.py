@@ -93,6 +93,7 @@ def _stages():
             "model": "deepseek/deepseek-v4-pro",
             "prompt_template": _load_prompt("5_analyysi_osiot.txt"),
             "expects_json": True,
+            "max_tokens": 32000,  # emits several long analysis sections
             "validator_code": None,
             "input_mapping": {
                 "input_data": "Vaihe 0 FAKTAT",
@@ -108,6 +109,7 @@ def _stages():
             "model": "deepseek/deepseek-v4-pro",
             "prompt_template": _load_prompt("6_tiivistelma.txt"),
             "expects_json": True,
+            "max_tokens": 32000,  # wrapper + 4 sections + machine_readable in one call
             "validator_code": _load_validator("stage6_final.py"),
             "input_mapping": {
                 "input_data": "Vaihe 0 FAKTAT",
@@ -189,6 +191,34 @@ def reseed_defaults(force=False):
     }
 
 
+def sync_code_and_limits():
+    """Keep the trust-critical validators and token limits in sync with the repo
+    on every boot, WITHOUT touching user-editable prompts / models / toggles.
+    This is how validator improvements reach an existing pipeline without a full
+    reseed (which would also reset prompts). Only pushes seeded validators; never
+    clears a validator the operator added."""
+    pipelines = store.list_pipelines()
+    if not pipelines:
+        return
+    pipeline = next(
+        (p for p in pipelines if p.get("name") == DEFAULT_PIPELINE_NAME), pipelines[0]
+    )
+    by_order = {s["order"]: s for s in pipeline.get("stages", [])}
+    for desired in _stages():
+        cur = by_order.get(desired["order"])
+        if not cur:
+            continue
+        patch = {}
+        dv = desired.get("validator_code")
+        if dv and (cur.get("validator_code") or "") != dv:
+            patch["validator_code"] = dv
+        dmax = desired.get("max_tokens")
+        if dmax and cur.get("max_tokens") != dmax:
+            patch["max_tokens"] = dmax
+        if patch:
+            store.update_stage(cur["id"], {**cur, **patch})
+
+
 def ensure_seeded():
     db.init_db()
     row = db.query_one("SELECT id FROM pipelines LIMIT 1")
@@ -196,5 +226,6 @@ def ensure_seeded():
         pipeline = store.get_pipeline(row["id"])
         if pipeline and _pipeline_needs_auto_reseed(pipeline):
             reseed_defaults(force=True)
+        sync_code_and_limits()
         return
     reseed_defaults(force=True)

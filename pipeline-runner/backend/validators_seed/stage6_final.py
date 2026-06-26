@@ -135,4 +135,17 @@ def validate(output: dict, context: dict) -> dict:
         chk("cover base_case_value == scenarios.realistic_base_case_teur", True,
             "skipped: value not available")
 
+    # --- 4. mandatory legal disclaimer (section 16) --------------------------
+    # Selling an automated valuation with no "ei sijoitusneuvontaa" notice is a
+    # legal exposure. The renderer injects a fallback, but the model is supposed
+    # to produce section 16 — flag when it doesn't.
+    secs = output.get("sections")
+    sec16 = None
+    if isinstance(secs, list):
+        sec16 = next((s for s in secs if isinstance(s, dict)
+                      and str(s.get("id")) == "16"), None)
+    chk("legal disclaimer present (section 16, 'ei sijoitusneuvontaa')",
+        sec16 is not None and "sijoitusneuvo" in str(sec16).lower(),
+        "section 16 missing or lacks the mandatory Vastuuvapaus text")
+
     return {"passed": all(c["passed"] for c in checks), "checks": checks}

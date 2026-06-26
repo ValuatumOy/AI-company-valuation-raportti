@@ -139,10 +139,28 @@ export const api = {
       j<{ token: boolean; profinder: boolean; kit: boolean }>(r)
     ),
 
-  // report files need auth header too → fetch as blob, return object URL
-  reportUrl: async (rid: string, format: "html" | "pdf") => {
-    const r = await req(`/api/runs/${rid}/report.${format}`);
-    if (!r.ok) throw new Error(await r.text());
+  runReadiness: (rid: string) =>
+    req(`/api/runs/${rid}/readiness`).then((r) =>
+      j<{ ready: boolean; issues: string[] }>(r)
+    ),
+
+  // report files need auth header too → fetch as blob, return object URL.
+  // The backend blocks delivering an unhealthy run with 409 + an issue list;
+  // pass force to override after the operator has reviewed.
+  reportUrl: async (rid: string, format: "html" | "pdf", force = false) => {
+    const r = await req(`/api/runs/${rid}/report.${format}${force ? "?force=1" : ""}`);
+    if (!r.ok) {
+      const text = await r.text();
+      const err: any = new Error(text);
+      err.status = r.status;
+      try {
+        const body = JSON.parse(text);
+        if (body?.detail?.issues) err.issues = body.detail.issues as string[];
+      } catch {
+        /* not JSON */
+      }
+      throw err;
+    }
     return URL.createObjectURL(await r.blob());
   },
 };

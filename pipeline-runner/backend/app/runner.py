@@ -4,6 +4,7 @@ stage 0), parse JSON, run the validator, persist, and yield SSE events.
 This is an async generator so the HTTP layer can stream progress live.
 """
 import json
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -11,6 +12,22 @@ from datetime import datetime, timezone
 from . import openrouter, store, validators
 from .models import DATA_FETCHER_MODEL
 from fetchers.company_data import fetch_company_data
+
+
+def _spend_cap_exceeded(rid):
+    """Optional hard ceiling on OpenRouter spend (env VALU_RUN_USD_CAP /
+    VALU_DAILY_USD_CAP, both default off). Checked before each paid stage."""
+    run_cap = float(os.getenv("VALU_RUN_USD_CAP") or 0)
+    day_cap = float(os.getenv("VALU_DAILY_USD_CAP") or 0)
+    if run_cap:
+        rc = (store.get_run(rid) or {}).get("total_cost_usd", 0.0) or 0.0
+        if rc >= run_cap:
+            return f"Per-run spend cap saavutettu (${rc:.4f} ≥ ${run_cap:.2f})."
+    if day_cap:
+        dc = store.usd_spent_today()
+        if dc >= day_cap:
+            return f"Päivän spend cap saavutettu (${dc:.4f} ≥ ${day_cap:.2f})."
+    return None
 
 # Canonical report section order. Section 7 is intentionally absent.
 SECTION_ORDER = [
@@ -198,6 +215,27 @@ async def _execute_stage(stage, context, run_input_data, identifier, params):
 
     if stage["expects_json"]:
         parsed = openrouter.extract_json(r["text"])
+        # Truncated output (finish_reason='length') is the #1 intermittent
+        # failure on big companies — retry once with more room before giving up.
+        if parsed is None and r.get("finish_reason") == "length":
+            try:
+                r2 = await openrouter.chat(
+                    model=stage["model"], prompt=prompt,
+                    temperature=stage["temperature"],
+                    max_tokens=min(int(stage["max_tokens"]) * 2, 60000),
+                    reasoning_effort=stage["reasoning_effort"],
+                    expects_json=stage["expects_json"],
+                    web_search=stage.get("web_search", False),
+                )
+                res["raw_response"] = r2["text"]
+                res["finish_reason"] = r2["finish_reason"]
+                res["tokens_prompt"] += r2["tokens_prompt"]
+                res["tokens_completion"] += r2["tokens_completion"]
+                res["cost_usd"] += openrouter.cost_for(
+                    stage["model"], r2["tokens_prompt"], r2["tokens_completion"])
+                parsed = openrouter.extract_json(r2["text"])
+            except Exception:
+                pass
         if parsed is None:
             res["status"] = "error"
             res["error_message"] = (
@@ -273,6 +311,15 @@ async def run_stages(run, stages, only=None, from_order=None):
         if not s["enabled"]:
             store.upsert_result(rid, {**_base(s), "status": "skipped"})
             yield _ev("stage", order=s["order"], status="skipped", name=s["name"])
+            continue
+
+        cap_msg = _spend_cap_exceeded(rid) if s["order"] >= 1 else None
+        if cap_msg:
+            store.upsert_result(rid, {**_base(s), "status": "error",
+                                      "error_message": cap_msg, "finished_at": _now()})
+            yield _ev("stage", order=s["order"], status="error", name=s["name"],
+                      error_message=cap_msg)
+            halted = True
             continue
 
         store.upsert_result(rid, {**_base(s), "status": "running",

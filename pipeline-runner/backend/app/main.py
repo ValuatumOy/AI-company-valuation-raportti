@@ -1,5 +1,6 @@
 """FastAPI app. The OpenRouter key lives here, never in the browser."""
 import asyncio
+import hmac
 import json
 import os
 from contextlib import asynccontextmanager
@@ -23,6 +24,7 @@ from fetchers.company_data import fetch_company_data  # noqa: E402
 @asynccontextmanager
 async def _lifespan(app):
     seed.ensure_seeded()
+    store.reset_stale_runs()  # clear orphan 'running' rows left by the last restart
     await openrouter.refresh_models()
     yield
 
@@ -53,7 +55,7 @@ async def auth_gate(request, call_next):
         path = request.url.path
         if path.startswith("/api/") and path != "/api/health":
             sent = request.headers.get("authorization", "")
-            if sent != f"Bearer {_APP_TOKEN}":
+            if not hmac.compare_digest(sent, f"Bearer {_APP_TOKEN}"):
                 from fastapi.responses import JSONResponse
 
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
@@ -238,23 +240,17 @@ def post_run(body: RunIn):
     p = store.get_pipeline(body.pipeline_id)
     if not p:
         raise HTTPException(404, "pipeline not found")
-    rid = store.create_run(body.pipeline_id, body.input_data, body.stop_on_failure)
-    # stash transient run-time params for the stream handler
-    _RUN_PARAMS[rid] = {
-        "identifier": body.identifier,
-        "params": body.params,
-    }
+    rid = store.create_run(
+        body.pipeline_id, body.input_data, body.stop_on_failure,
+        identifier=body.identifier, params=body.params,
+    )
     return {"run_id": rid}
 
 
-_RUN_PARAMS: dict[str, dict] = {}
-
-
 def _run_with_params(rid):
-    run = store.get_run(rid)
-    if run:
-        run.update(_RUN_PARAMS.get(rid, {}))
-    return run
+    # identifier/params are persisted on the run row (store.get_run), so a
+    # background run survives a restart and compare/rerun need no in-memory state.
+    return store.get_run(rid)
 
 
 async def _stream(rid, only=None, from_order=None):
@@ -342,6 +338,23 @@ def report_capabilities():
     }
 
 
+def _require_ready(rid: str, force: int):
+    """Block delivering a report from an unhealthy run unless explicitly forced.
+    This is the single most important safety check — it stops a run whose number
+    validators FAILED from being handed to a paying client."""
+    r = store.report_readiness(rid)
+    if not r["ready"] and not force:
+        raise HTTPException(409, {"detail": "raportti ei läpäissyt tarkistuksia",
+                                  "issues": r["issues"]})
+
+
+@app.get("/api/runs/{rid}/readiness")
+def run_readiness(rid: str):
+    if not store.get_run(rid):
+        raise HTTPException(404, "run not found")
+    return store.report_readiness(rid)
+
+
 @app.get("/api/runs/{rid}/report-source")
 def report_source(rid: str):
     j = store.final_report_json(rid)
@@ -350,11 +363,23 @@ def report_source(rid: str):
     return j
 
 
+@app.post("/api/preview-report")
+def preview_report(body: dict):
+    """Render an arbitrary report JSON to HTML — no run, no LLM, no cost. Powers
+    fast design iteration and the in-app report preview."""
+    from . import render
+    try:
+        return HTMLResponse(render.render_html(body))
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/runs/{rid}/report.html")
-def report_html(rid: str):
+def report_html(rid: str, force: int = 0):
     j = store.final_report_json(rid)
     if j is None:
         raise HTTPException(400, "ei valmista loppuvaiheen JSONia tälle ajolle")
+    _require_ready(rid, force)
     try:
         path = report.generate_html(rid, j)
     except Exception as e:
@@ -363,10 +388,11 @@ def report_html(rid: str):
 
 
 @app.get("/api/runs/{rid}/report.pdf")
-def report_pdf(rid: str):
+def report_pdf(rid: str, force: int = 0):
     j = store.final_report_json(rid)
     if j is None:
         raise HTTPException(400, "ei valmista loppuvaiheen JSONia tälle ajolle")
+    _require_ready(rid, force)
     try:
         path = report.generate_pdf(rid, j)
     except Exception as e:

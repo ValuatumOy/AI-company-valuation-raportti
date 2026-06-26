@@ -3,6 +3,7 @@
 Docs: https://openrouter.ai/docs  (chat/completions is OpenAI-compatible;
 reasoning is passed as {"reasoning": {"effort": "high"}}).
 """
+import asyncio
 import json
 import os
 import re
@@ -92,10 +93,24 @@ async def chat(
         # https://openrouter.ai/docs/guides/features/plugins/web-search
         payload["plugins"] = [{"id": "web"}]
 
-    async with httpx.AsyncClient(timeout=600) as client:
-        r = await client.post(
-            f"{BASE}/chat/completions", headers=_headers(), json=payload
-        )
+    # Retry transient failures (429 rate limit, 5xx, network/timeout) so a single
+    # blip doesn't kill a 6-stage run and force the operator to babysit it.
+    r = None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=600) as client:
+                r = await client.post(
+                    f"{BASE}/chat/completions", headers=_headers(), json=payload
+                )
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            break
+        except (httpx.TimeoutException, httpx.TransportError):
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise
     if r.status_code >= 400:
         raise RuntimeError(f"OpenRouter {r.status_code}: {r.text[:800]}")
     body = r.json()
