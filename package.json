@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix pipeline-runner/frontend ci && npm --prefix pipeline-runner/frontend run build"
+  }
+}
