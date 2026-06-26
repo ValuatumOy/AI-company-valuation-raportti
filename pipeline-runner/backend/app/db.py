@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS stages (
     max_tokens INTEGER NOT NULL DEFAULT 16000,
     reasoning_effort TEXT,
     expects_json INTEGER NOT NULL DEFAULT 1,
+    web_search INTEGER NOT NULL DEFAULT 0,
     validator_code TEXT,
     input_mapping TEXT NOT NULL DEFAULT '{}'
 );
@@ -102,12 +103,15 @@ if IS_PG:
         with _pool.connection() as conn:
             for stmt in _STATEMENTS:
                 conn.execute(stmt)
-            try:
-                conn.execute(
-                    "ALTER TABLE stage_results ADD COLUMN IF NOT EXISTS model TEXT"
-                )
-            except Exception:
-                pass
+            for mig in (
+                "ALTER TABLE stage_results ADD COLUMN IF NOT EXISTS model TEXT",
+                "ALTER TABLE stages ADD COLUMN IF NOT EXISTS "
+                "web_search INTEGER NOT NULL DEFAULT 0",
+            ):
+                try:
+                    conn.execute(mig)
+                except Exception:
+                    pass
 
     def query(sql, params=()):
         with _pool.connection() as conn:
@@ -139,11 +143,15 @@ else:
         c = _conn()
         c.executescript(SCHEMA)
         c.commit()
-        try:
-            c.execute("ALTER TABLE stage_results ADD COLUMN model TEXT")
-            c.commit()
-        except Exception:
-            pass  # column already exists
+        for mig in (
+            "ALTER TABLE stage_results ADD COLUMN model TEXT",
+            "ALTER TABLE stages ADD COLUMN web_search INTEGER NOT NULL DEFAULT 0",
+        ):
+            try:
+                c.execute(mig)
+                c.commit()
+            except Exception:
+                pass  # column already exists
 
     def query(sql, params=()):
         cur = _conn().execute(sql, params)

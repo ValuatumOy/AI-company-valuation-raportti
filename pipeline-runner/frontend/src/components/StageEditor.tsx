@@ -105,19 +105,31 @@ export function StageEditor({
                   className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 w-20"
                 />
               </label>
-              <label className="flex items-center gap-1.5 text-neutral-400">
-                reasoning
+              <label className="flex items-center gap-1.5 text-neutral-400" title="Reasoning / thinking effort (reasoning-capable models only)">
+                thinking
                 <select
                   value={draft.reasoning_effort ?? ""}
                   onChange={(e) => patch({ reasoning_effort: e.target.value || null })}
                   className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1"
                 >
-                  <option value="">–</option>
+                  <option value="">off</option>
                   <option value="low">low</option>
                   <option value="medium">medium</option>
                   <option value="high">high</option>
                   <option value="xhigh">xhigh</option>
                 </select>
+              </label>
+              <label
+                className={`flex items-center gap-1.5 ${draft.web_search ? "text-sky-300" : "text-neutral-400"}`}
+                title="Run this stage with live OpenRouter web search (~$4 / 1000 results)"
+              >
+                <input
+                  type="checkbox"
+                  checked={draft.web_search}
+                  onChange={(e) => patch({ web_search: e.target.checked })}
+                  className="accent-sky-500"
+                />
+                🌐 web search
               </label>
               <label className="flex items-center gap-1.5 text-neutral-400">
                 <input

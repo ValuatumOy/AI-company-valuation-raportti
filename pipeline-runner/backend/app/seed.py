@@ -44,6 +44,7 @@ def _stages():
             "model": "google/gemini-2.5-flash",
             "prompt_template": _load_prompt("1_enrichment.txt"),
             "expects_json": True,
+            "web_search": True,  # enrichment does live web research
             "validator_code": None,
             "input_mapping": {"input_data": "Vaihe 0 FAKTAT"},
         },

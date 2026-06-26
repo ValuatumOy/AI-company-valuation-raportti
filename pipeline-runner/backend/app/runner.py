@@ -177,6 +177,7 @@ async def _execute_stage(stage, context, run_input_data, identifier, params):
             max_tokens=stage["max_tokens"],
             reasoning_effort=stage["reasoning_effort"],
             expects_json=stage["expects_json"],
+            web_search=stage.get("web_search", False),
         )
     except Exception as e:
         res["status"] = "error"

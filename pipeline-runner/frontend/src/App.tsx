@@ -224,6 +224,7 @@ export default function App() {
       temperature: 0.2,
       max_tokens: 16000,
       reasoning_effort: null,
+      web_search: false,
       expects_json: true,
       validator_code: null,
       input_mapping: {},
@@ -343,9 +344,10 @@ export default function App() {
           value={runId ?? ""}
           className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs max-w-[220px]"
         >
-          <option value="">— run history —</option>
+          <option value="">— run history ({runs.length}) —</option>
           {runs.map((r) => (
             <option key={r.id} value={r.id}>
+              {r.company_name ? `${r.company_name} · ` : ""}
               {r.created_at?.slice(0, 16)} · {r.status} · ${r.total_cost_usd?.toFixed(4)}
             </option>
           ))}

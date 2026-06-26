@@ -16,6 +16,7 @@ class StageIn(BaseModel):
     max_tokens: int = 16000
     reasoning_effort: Optional[str] = None
     expects_json: bool = True
+    web_search: bool = False
     validator_code: Optional[str] = None
     input_mapping: dict[str, Any] = Field(default_factory=dict)
 

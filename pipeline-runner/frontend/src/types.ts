@@ -12,6 +12,7 @@ export interface Stage {
   max_tokens: number;
   reasoning_effort: string | null;
   expects_json: boolean;
+  web_search: boolean;
   validator_code: string | null;
   input_mapping: Record<string, string>;
 }

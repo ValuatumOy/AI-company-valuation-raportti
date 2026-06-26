@@ -72,6 +72,7 @@ async def chat(
     max_tokens: int = 16000,
     reasoning_effort: str | None = None,
     expects_json: bool = True,
+    web_search: bool = False,
 ) -> dict:
     """One-shot completion. Returns dict with text, usage, finish_reason, payload."""
     messages = [{"role": "user", "content": prompt}]
@@ -86,6 +87,10 @@ async def chat(
         payload["response_format"] = {"type": "json_object"}
     if reasoning_effort:
         payload["reasoning"] = {"effort": reasoning_effort}
+    if web_search:
+        # OpenRouter web plugin — live web results injected before generation.
+        # https://openrouter.ai/docs/guides/features/plugins/web-search
+        payload["plugins"] = [{"id": "web"}]
 
     async with httpx.AsyncClient(timeout=600) as client:
         r = await client.post(

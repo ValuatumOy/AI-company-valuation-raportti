@@ -28,6 +28,7 @@ def _stage_row_to_dict(r):
         "max_tokens": r["max_tokens"],
         "reasoning_effort": r["reasoning_effort"],
         "expects_json": bool(r["expects_json"]),
+        "web_search": bool(r.get("web_search")),
         "validator_code": r["validator_code"],
         "input_mapping": db.jload(r["input_mapping"]) or {},
     }
@@ -66,13 +67,14 @@ def add_stage(pid, s: dict):
     db.execute(
         'INSERT INTO stages(id,pipeline_id,"order",name,enabled,model,'
         "prompt_template,temperature,max_tokens,reasoning_effort,expects_json,"
-        "validator_code,input_mapping) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "web_search,validator_code,input_mapping) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             sid, pid, s["order"], s["name"], int(s.get("enabled", True)),
             s["model"], s.get("prompt_template", ""), s.get("temperature", 0.2),
             s.get("max_tokens", 16000), s.get("reasoning_effort"),
-            int(s.get("expects_json", True)), s.get("validator_code"),
-            db.jdump(s.get("input_mapping", {})),
+            int(s.get("expects_json", True)), int(s.get("web_search", False)),
+            s.get("validator_code"), db.jdump(s.get("input_mapping", {})),
         ),
     )
     touch_pipeline(pid)
@@ -92,13 +94,13 @@ def update_stage(sid, s: dict):
     db.execute(
         'UPDATE stages SET "order"=?,name=?,enabled=?,model=?,prompt_template=?,'
         "temperature=?,max_tokens=?,reasoning_effort=?,expects_json=?,"
-        "validator_code=?,input_mapping=? WHERE id=?",
+        "web_search=?,validator_code=?,input_mapping=? WHERE id=?",
         (
             merged["order"], merged["name"], int(merged["enabled"]),
             merged["model"], merged["prompt_template"], merged["temperature"],
             merged["max_tokens"], merged["reasoning_effort"],
-            int(merged["expects_json"]), merged["validator_code"],
-            db.jdump(merged.get("input_mapping", {})), sid,
+            int(merged["expects_json"]), int(merged.get("web_search", False)),
+            merged["validator_code"], db.jdump(merged.get("input_mapping", {})), sid,
         ),
     )
     touch_pipeline(cur["pipeline_id"])
@@ -232,13 +234,27 @@ def get_run(rid):
     return run
 
 
-def list_runs(limit=50):
+def list_runs(limit=100):
     rows = db.query(
-        "SELECT id,pipeline_id,status,total_cost_usd,created_at "
+        "SELECT id,pipeline_id,input_data,status,total_cost_usd,created_at "
         "FROM runs ORDER BY created_at DESC LIMIT ?",
         (limit,),
     )
-    return rows
+    out = []
+    for r in rows:
+        inp = db.jload(r.get("input_data"))
+        company = None
+        if isinstance(inp, dict):
+            company = (inp.get("meta") or {}).get("company_name")
+        out.append({
+            "id": r["id"],
+            "pipeline_id": r["pipeline_id"],
+            "status": r["status"],
+            "total_cost_usd": r["total_cost_usd"],
+            "created_at": r["created_at"],
+            "company_name": company,
+        })
+    return out
 
 
 def final_report_json(rid):
