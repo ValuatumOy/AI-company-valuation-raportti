@@ -65,4 +65,14 @@ def assemble(run):
         wrapper = dict(outputs[max(outputs)])
 
     wrapper["sections"] = merge_sections(outputs)
+
+    # Attach the structured scoring (stage 3) + scenarios (stage 4) objects so
+    # the renderer can derive the signature visuals (range bar, method-value
+    # chart, weights donut, confidence). Underscore-prefixed = renderer-only.
+    s3 = outputs.get(3) or {}
+    if isinstance(s3.get("scoring"), dict):
+        wrapper.setdefault("_scoring", s3["scoring"])
+    s4 = outputs.get(4)
+    if isinstance(s4, dict):
+        wrapper.setdefault("_scenarios", s4)
     return wrapper

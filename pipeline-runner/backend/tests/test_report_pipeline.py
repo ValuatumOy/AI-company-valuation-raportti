@@ -45,17 +45,17 @@ def test_render_html_contains_both_cover_figures():
 
 
 def test_cover_guard_passes_on_intact_cover():
-    render._cover_guard(_report())  # must not raise
+    render._cover_guard(_report(), render._derive(_report()))  # must not raise
 
 
 def test_cover_guard_rejects_per_glyph_corruption(monkeypatch):
-    orig = render._cover_html
+    orig = render._cover
     monkeypatch.setattr(
-        render, "_cover_html",
-        lambda r: orig(r).replace("1 598 tEUR", "1 5 9 8 t E U R"),
+        render, "_cover",
+        lambda r, d: orig(r, d).replace("1 598 tEUR", "1 5 9 8 t E U R"),
     )
     with pytest.raises(render.CoverGuardError):
-        render._cover_guard(_report())
+        render._cover_guard(_report(), render._derive(_report()))
 
 
 # --------------------------------------------------------------- assembler
@@ -173,7 +173,7 @@ def test_cover_guard_rejects_blank_figure():
     rep = _report()
     rep["cover"]["base_case_value"] = ""
     with pytest.raises(render.CoverGuardError):
-        render._cover_guard(rep)
+        render._cover_guard(rep, render._derive(rep))
 
 
 def test_renderer_drops_noncanonical_section_ids():
