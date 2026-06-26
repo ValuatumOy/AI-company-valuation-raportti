@@ -240,15 +240,10 @@ def list_runs(limit=50):
 
 
 def final_report_json(rid):
-    """The JSON to feed the report generator: highest-order completed stage
-    output (the summary/kokoaja stage)."""
-    rows = db.query(
-        'SELECT parsed_json FROM stage_results WHERE run_id=? AND status IN '
-        "('ok','validation_failed') AND parsed_json IS NOT NULL "
-        'ORDER BY "order" DESC LIMIT 1',
-        (rid,),
-    )
-    return db.jload(rows[0]["parsed_json"]) if rows else None
+    """The JSON to feed the report generator: assembled wrapper + sections."""
+    from . import assemble
+
+    return assemble.assemble(get_run(rid))
 
 
 def costs_summary(limit=200):

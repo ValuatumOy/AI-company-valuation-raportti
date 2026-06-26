@@ -19,6 +19,11 @@ TIMEOUT_S = 5
 _HARNESS = '''
 import json, sys, traceback
 
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 def _emit(r):
     sys.stdout.write("___VRESULT___" + json.dumps(r, ensure_ascii=False, default=str))
 
@@ -58,6 +63,7 @@ def run_validator(code: str, output, context) -> dict:
             input=stdin,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=TIMEOUT_S,
         )
     except subprocess.TimeoutExpired:

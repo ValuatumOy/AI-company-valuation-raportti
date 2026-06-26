@@ -10,10 +10,11 @@ import { ValuatumExport } from "./components/ValuatumExport";
 const WELL_KNOWN: Record<number, string> = {
   0: "input_data",
   1: "enrichment",
-  2: "scoring",
+  2: "profile_analysis",
   3: "sections_numeric",
-  4: "sections_analysis",
-  5: "summary",
+  4: "scenarios",
+  5: "analysis_sections",
+  6: "summary",
 };
 const slug = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
@@ -86,6 +87,16 @@ export default function App() {
     const ctx: Record<string, any> = {};
     if (inputData != null) ctx["input_data"] = inputData;
     if (!pipeline) return ctx;
+    const mergeSections = (sections: any[]) => {
+      const byId: Record<string, any> = {};
+      for (const sec of ctx["sections_analysis"]?.sections ?? []) {
+        if (sec?.id != null) byId[String(sec.id)] = sec;
+      }
+      for (const sec of sections) {
+        if (sec?.id != null) byId[String(sec.id)] = sec;
+      }
+      ctx["sections_analysis"] = { sections: Object.values(byId) };
+    };
     for (const s of pipeline.stages) {
       if (selected && s.order >= selected.order) continue;
       const r = results[s.order];
@@ -93,6 +104,13 @@ export default function App() {
         const out = r.parsed_json ?? { raw: r.raw_response };
         ctx[WELL_KNOWN[s.order] ?? slug(s.name)] = out;
         ctx[slug(s.name)] = out;
+        if (out?.growth_assessment) ctx["growth_assessment"] = out.growth_assessment;
+        if (out?.scoring) ctx["scoring"] = out.scoring;
+        if (s.order === 4) ctx["scenarios"] = out;
+        if (Array.isArray(out?.sections)) {
+          if (s.order === 3) ctx["sections_numeric"] = out;
+          if ([2, 4, 5].includes(s.order)) mergeSections(out.sections);
+        }
       }
     }
     return ctx;
@@ -178,6 +196,20 @@ export default function App() {
     const updated = await api.updateStage(s.id, s);
     setPipeline((p) =>
       p ? { ...p, stages: p.stages.map((x) => (x.id === s.id ? updated : x)) } : p
+    );
+  }
+  async function reseedDefaults() {
+    if (!pipeline) return;
+    const ok = confirm(
+      "Päivitetään oletusvaiheiden promptit repo-version mukaisiksi. Jatketaanko?"
+    );
+    if (!ok) return;
+    const res = await api.reseedDefaults();
+    setPipeline(res.pipeline);
+    setSelectedId((id) =>
+      id && res.pipeline.stages.some((s) => s.id === id)
+        ? id
+        : res.pipeline.stages[0]?.id ?? null
     );
   }
   async function toggleStage(id: string, enabled: boolean) {
@@ -316,6 +348,13 @@ export default function App() {
           className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
         >
           € kustannukset
+        </button>
+        <button
+          onClick={reseedDefaults}
+          className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
+          title="palauta oletusvaiheiden promptit repo-version mukaisiksi"
+        >
+          Päivitä promptit
         </button>
         {reportCaps.generator && (
           <>

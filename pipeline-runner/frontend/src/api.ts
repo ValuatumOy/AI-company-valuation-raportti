@@ -34,6 +34,10 @@ export const api = {
 
   pipelines: () => req("/api/pipelines").then((r) => j<Pipeline[]>(r)),
   pipeline: (id: string) => req(`/api/pipelines/${id}`).then((r) => j<Pipeline>(r)),
+  reseedDefaults: () =>
+    req("/api/reseed", { method: "POST" }).then((r) =>
+      j<{ ok: boolean; created: number; updated: number; pipeline: Pipeline }>(r)
+    ),
 
   updateStage: (sid: string, s: Stage) =>
     req(`/api/stages/${sid}`, {

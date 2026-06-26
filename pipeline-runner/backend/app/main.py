@@ -75,6 +75,11 @@ def post_pipeline(body: PipelineIn):
     return store.create_pipeline(body.name)
 
 
+@app.post("/api/reseed")
+def post_reseed():
+    return seed.reseed_defaults(force=True)
+
+
 @app.get("/api/pipelines/{pid}")
 def get_pipeline(pid: str):
     p = store.get_pipeline(pid)
@@ -307,7 +312,7 @@ async def compare_models(rid: str, order: int, body: CompareIn):
         if r["order"] < order and r.get("status") in ("ok", "validation_failed"):
             s2 = next((x for x in p["stages"] if x["order"] == r["order"]), None)
             if s2:
-                runner._add_to_context(ctx, s2, runner._output_value(r))
+                runner._contribute(ctx, s2, runner._output_value(r))
 
     out = []
     for model in body.models:

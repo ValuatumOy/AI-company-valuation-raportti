@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
 import type { ModelInfo, Stage } from "../types";
 import { DATA_FETCHER_MODEL } from "../types";
@@ -7,10 +7,11 @@ import { ModelSelect } from "./ModelSelect";
 const WELL_KNOWN: Record<number, string> = {
   0: "input_data",
   1: "enrichment",
-  2: "scoring",
+  2: "profile_analysis",
   3: "sections_numeric",
-  4: "sections_analysis",
-  5: "summary",
+  4: "scenarios",
+  5: "analysis_sections",
+  6: "summary",
 };
 
 function substitute(template: string, ctx: Record<string, any>) {
@@ -39,31 +40,36 @@ export function StageEditor({
   models: ModelInfo[];
   context: Record<string, any>;
   inputData: any;
-  onSave: (s: Stage) => void;
+  onSave: (s: Stage) => void | Promise<void>;
   onSetInputData: (d: any) => void;
   onFetch: (identifier: string) => void;
 }) {
   const [draft, setDraft] = useState<Stage>(stage);
   const [showValidator, setShowValidator] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const firstLoad = useRef(true);
+  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">(
+    "saved"
+  );
 
   useEffect(() => {
     setDraft(stage);
-    firstLoad.current = true;
+    setSaveState("saved");
   }, [stage.id]);
 
-  // debounced persistence
-  useEffect(() => {
-    if (firstLoad.current) {
-      firstLoad.current = false;
-      return;
-    }
-    const t = setTimeout(() => onSave(draft), 500);
-    return () => clearTimeout(t);
-  }, [draft]);
+  const patch = (p: Partial<Stage>) => {
+    setDraft((d) => ({ ...d, ...p }));
+    setSaveState("dirty");
+  };
 
-  const patch = (p: Partial<Stage>) => setDraft((d) => ({ ...d, ...p }));
+  async function saveDraft() {
+    setSaveState("saving");
+    try {
+      await onSave(draft);
+      setSaveState("saved");
+    } catch {
+      setSaveState("error");
+    }
+  }
 
   const isFetcher = draft.model === DATA_FETCHER_MODEL;
   const preview = useMemo(
@@ -72,14 +78,32 @@ export function StageEditor({
   );
   const mappingKeys = Object.keys(draft.input_mapping || {});
   const unavailable = mappingKeys.filter((k) => !(k in context));
+  const saveLabel =
+    saveState === "saving"
+      ? "Tallennetaan..."
+      : saveState === "saved"
+        ? "Tallennettu"
+        : "Tallenna";
 
   return (
     <div className="flex flex-col h-full overflow-auto p-4 gap-3">
-      <input
-        value={draft.name}
-        onChange={(e) => patch({ name: e.target.value })}
-        className="bg-neutral-800 border border-neutral-700 rounded px-3 py-2 text-lg font-semibold"
-      />
+      <div className="flex gap-2">
+        <input
+          value={draft.name}
+          onChange={(e) => patch({ name: e.target.value })}
+          className="bg-neutral-800 border border-neutral-700 rounded px-3 py-2 text-lg font-semibold flex-1 min-w-0"
+        />
+        <button
+          onClick={saveDraft}
+          disabled={saveState === "saving" || saveState === "saved"}
+          className="px-3 py-2 rounded bg-sky-700 hover:bg-sky-600 disabled:bg-neutral-800 disabled:text-neutral-500 text-sm font-medium"
+        >
+          {saveLabel}
+        </button>
+      </div>
+      {saveState === "error" && (
+        <div className="text-xs text-red-400">Tallennus epäonnistui.</div>
+      )}
 
       <div className="flex flex-wrap items-center gap-4 text-xs">
         <label className="flex items-center gap-2">
