@@ -42,6 +42,9 @@ app.add_middleware(
 #   Authorization: Bearer <APP_TOKEN>
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
+# Bump on deploy to confirm which build is live (surfaced in /api/health).
+BUILD = "2026-06-26-autodeploy-check"
+
 
 @app.middleware("http")
 async def auth_gate(request, call_next):
@@ -64,6 +67,7 @@ def health():
         "ok": True,
         "auth": bool(_APP_TOKEN),
         "db": "postgres" if db.IS_PG else "sqlite",
+        "build": BUILD,
     }
 
 
