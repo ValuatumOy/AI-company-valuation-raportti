@@ -277,6 +277,26 @@ function Stage0Fetcher({
     setPasteText(inputData ? JSON.stringify(inputData, null, 2) : "");
   }, [inputData]);
 
+  // Auto-apply pasted JSON once it's valid — no separate "Use as input_data"
+  // press needed. (Fetched data is already applied automatically on success.)
+  useEffect(() => {
+    if (!showPaste || !pasteText.trim()) return;
+    const t = setTimeout(() => {
+      try {
+        const parsed = JSON.parse(pasteText);
+        if (JSON.stringify(parsed) !== JSON.stringify(inputData)) {
+          onSetInputData(parsed);
+          setPasteErr(null);
+          setPasteOk(true);
+          window.setTimeout(() => setPasteOk(false), 2500);
+        }
+      } catch {
+        /* partial/invalid JSON — wait until it parses */
+      }
+    }, 700);
+    return () => clearTimeout(t);
+  }, [pasteText, showPaste]);
+
   async function fetchValuatum() {
     if (!name.trim() || !fid.trim()) return;
     setPhase("running");
@@ -413,7 +433,7 @@ function Stage0Fetcher({
         )}
         {phase === "done" && (
           <div className="text-xs text-emerald-400">
-            ✓ Data loaded — {inputData?.meta?.company_name ?? ""}
+            ✓ Data loaded{inputData?.meta?.company_name ? ` — ${inputData.meta.company_name}` : ""} · ready to run (press ▶ Run pipeline)
             {warnings.length > 0 && (
               <ul className="mt-1 text-amber-300 space-y-0.5">
                 {warnings.map((w, i) => <li key={i}>⚠ {w}</li>)}
@@ -459,12 +479,18 @@ function Stage0Fetcher({
               />
             </div>
             {pasteErr && <div className="text-xs text-red-400">{pasteErr}</div>}
-            <button
-              onClick={applyPaste}
-              className="px-3 py-1.5 text-sm rounded bg-sky-700 hover:bg-sky-600"
-            >
-              Use as input_data
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-emerald-400">
+                {pasteOk ? "✓ applied" : "Applies automatically when the JSON is valid"}
+              </span>
+              <button
+                onClick={applyPaste}
+                className="px-2 py-1 text-xs rounded bg-neutral-700 hover:bg-neutral-600"
+                title="Optional — paste auto-applies"
+              >
+                apply now
+              </button>
+            </div>
           </>
         )}
       </div>

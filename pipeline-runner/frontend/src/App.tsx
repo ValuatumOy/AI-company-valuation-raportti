@@ -27,6 +27,8 @@ export default function App() {
   const [results, setResults] = useState<Record<number, StageResult>>({});
   const [stopOnFailure, setStopOnFailure] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [runStartAt, setRunStartAt] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(Date.now());
   const [totalCost, setTotalCost] = useState(0);
   const [runs, setRuns] = useState<any[]>([]);
   const [cmp, setCmp] = useState<{ order: number; results: any[] } | null>(null);
@@ -74,10 +76,18 @@ export default function App() {
       .catch(() => init());
   }, []);
 
+  // Tick a clock once a second while a run is in flight, for the elapsed timer.
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [busy]);
+
   function newRun() {
     setRunId(null);
     setResults({});
     setTotalCost(0);
+    setRunStartAt(null);
     setInputData(null);
     // jump to stage 0
     setSelectedId(pipeline?.stages.find((s) => s.order === 0)?.id ?? null);
@@ -171,6 +181,8 @@ export default function App() {
   async function runAll() {
     if (!pipeline) return;
     setBusy(true);
+    setRunStartAt(Date.now());
+    setNowTick(Date.now());
     setResults({});
     const { run_id } = await api.startRun({
       pipeline_id: pipeline.id,
@@ -186,6 +198,8 @@ export default function App() {
   async function rerun(order: number, from = false) {
     if (!runId) return runAll();
     setBusy(true);
+    setRunStartAt(Date.now());
+    setNowTick(Date.now());
     const url = from
       ? `/api/runs/${runId}/stages/${order}/rerun-from`
       : `/api/runs/${runId}/stages/${order}/rerun`;
@@ -307,6 +321,21 @@ export default function App() {
 
   const hasRun = runId != null;
 
+  // ── run progress (live signal) ──
+  const TERMINAL = ["ok", "validation_failed", "skipped", "error"];
+  const runStages = pipeline.stages
+    .filter((s) => s.order >= 1 && s.enabled)
+    .sort((a, b) => a.order - b.order);
+  const totalStages = runStages.length;
+  const doneCount = runStages.filter((s) =>
+    TERMINAL.includes(results[s.order]?.status as string)
+  ).length;
+  const runningStage = runStages.find((s) => results[s.order]?.status === "running");
+  const elapsed = runStartAt ? Math.max(0, Math.floor((nowTick - runStartAt) / 1000)) : 0;
+  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const pct = totalStages ? Math.round((doneCount / totalStages) * 100) : 0;
+  const showProgress = busy || (runStartAt != null && doneCount < totalStages);
+
   return (
     <div className="h-full flex flex-col">
       {/* ── top bar ── */}
@@ -419,6 +448,53 @@ export default function App() {
           🔒
         </button>
       </div>
+
+      {/* ── run progress banner (live signal) ── */}
+      {showProgress && (
+        <div className="px-4 py-2 border-b border-neutral-800 bg-neutral-900 shrink-0">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse shrink-0" />
+            <span className="font-medium text-sky-200">
+              {busy
+                ? runningStage
+                  ? `Running stage ${runningStage.order}/${totalStages} — ${runningStage.name}`
+                  : `Starting… (${doneCount}/${totalStages} done)`
+                : `Finished ${doneCount}/${totalStages} stages`}
+            </span>
+            <span className="text-neutral-400 tabular-nums">⏱ {mmss(elapsed)}</span>
+            <span className="text-neutral-500 text-xs">
+              · Pro-models take ~1–3 min/stage · live cost ${totalCost.toFixed(4)}
+            </span>
+            <div className="flex-1" />
+            <div className="flex items-center gap-1">
+              {runStages.map((s) => {
+                const st = results[s.order]?.status;
+                const color =
+                  st === "ok" || st === "validation_failed"
+                    ? "bg-emerald-500"
+                    : st === "error"
+                    ? "bg-red-500"
+                    : st === "running"
+                    ? "bg-sky-400 animate-pulse"
+                    : "bg-neutral-700";
+                return (
+                  <span
+                    key={s.order}
+                    title={`${s.order}. ${s.name}${st ? " — " + st : ""}`}
+                    className={`w-6 h-1.5 rounded-full ${color}`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+          <div className="mt-1.5 h-1 bg-neutral-800 rounded overflow-hidden">
+            <div
+              className="h-full bg-sky-500 transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── body ── */}
       <div className="flex-1 grid grid-cols-[260px_1fr_1fr] min-h-0">
