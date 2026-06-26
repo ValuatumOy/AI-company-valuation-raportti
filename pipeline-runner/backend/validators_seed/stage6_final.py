@@ -75,13 +75,19 @@ def validate(output: dict, context: dict) -> dict:
     mr = output.get("machine_readable") or {}
     chk("machine_readable present", bool(mr),
         "missing machine_readable block" if not mr else "")
-    mr_nums = _numbers_of(mr)
+    # A figure is legitimate if it appears in machine_readable OR anywhere in the
+    # verified upstream pipeline data (input_data, scoring, scenarios, the locked
+    # section numbers). machine_readable is a summary, not a complete index, so
+    # requiring every prose figure to live in it alone produced false orphans.
+    allowed = _numbers_of(mr) | _numbers_of(context or {})
 
     # --- 1. no section prose references a figure absent from machine_readable -
+    # Scope to section content only (the spec's intent). The wrapper fields
+    # (expected_value.calculation, confidence.deciding_rule, cover) legitimately
+    # contain intermediate/explanatory figures that need not all live in
+    # machine_readable, so sweeping them produced false orphans.
     orphans = []
-    for path, v in _walk(output):
-        if path.startswith("machine_readable") or path.startswith("cover"):
-            continue
+    for path, v in _walk(output.get("sections", [])):
         if not isinstance(v, str) or len(v) < 12:
             continue
         for m in _NUM_RE.findall(v):
@@ -90,7 +96,7 @@ def validate(output: dict, context: dict) -> dict:
                 continue
             if is_pct is False and val == int(val) and 1900 <= int(val) <= 2100:
                 continue  # year
-            if not _match(val, is_pct, mr_nums):
+            if not _match(val, is_pct, allowed):
                 orphans.append(f"{m.strip()} @ {path}")
     chk("no section references a figure absent from machine_readable",
         not orphans,

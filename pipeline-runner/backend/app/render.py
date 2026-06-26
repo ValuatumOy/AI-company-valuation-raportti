@@ -590,8 +590,12 @@ table.data-table tr:nth-child(even) td { background: #fafbfc; }
 .driver { display: flex; flex-direction: column; background: #fff; border: 1px solid #d6e4ff; border-radius: 5px; padding: 2mm 3mm; min-width: 28mm; }
 .driver-k { font-size: 8pt; color: #666; }
 .driver-v { font-size: 11pt; font-weight: 700; }
-.scenario-subtables { display: flex; gap: 5mm; }
-.scenario-subtables .subtable { flex: 1 1 0; min-width: 0; }
+/* Stack the two sub-tables full-width — perusluvut/avainluvut often have 5-6
+   columns and overflow/clip when forced side-by-side on A4. */
+.scenario-subtables { display: block; }
+.scenario-subtables .subtable { margin-top: 3mm; }
+.scenario-panel table.data-table { table-layout: fixed; font-size: 8.5pt; }
+.scenario-panel table.data-table th, .scenario-panel table.data-table td { word-break: break-word; }
 .unknown-block { color: #cf222e; font-size: 9pt; }
 """
 

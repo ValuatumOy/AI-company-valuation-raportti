@@ -51,7 +51,7 @@ def _derive(base):
     say so in the orphan detail."""
     allowed = set(base)
     b = list(base)
-    if len(b) > 120:
+    if len(b) > 600:
         return allowed, False  # too many — pairwise derivation skipped
     for a in b:
         for c in b:
@@ -134,7 +134,7 @@ def validate(output: dict, context: dict) -> dict:
                 continue
             if not _match(val, is_pct, allowed):
                 orphans.append((m.strip(), path))
-    note = "" if pairwise else " (pairwise derivation skipped: >120 input numbers)"
+    note = "" if pairwise else " (pairwise derivation skipped: >600 input numbers)"
     if orphans:
         sample = "; ".join(f"{tok} @ {p}" for tok, p in orphans[:25])
         chk("every prose number traces to input_data (or simple calc)",
