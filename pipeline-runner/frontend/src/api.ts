@@ -148,10 +148,16 @@ export async function streamRun(
     const { done, value } = await reader.read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
-    const parts = buf.split("\n\n");
+    // SSE frames are separated by a blank line. sse-starlette emits CRLF
+    // (\r\n\r\n); the spec also allows \n\n and \r\r. Split on all of them —
+    // splitting on "\n\n" alone never matches \r\n\r\n, which silently drops
+    // every event and hangs the caller (the "stuck on Fetching…" bug).
+    const parts = buf.split(/\r\n\r\n|\n\n|\r\r/);
     buf = parts.pop() || "";
     for (const part of parts) {
-      const line = part.split("\n").find((l) => l.startsWith("data:"));
+      const line = part
+        .split(/\r\n|\n|\r/)
+        .find((l) => l.startsWith("data:"));
       if (line) {
         try {
           onEvent(JSON.parse(line.slice(5).trim()));
