@@ -49,8 +49,8 @@ def _stages():
         },
         {
             "order": 2,
-            "name": "Vaihe 2 - Profiili, markkina ja kilpailijat",
-            "model": "deepseek/deepseek-v4-flash",
+            "name": "Vaihe 2 - Profiili + kilpailijat",
+            "model": "deepseek/deepseek-v4-pro",
             "prompt_template": _load_prompt("2_profiili_kilpailijat.txt"),
             "expects_json": True,
             "validator_code": None,
@@ -61,7 +61,7 @@ def _stages():
         },
         {
             "order": 3,
-            "name": "Vaihe 3 - Pisteytys ja numero-osiot",
+            "name": "Vaihe 3 - Pisteytys + numero-osiot",
             "model": "deepseek/deepseek-v4-flash",
             "prompt_template": _load_prompt("3_pisteytys_numero_osiot.txt"),
             "expects_json": True,
@@ -73,7 +73,7 @@ def _stages():
         },
         {
             "order": 4,
-            "name": "Vaihe 4 - Skenaariot ja odotusarvo",
+            "name": "Vaihe 4 - Skenaariot",
             "model": "deepseek/deepseek-v4-pro",
             "prompt_template": _load_prompt("4_skenaariot.txt"),
             "expects_json": True,
@@ -103,7 +103,7 @@ def _stages():
         },
         {
             "order": 6,
-            "name": "Vaihe 6 - Tiivistelmä ja kokoaja",
+            "name": "Vaihe 6 - Tiivistelmä + kokoaja",
             "model": "deepseek/deepseek-v4-pro",
             "prompt_template": _load_prompt("6_tiivistelma.txt"),
             "expects_json": True,
@@ -131,6 +131,23 @@ def _pipeline_needs_auto_reseed(pipeline):
     if any(order not in by_order for order in range(0, 7)):
         return True
     return any(_placeholder_stage(s) for s in by_order.values())
+
+
+def ensure_current_defaults():
+    """Repair stale default pipelines before the UI reads them."""
+    db.init_db()
+    pipelines = store.list_pipelines()
+    if not pipelines:
+        return reseed_defaults(force=True)
+
+    pipeline = next(
+        (p for p in pipelines if p.get("name") == DEFAULT_PIPELINE_NAME),
+        pipelines[0],
+    )
+    if _pipeline_needs_auto_reseed(pipeline):
+        return reseed_defaults(force=True)
+
+    return {"ok": True, "created": 0, "updated": 0, "pipeline": pipeline}
 
 
 def reseed_defaults(force=False):
@@ -177,6 +194,6 @@ def ensure_seeded():
     if row:
         pipeline = store.get_pipeline(row["id"])
         if pipeline and _pipeline_needs_auto_reseed(pipeline):
-            reseed_defaults(force=False)
+            reseed_defaults(force=True)
         return
     reseed_defaults(force=True)

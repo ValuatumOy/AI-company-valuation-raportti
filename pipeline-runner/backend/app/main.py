@@ -68,6 +68,7 @@ async def _startup():
 
 @app.get("/api/pipelines")
 def get_pipelines():
+    seed.ensure_current_defaults()
     return store.list_pipelines()
 
 
@@ -83,6 +84,7 @@ def post_reseed():
 
 @app.get("/api/pipelines/{pid}")
 def get_pipeline(pid: str):
+    seed.ensure_current_defaults()
     p = store.get_pipeline(pid)
     if not p:
         raise HTTPException(404, "pipeline not found")
