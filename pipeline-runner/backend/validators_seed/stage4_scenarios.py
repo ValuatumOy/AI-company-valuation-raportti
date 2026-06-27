@@ -131,8 +131,13 @@ def validate(output: dict, context: dict) -> dict:
     scoring = (context or {}).get("scoring", {}) or {}
     wbc = _num(scoring.get("weighted_base_case_teur")) if isinstance(scoring, dict) else None
     if rbc is not None and wbc is not None:
-        chk("realistic_base_case_teur == scoring.weighted_base_case_teur (±1 tEUR)",
-            abs(rbc - wbc) <= 1.0, f"stage4 {rbc} vs stage3 weighted {wbc}")
+        # The realistic base case is floored at 0 (equity value can't go below
+        # zero), so compare against the FLOORED weighted base case — a negative
+        # weighted value of -4070 legitimately floors to a realistic 0.
+        floored = max(0.0, wbc)
+        chk("realistic_base_case_teur == floored stage-3 weighted base case (±1 tEUR)",
+            abs(rbc - floored) <= 1.0,
+            f"stage4 {rbc} vs floored weighted {floored} (raw {wbc})")
     else:
         chk("realistic_base_case anchors to stage-3 weighted base case", True,
             "skipped: scoring.weighted_base_case_teur not available")
