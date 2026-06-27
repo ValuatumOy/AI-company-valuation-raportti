@@ -256,6 +256,21 @@ def test_deliver_gate_blocks_unhealthy_run_unless_forced():
         assert c.get(f"/api/runs/{rid}/report.html?force=1").status_code == 200  # override
 
 
+def test_delete_run_removes_run_and_results():
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    pid = store.list_pipelines()[0]["id"]
+    rid = store.create_run(pid, {"meta": {"company_name": "Del"}}, True)
+    store.upsert_result(rid, {"order": 1, "name": "s1", "status": "error"})
+    with TestClient(main.app) as c:
+        assert c.get(f"/api/runs/{rid}").status_code == 200
+        assert c.delete(f"/api/runs/{rid}").json()["ok"] is True
+        assert c.get(f"/api/runs/{rid}").status_code == 404
+    assert store.get_run(rid) is None
+
+
 @pytest.mark.skipif(not render.pdf_available(), reason="no local Chromium")
 def test_golden_pdf_has_no_blank_pages(tmp_path):
     rep = _golden()

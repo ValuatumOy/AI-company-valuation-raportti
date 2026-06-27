@@ -110,6 +110,8 @@ export const api = {
 
   runs: () => req("/api/runs").then((r) => j<any[]>(r)),
   run: (id: string) => req(`/api/runs/${id}`).then((r) => j<Run>(r)),
+  deleteRun: (id: string) =>
+    req(`/api/runs/${id}`, { method: "DELETE" }).then((r) => j<{ ok: boolean }>(r)),
 
   // Saved companies: remembered name + FID + last fetched data, for instant reuse.
   companies: () => req("/api/companies").then((r) => j<SavedCompany[]>(r)),

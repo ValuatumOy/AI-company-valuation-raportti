@@ -144,6 +144,13 @@ def set_run_status(rid, status):
     db.execute("UPDATE runs SET status=? WHERE id=?", (status, rid))
 
 
+def delete_run(rid):
+    """Delete a run and its stage results. Explicit child delete so it works on
+    SQLite (where FK cascade needs PRAGMA) and Postgres alike."""
+    db.execute("DELETE FROM stage_results WHERE run_id=?", (rid,))
+    db.execute("DELETE FROM runs WHERE id=?", (rid,))
+
+
 def reset_stale_runs():
     """On startup, any run still marked 'running' is an orphan from a previous
     process (a deploy/restart killed its background task). Flip to error so the

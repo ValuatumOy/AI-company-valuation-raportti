@@ -215,14 +215,19 @@ async def _execute_stage(stage, context, run_input_data, identifier, params):
 
     if stage["expects_json"]:
         parsed = openrouter.extract_json(r["text"])
-        # Truncated output (finish_reason='length') is the #1 intermittent
-        # failure on big companies — retry once with more room before giving up.
-        if parsed is None and r.get("finish_reason") == "length":
+        # Retry once on a truncated/unparseable response. 'length' = hit the
+        # token cap, so give it more room. 'error' = the provider returned a
+        # truncated/aborted HTTP 200 (seen with z-ai/glm-5.2) — transient, retry
+        # at the same size. Both are the #1 intermittent failures on big runs.
+        if parsed is None and r.get("finish_reason") in ("length", "error"):
+            retry_max = int(stage["max_tokens"])
+            if r.get("finish_reason") == "length":
+                retry_max = min(retry_max * 2, 120000)
             try:
                 r2 = await openrouter.chat(
                     model=stage["model"], prompt=prompt,
                     temperature=stage["temperature"],
-                    max_tokens=min(int(stage["max_tokens"]) * 2, 60000),
+                    max_tokens=retry_max,
                     reasoning_effort=stage["reasoning_effort"],
                     expects_json=stage["expects_json"],
                     web_search=stage.get("web_search", False),

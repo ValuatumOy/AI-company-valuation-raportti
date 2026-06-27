@@ -414,6 +414,16 @@ def get_run(rid: str):
     return r
 
 
+@app.delete("/api/runs/{rid}")
+def delete_run(rid: str):
+    # Don't delete a run whose background task is still executing.
+    task = _RUN_TASKS.get(rid)
+    if task and not task.done():
+        raise HTTPException(409, "run is still executing")
+    store.delete_run(rid)
+    return {"ok": True}
+
+
 # ---- compare models on a single stage --------------------------------------
 
 @app.post("/api/runs/{rid}/stages/{order}/compare")

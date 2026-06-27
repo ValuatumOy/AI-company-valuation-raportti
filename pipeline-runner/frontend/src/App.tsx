@@ -36,6 +36,7 @@ export default function App() {
   const [reportCaps, setReportCaps] = useState({ generator: false, pdf: false });
   const [reportBusy, setReportBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [showRuns, setShowRuns] = useState(false);
   const [needToken, setNeedToken] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
 
@@ -323,6 +324,19 @@ export default function App() {
     setPipeline(p);
   }
 
+  async function removeRuns(ids: string[]) {
+    for (const id of ids) {
+      try {
+        await api.deleteRun(id);
+      } catch (e: any) {
+        alert("Poisto epäonnistui:\n" + (e?.message || e));
+      }
+    }
+    const fresh = await api.runs().catch(() => []);
+    setRuns(fresh);
+    if (runId && ids.includes(runId)) newRun();
+  }
+
   async function loadRun(rid: string) {
     setRunId(rid);
     await refreshRun(rid);
@@ -452,6 +466,14 @@ export default function App() {
             </option>
           ))}
         </select>
+
+        <button
+          onClick={() => setShowRuns(true)}
+          title="Hallitse ja poista ajoja"
+          className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
+        >
+          🗑 Manage
+        </button>
 
         <button
           onClick={() => setShowCosts(true)}
@@ -625,6 +647,98 @@ export default function App() {
           }}
         />
       )}
+      {showRuns && (
+        <RunsOverlay
+          runs={runs}
+          currentId={runId}
+          onLoad={(id) => {
+            setShowRuns(false);
+            loadRun(id);
+          }}
+          onDelete={(ids) => removeRuns(ids)}
+          onClose={() => setShowRuns(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function RunsOverlay({
+  runs,
+  currentId,
+  onLoad,
+  onDelete,
+  onClose,
+}: {
+  runs: any[];
+  currentId: string | null;
+  onLoad: (id: string) => void;
+  onDelete: (ids: string[]) => void;
+  onClose: () => void;
+}) {
+  const bad = runs.filter((r) => r.status !== "ok");
+  const dot = (s: string) =>
+    s === "ok" ? "bg-emerald-500" : s === "running" ? "bg-amber-400" : "bg-red-500";
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-6 z-50" onClick={onClose}>
+      <div
+        className="bg-neutral-900 border border-neutral-700 rounded-lg w-[640px] max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center px-4 py-3 border-b border-neutral-800 shrink-0">
+          <span className="text-sm font-semibold text-neutral-200">Ajohistoria ({runs.length})</span>
+          <div className="flex items-center gap-2">
+            {bad.length > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm(`Poista ${bad.length} keskeneräistä / virheellistä ajoa?`))
+                    onDelete(bad.map((r) => r.id));
+                }}
+                className="text-xs px-2 py-1 rounded bg-red-900/70 hover:bg-red-800 text-red-100"
+              >
+                Poista kaikki epäonnistuneet ({bad.length})
+              </button>
+            )}
+            <button onClick={onClose} className="text-neutral-400 hover:text-white text-lg leading-none">
+              ✕
+            </button>
+          </div>
+        </div>
+        <div className="overflow-auto px-2 py-2">
+          {runs.length === 0 && (
+            <div className="text-xs text-neutral-500 italic p-4">Ei ajoja.</div>
+          )}
+          {runs.map((r) => (
+            <div
+              key={r.id}
+              className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${
+                r.id === currentId ? "bg-neutral-800" : "hover:bg-neutral-850"
+              }`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dot(r.status)}`} />
+              <span className="flex-1 min-w-0 truncate text-neutral-300">
+                {r.company_name ? `${r.company_name} · ` : ""}
+                {r.created_at?.slice(0, 16)} · {r.status} · ${r.total_cost_usd?.toFixed(4)}
+              </span>
+              <button
+                onClick={() => onLoad(r.id)}
+                className="px-2 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300"
+              >
+                Avaa
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm("Poista tämä ajo?")) onDelete([r.id]);
+                }}
+                title="Poista"
+                className="px-1.5 py-0.5 rounded text-neutral-500 hover:text-red-400"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
