@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, getToken, setToken } from "./api";
 import type { ModelInfo, Pipeline, Run, Stage, StageResult } from "./types";
 import { StageList } from "./components/StageList";
@@ -37,6 +37,7 @@ export default function App() {
   const [reportBusy, setReportBusy] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showRuns, setShowRuns] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [needToken, setNeedToken] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
 
@@ -411,137 +412,124 @@ export default function App() {
     <div className="h-full flex flex-col">
       {/* ── top bar ── */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-800 bg-neutral-950 shrink-0">
-        <span className="font-semibold text-sm text-neutral-300">{pipeline.name}</span>
+        <span className="font-semibold text-sm text-neutral-300 mr-1 hidden md:inline">
+          {pipeline.name}
+        </span>
 
-        {/* New Run — most important action */}
+        {/* primary workflow: new run + run all */}
         <button
           onClick={newRun}
           disabled={busy}
           className="px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-sm font-semibold disabled:opacity-40"
-          title="Clear current run and start fresh with a new company"
+          title="Tyhjennä ja aloita uudella yrityksellä"
         >
-          ✚ New Run
+          ✚ Uusi
         </button>
-
-        {/* Run all */}
         <button
           disabled={busy || !inputData}
           onClick={runAll}
           className="px-3 py-1.5 rounded bg-sky-700 hover:bg-sky-600 text-sm font-medium disabled:opacity-40"
-          title={!inputData ? "Fetch company data first (Stage 0)" : "Run all enabled stages"}
+          title={!inputData ? "Hae ensin yrityksen tiedot (Vaihe 0)" : "Aja kaikki vaiheet"}
         >
-          {busy ? "Running…" : "▶ Run all stages"}
+          {busy ? "Ajetaan…" : "▶ Luo raportti"}
         </button>
-
-        <label className="flex items-center gap-1 text-xs text-neutral-400">
-          <input
-            type="checkbox"
-            checked={stopOnFailure}
-            onChange={(e) => setStopOnFailure(e.target.checked)}
-            className="accent-sky-500"
-          />
-          Stop on failure
-        </label>
 
         <div className="flex-1" />
 
-        {/* cost */}
+        {/* run context: cost + history */}
         {hasRun && (
-          <span className="text-xs text-emerald-300 font-mono">
-            ${totalCost.toFixed(5)}
-          </span>
+          <span className="text-xs text-emerald-300 font-mono">${totalCost.toFixed(4)}</span>
         )}
-
-        {/* history */}
         <select
           onChange={(e) => e.target.value && loadRun(e.target.value)}
           value={runId ?? ""}
-          className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs max-w-[220px]"
+          className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs max-w-[200px]"
         >
-          <option value="">— run history ({runs.length}) —</option>
+          <option value="">— historia ({runs.length}) —</option>
           {runs.map((r) => (
             <option key={r.id} value={r.id}>
               {r.company_name ? `${r.company_name} · ` : ""}
-              {r.created_at?.slice(0, 16)} · {r.status} · ${r.total_cost_usd?.toFixed(4)}
+              {r.created_at?.slice(0, 16)} · {r.status}
             </option>
           ))}
         </select>
 
-        <button
-          onClick={() => setShowRuns(true)}
-          title="Hallitse ja poista ajoja"
-          className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
-        >
-          🗑 Manage
-        </button>
-
-        <button
-          onClick={() => setShowCosts(true)}
-          className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
-        >
-          💰 Costs
-        </button>
-
-        {/* reports */}
+        {/* report actions — grouped, only meaningful once a run exists */}
         {reportCaps.generator && (
-          <>
+          <div className="flex items-center gap-1.5 pl-2 ml-1 border-l border-neutral-800">
             {hasRun && reportIssues.length > 0 && (
               <span
                 title={"Tarkista ennen toimitusta:\n• " + reportIssues.join("\n• ")}
                 className="text-xs px-2 py-1 rounded bg-red-900/60 text-red-200 font-medium"
               >
-                ⚠ {reportIssues.length} {reportIssues.length === 1 ? "ongelma" : "ongelmaa"} — tarkista
+                ⚠ {reportIssues.length} — tarkista
               </span>
             )}
             <button
               disabled={!runId || reportBusy}
               onClick={openPreview}
               className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40"
-              title="Esikatsele raportti sovelluksessa ennen toimitusta"
+              title="Esikatsele raportti sovelluksessa"
             >
-              👁 Preview
-            </button>
-            <button
-              disabled={!runId || reportBusy}
-              onClick={() => openReport("html")}
-              className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40"
-            >
-              📄 HTML
+              👁 Esikatsele
             </button>
             <button
               disabled={!runId || reportBusy || !reportCaps.pdf}
               onClick={() => openReport("pdf")}
-              title={!reportCaps.pdf ? "Chrome not found — PDF unavailable" : ""}
+              title={!reportCaps.pdf ? "Chrome puuttuu — PDF ei käytettävissä" : "Lataa PDF"}
               className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40"
             >
               📄 PDF
             </button>
-          </>
+          </div>
         )}
 
-        <button
-          onClick={reseedDefaults}
-          className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
-          title="Reset stage prompts to repo defaults"
-        >
-          Reset prompts
-        </button>
-
-        <button
-          onClick={() => api.refreshModels().then(setModels)}
-          className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
-          title="Refresh model list from OpenRouter"
-        >
-          ⟳ models ({models.length})
-        </button>
-
-        <button
-          onClick={() => { setTokenDraft(getToken()); setNeedToken(true); }}
-          className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
-          title="Change access token"
-        >
-          🔒
-        </button>
+        {/* everything admin tucked behind a single menu */}
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen((o) => !o)}
+            title="Lisää"
+            className="text-sm px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700"
+          >
+            ⋯
+          </button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div className="absolute right-0 mt-1 w-60 bg-neutral-900 border border-neutral-700 rounded-lg shadow-xl z-50 py-1 text-sm">
+                <MenuItem onClick={() => { setShowRuns(true); setMenuOpen(false); }}>
+                  🗑 Hallitse ajoja
+                </MenuItem>
+                <MenuItem onClick={() => { openReport("html"); setMenuOpen(false); }} disabled={!runId || reportBusy}>
+                  📄 Avaa HTML-raportti
+                </MenuItem>
+                <MenuItem onClick={() => { setShowCosts(true); setMenuOpen(false); }}>
+                  💰 Kustannukset
+                </MenuItem>
+                <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-neutral-800 cursor-pointer text-neutral-200">
+                  <input
+                    type="checkbox"
+                    checked={stopOnFailure}
+                    onChange={(e) => setStopOnFailure(e.target.checked)}
+                    className="accent-sky-500"
+                  />
+                  Pysäytä virheeseen
+                </label>
+                <div className="my-1 border-t border-neutral-800" />
+                <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-500">Ylläpito</div>
+                <MenuItem onClick={() => { reseedDefaults(); setMenuOpen(false); }}>
+                  ↺ Palauta oletuspromptit
+                </MenuItem>
+                <MenuItem onClick={() => { api.refreshModels().then(setModels); setMenuOpen(false); }}>
+                  ⟳ Päivitä mallit ({models.length})
+                </MenuItem>
+                <MenuItem onClick={() => { setTokenDraft(getToken()); setNeedToken(true); setMenuOpen(false); }}>
+                  🔒 Vaihda tunnus
+                </MenuItem>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* ── run progress banner (live signal) ── */}
@@ -660,6 +648,26 @@ export default function App() {
         />
       )}
     </div>
+  );
+}
+
+function MenuItem({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full text-left px-3 py-1.5 hover:bg-neutral-800 text-neutral-200 disabled:opacity-40 disabled:hover:bg-transparent"
+    >
+      {children}
+    </button>
   );
 }
 
