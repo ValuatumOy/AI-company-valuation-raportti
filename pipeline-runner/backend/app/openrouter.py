@@ -93,27 +93,41 @@ async def chat(
         # https://openrouter.ai/docs/guides/features/plugins/web-search
         payload["plugins"] = [{"id": "web"}]
 
-    # Retry transient failures (429 rate limit, 5xx, network/timeout) so a single
-    # blip doesn't kill a 6-stage run and force the operator to babysit it.
-    r = None
-    for attempt in range(3):
+    # Retry transient failures so a single blip doesn't kill a 6-stage run:
+    # 429 rate limit, 5xx, network/timeout, AND a 200 carrying a malformed or
+    # truncated body (z-ai/glm-5.2 occasionally returns one — that crashed stage 3
+    # with "Expecting value: line N column 1").
+    body = None
+    for attempt in range(4):
+        last = attempt == 3
         try:
             async with httpx.AsyncClient(timeout=600) as client:
                 r = await client.post(
                     f"{BASE}/chat/completions", headers=_headers(), json=payload
                 )
-            if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+            if r.status_code in (429, 500, 502, 503, 504):
+                if last:
+                    raise RuntimeError(f"OpenRouter {r.status_code}: {r.text[:800]}")
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if r.status_code >= 400:
+                raise RuntimeError(f"OpenRouter {r.status_code}: {r.text[:800]}")
+            try:
+                body = r.json()
+            except Exception:
+                if last:
+                    raise RuntimeError(
+                        "OpenRouter palautti virheellisen/katkenneen vastauksen "
+                        f"(ei kelvollista JSONia): {(r.text or '')[:500]}"
+                    )
                 await asyncio.sleep(2 ** attempt)
                 continue
             break
         except (httpx.TimeoutException, httpx.TransportError):
-            if attempt < 2:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            raise
-    if r.status_code >= 400:
-        raise RuntimeError(f"OpenRouter {r.status_code}: {r.text[:800]}")
-    body = r.json()
+            if last:
+                raise
+            await asyncio.sleep(2 ** attempt)
+            continue
     choice = (body.get("choices") or [{}])[0]
     msg = choice.get("message", {}) or {}
     text = msg.get("content") or ""
