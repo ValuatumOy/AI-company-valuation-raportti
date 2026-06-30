@@ -717,9 +717,8 @@ def _footer():
 def _cover(report, derived):
     cover = report.get("cover") or {}
     meta = report.get("meta") or {}
-    hv = cover.get("headline_value")
-    bcv = cover.get("base_case_value")
-    label = cover.get("headline_label") or "Skenaarioiden odotusarvo"
+    hv = cover.get("headline_value")    # probability-weighted expected value
+    bcv = cover.get("base_case_value")  # realistic base case (DCF/EVA-based)
     rng = derived.get("range")
     range_html = ""
     if rng:
@@ -730,9 +729,34 @@ def _cover(report, derived):
                  f'{_esc(meta.get("report_date"))} · Valuatum Oy' if meta.get("report_date") else ""]
     meta_lines = "<br>".join(x for x in meta_bits if x)
     conf = report.get("confidence") or {}
-    base_block = (f'<div><div class="cv-big" style="font-size:30pt">'
-                  f'<span class="cap">Realistinen base case</span>{html.escape(_short(bcv))}</div></div>'
-                  if bcv else "")
+
+    # Lead with the realistic base case (method-based, stable). The probability-
+    # weighted expected value is supporting context, with a one-line note when the
+    # two differ — so "expected lower than base case" never reads as a mistake.
+    hero_val = bcv if bcv not in (None, "") else hv
+    hero_label = ("Realistinen arvo (base case)" if bcv not in (None, "")
+                  else (cover.get("headline_label") or "Arvonmäärityksen tulos"))
+    base_num = _to_num(_short(bcv)) if bcv not in (None, "") else None
+    exp_num = _to_num(_short(hv)) if hv not in (None, "") else None
+
+    sec_html = ""
+    if hv not in (None, "") and (base_num is None or exp_num is None
+                                 or abs((exp_num or 0) - (base_num or 0)) > 1):
+        sec_html = (f'<div class="cv-big" style="font-size:26pt">'
+                    f'<span class="cap">Skenaarioilla painotettu odotusarvo</span>'
+                    f'{html.escape(_short(hv))}</div>')
+    note = ""
+    if base_num is not None and exp_num is not None:
+        gap = max(1.0, 0.02 * abs(base_num))
+        if exp_num > base_num + gap:
+            note = ("Skenaarioilla painotettu odotusarvo on base casea korkeampi "
+                    "optimistisen skenaarion vuoksi — arvo nojaa onnistuvaan kasvuun.")
+        elif exp_num < base_num - gap:
+            note = ("Skenaarioilla painotettu odotusarvo on base casea matalampi, "
+                    "koska pessimistinen skenaario painaa todennäköisyyspainotettua keskiarvoa.")
+    note_html = f'<div class="cv-note">{_esc(note)}</div>' if note else ""
+    second_block = sec_html + note_html
+
     return (
         '<section class="page cover">'
         f'<div class="cv-top">{_brandmark_cover()}<span class="cv-tag">Equity Research · AI</span></div>'
@@ -741,11 +765,12 @@ def _cover(report, derived):
         f'<h1>{_esc(meta.get("company_name"))}</h1>'
         f'<div class="cv-meta">{meta_lines}</div></div>'
         '<div class="cv-headline">'
-        f'<div class="cv-big"><span class="cap">{_esc(label)}</span>{html.escape(_short(hv))}</div>'
+        f'<div class="cv-big"><span class="cap">{_esc(hero_label)}</span>{html.escape(_short(hero_val))}</div>'
         f'{range_html}</div>'
-        f'<div class="cv-headline" style="border-top:none;padding-top:14px;margin-top:14px">{base_block}</div>'
-        f'{_conf_pills(conf.get("level"), conf.get("deciding_rule"))}'
-        '</section>'
+        + (f'<div class="cv-headline" style="border-top:none;padding-top:14px;margin-top:14px">'
+           f'{second_block}</div>' if second_block else "")
+        + _conf_pills(conf.get("level"), conf.get("deciding_rule"))
+        + '</section>'
     )
 
 
@@ -1093,6 +1118,7 @@ table.tbl tbody tr:nth-child(even) td{ background:#FAFBFA; }
   font-variant-numeric:tabular-nums lining-nums; letter-spacing:-.02em; white-space:nowrap; }
 .cv-big .cap{ display:block; font-family:var(--sans); font-size:8.5pt; font-weight:700; color:var(--gray);
   text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; white-space:normal; }
+.cv-note{ margin-top:10px; font-size:9pt; color:var(--gray); max-width:160mm; line-height:1.45; }
 
 /* scenario panels */
 .scen{ border:1px solid var(--line-strong); border-top:3px solid var(--green); padding:11px 13px; margin:11px 0; page-break-inside:avoid; }
