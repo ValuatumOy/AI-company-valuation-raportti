@@ -65,8 +65,11 @@ def pdf_available():
 # --------------------------------------------------------------------------- #
 _VAR_RE = re.compile(r"\{\{[^}]*\}\}")
 _PLACEHOLDER_RE = re.compile(r"\[\[[^\]]*\]\]")
-_INPUT_TOK = re.compile(r"\[?\binput[_ ]?data\b\]?", re.IGNORECASE)
-_ENRICH_TOK = re.compile(r"\[?\benrichment\b\]?", re.IGNORECASE)
+# Capture any trailing Finnish case suffix (input_datassa, input_datan, ...) so
+# the inflected token doesn't slip past a \b boundary. The suffix carries over to
+# the replacement noun, which also ends in -data, so it stays grammatical.
+_INPUT_TOK = re.compile(r"\[?\binput[_ ]?data([a-zäöå]*)\]?", re.IGNORECASE)
+_ENRICH_TOK = re.compile(r"\[?\benrichment[a-zäöå]*\]?", re.IGNORECASE)
 
 
 def _clean(s):
@@ -76,7 +79,7 @@ def _clean(s):
     s = str(s)
     s = _VAR_RE.sub("", s)
     s = _PLACEHOLDER_RE.sub("", s)
-    s = _INPUT_TOK.sub("tilinpäätösdata", s)
+    s = _INPUT_TOK.sub(lambda m: "tilinpäätösdata" + m.group(1), s)
     s = _ENRICH_TOK.sub("julkinen lähde", s)
     return s
 
