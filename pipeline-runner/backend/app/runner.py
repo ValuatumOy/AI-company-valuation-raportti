@@ -138,8 +138,43 @@ def _contribute(context, stage, output):
             )
 
 
-async def _execute_stage(stage, context, run_input_data, identifier, params):
-    """Run one stage. Returns a result dict (not yet persisted)."""
+def _failure_feedback(res):
+    """Turn a failed stage result into a concrete correction instruction: the
+    exact checks that failed (or the error), so the retry model knows what to fix
+    instead of blindly re-rolling the same prompt."""
+    parts = []
+    vr = res.get("validator_report") or {}
+    fails = [c for c in vr.get("checks", []) if not c.get("passed")]
+    for c in fails[:12]:
+        parts.append(f"- {c.get('name')}: {c.get('detail')}")
+    if not fails and res.get("error_message"):
+        parts.append("- " + str(res["error_message"])[:500])
+    return "\n".join(parts)
+
+
+def _correction_prompt(base_prompt, correction):
+    """Append a targeted self-correction instruction + the model's own previous
+    output to the original prompt."""
+    prev = correction.get("previous")
+    prev_str = (json.dumps(prev, ensure_ascii=False, indent=2)
+                if not isinstance(prev, str) else prev)
+    return (
+        base_prompt
+        + "\n\n================ KORJAUSOHJE ================\n"
+        + "Tuotit jo vastauksen, mutta se ei läpäissyt automaattisia tarkistuksia. "
+        + "Korjaa VAIN alla luetellut ongelmat. Älä muuta mitään muuta. Palauta "
+        + "täsmälleen sama JSON-rakenne korjattuna ja täydellisenä.\n\n"
+        + "Havaitut ongelmat:\n" + (correction.get("feedback") or "(ei eritelty)")
+        + "\n\nEdellinen vastauksesi (korjattavana):\n"
+        + (prev_str or "(tyhjä)")[:24000]
+    )
+
+
+async def _execute_stage(stage, context, run_input_data, identifier, params,
+                         correction=None):
+    """Run one stage. Returns a result dict (not yet persisted). When `correction`
+    is given, the prompt is augmented with the prior failure + output so the model
+    fixes the specific issue (feedback-driven self-correction)."""
     started = _now()
     t0 = time.time()
     res = {
@@ -185,6 +220,9 @@ async def _execute_stage(stage, context, run_input_data, identifier, params):
         res["latency_ms"] = int((time.time() - t0) * 1000)
         res["finished_at"] = _now()
         return res
+
+    if correction:
+        prompt = _correction_prompt(prompt, correction)
 
     try:
         r = await openrouter.chat(
@@ -343,14 +381,33 @@ async def run_stages(run, stages, only=None, from_order=None):
                 and s["order"] >= 1
                 and "variable {{" not in (res.get("error_message") or "")
                 and not _spend_cap_exceeded(rid)):
+            # Feedback-driven self-correction: hand the model back its own output
+            # plus the exact checks it failed, and ask it to fix only those.
+            correction = {
+                "feedback": _failure_feedback(res),
+                "previous": (res.get("parsed_json")
+                             if res.get("parsed_json") is not None
+                             else res.get("raw_response")),
+            }
             store.upsert_result(rid, {**_base(s), "status": "running",
                                       "started_at": _now()})
             yield _ev("stage", order=s["order"], status="running",
                       name=s["name"], retry=True)
-            retry = await _execute_stage(s, context, input_data, identifier, params)
+            retry = await _execute_stage(s, context, input_data, identifier,
+                                         params, correction=correction)
             store.add_run_cost(rid, retry.get("cost_usd", 0.0))
             rank = {"ok": 2, "validation_failed": 1, "error": 0}
             if rank.get(retry["status"], 0) > rank.get(res["status"], 0):
+                # Record what was auto-fixed so it stays auditable in the stage's
+                # checklist even though the stage now passes.
+                vr = retry.get("validator_report") or {"passed": True, "checks": []}
+                vr.setdefault("checks", []).insert(0, {
+                    "name": "🔧 Automaattinen korjaus",
+                    "passed": True,
+                    "detail": "Vaihe korjattiin automaattisesti. Alkuperäinen "
+                              "ongelma:\n" + (correction["feedback"] or "(ei eritelty)"),
+                })
+                retry["validator_report"] = vr
                 res = retry
 
         store.upsert_result(rid, res)

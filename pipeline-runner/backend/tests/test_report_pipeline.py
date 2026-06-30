@@ -244,13 +244,19 @@ def test_self_heal_retries_failed_stage(monkeypatch):
     pid = store.list_pipelines()[0]["id"]
     rid = store.create_run(pid, {"meta": {"company_name": "X"}}, False)
     p = store.get_pipeline(pid)
-    calls = {"n": 0}
+    calls = {"n": 0, "correction": None}
 
-    async def fake_exec(stage, ctx, inp, ident, params):
+    async def fake_exec(stage, ctx, inp, ident, params, correction=None):
         calls["n"] += 1
-        st = "validation_failed" if calls["n"] == 1 else "ok"
-        return {**runner._base(stage), "status": st, "parsed_json": {"scoring": {}},
-                "validator_passed": st == "ok", "cost_usd": 0.0,
+        if calls["n"] == 1:
+            return {**runner._base(stage), "status": "validation_failed",
+                    "parsed_json": {"scoring": {}}, "validator_passed": False,
+                    "validator_report": {"passed": False, "checks": [
+                        {"name": "missing X", "passed": False, "detail": "needs Y"}]},
+                    "cost_usd": 0.0, "tokens_prompt": 0, "tokens_completion": 0}
+        calls["correction"] = correction  # retry must carry the failure feedback
+        return {**runner._base(stage), "status": "ok", "parsed_json": {"scoring": {}},
+                "validator_passed": True, "cost_usd": 0.0,
                 "tokens_prompt": 0, "tokens_completion": 0}
 
     monkeypatch.setattr(runner, "_execute_stage", fake_exec)
@@ -262,8 +268,13 @@ def test_self_heal_retries_failed_stage(monkeypatch):
 
     asyncio.run(drive())
     assert calls["n"] == 2  # failed once, retried
+    # the retry was feedback-driven: it received the failing check as correction
+    assert calls["correction"] and "missing X" in calls["correction"]["feedback"]
     s3 = [r for r in store.get_run(rid)["results"] if r["order"] == 3][0]
-    assert s3["status"] == "ok"  # self-healed on the retry
+    assert s3["status"] == "ok"  # self-healed
+    # the auto-fix is recorded in the checklist
+    names = [c["name"] for c in (s3.get("validator_report") or {}).get("checks", [])]
+    assert any("Automaattinen korjaus" in n for n in names)
 
 
 def test_deliver_gate_blocks_unhealthy_run_unless_forced():
