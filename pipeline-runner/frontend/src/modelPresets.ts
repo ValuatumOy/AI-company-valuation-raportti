@@ -11,6 +11,7 @@ export const MODEL_GROUPS: { group: string; items: ModelPreset[] }[] = [
   {
     group: "Claude",
     items: [
+      { id: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5" },
       { id: "anthropic/claude-opus-4.8", label: "Claude Opus 4.8" },
       { id: "anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6" },
       { id: "anthropic/claude-haiku-4.5", label: "Claude Haiku 4.5" },

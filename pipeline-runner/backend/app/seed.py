@@ -91,7 +91,7 @@ def _stages():
         {
             "order": 5,
             "name": "Vaihe 5 - Analyysi-osiot",
-            "model": "deepseek/deepseek-v4-pro",
+            "model": "anthropic/claude-sonnet-5",  # heaviest writing section
             "prompt_template": _load_prompt("5_analyysi_osiot.txt"),
             "expects_json": True,
             "max_tokens": 32000,  # emits several long analysis sections
@@ -107,7 +107,7 @@ def _stages():
         {
             "order": 6,
             "name": "Vaihe 6 - Tiivistelmä + kokoaja",
-            "model": "deepseek/deepseek-v4-pro",
+            "model": "anthropic/claude-sonnet-5",  # client-facing summary writing
             "prompt_template": _load_prompt("6_tiivistelma.txt"),
             "expects_json": True,
             "max_tokens": 32000,  # wrapper + 4 sections + machine_readable in one call
