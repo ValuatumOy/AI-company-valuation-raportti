@@ -90,6 +90,7 @@ export const api = {
     input_data?: any;
     identifier?: string;
     stop_on_failure: boolean;
+    params?: Record<string, any>;
   }) =>
     req("/api/runs", {
       method: "POST",

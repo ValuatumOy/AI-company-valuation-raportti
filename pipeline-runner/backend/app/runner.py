@@ -326,6 +326,15 @@ async def run_stages(run, stages, only=None, from_order=None):
     context = {}
     if input_data is not None:
         context["input_data"] = input_data
+    # User-supplied context / assumptions (free text). Always present so a prompt
+    # referencing {{user_input}} never fails on a missing variable, and so the
+    # numbers a user states (e.g. an assumed WACC or market size) land in the
+    # validator context and are therefore treated as allowed, not fabricated.
+    _ui = (params or {}).get("user_input")
+    context["user_input"] = (
+        _ui.strip() if isinstance(_ui, str) and _ui.strip()
+        else "(Käyttäjä ei antanut lisätietoja tai oletuksia.)"
+    )
 
     def in_scope(order):
         if only is not None:

@@ -30,6 +30,7 @@ export default function App() {
   // full report; the deliver-gate flags any issues at download time instead of
   // killing the whole run on one validation hiccup.
   const [stopOnFailure, setStopOnFailure] = useState(false);
+  const [userInput, setUserInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [runStartAt, setRunStartAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState(Date.now());
@@ -233,6 +234,7 @@ export default function App() {
         pipeline_id: pipeline.id,
         input_data: inputData ?? undefined,
         stop_on_failure: stopOnFailure,
+        params: userInput.trim() ? { user_input: userInput.trim() } : undefined,
       });
       setRunId(run_id);
       await api.startRunBg(run_id); // runs server-side; the poll drives the UI
@@ -601,8 +603,8 @@ export default function App() {
 
       {/* ── body ── */}
       <div className="flex-1 grid grid-cols-[260px_1fr_1fr] min-h-0">
-        {/* left: stage list */}
-        <div className="border-r border-neutral-800 bg-neutral-950 overflow-auto">
+        {/* left: stage list + optional user context for the AI */}
+        <div className="border-r border-neutral-800 bg-neutral-950 overflow-auto flex flex-col">
           <StageList
             pipeline={pipeline}
             selectedId={selectedId}
@@ -613,6 +615,24 @@ export default function App() {
             onDelete={deleteStage}
             onMove={moveStage}
           />
+          <div className="mt-auto border-t border-neutral-800 p-2.5">
+            <label className="block text-[11px] font-semibold text-neutral-400 mb-1">
+              Lisätiedot AI:lle <span className="font-normal text-neutral-600">(valinnainen)</span>
+            </label>
+            <textarea
+              value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
+              disabled={busy}
+              rows={4}
+              placeholder="Omat oletukset (esim. WACC, kasvu, skenaariotodennäköisyydet), asiakkuudet, sopimukset, ostotarjoukset, omistajan aikeet. AI ottaa nämä huomioon analyysissä — ei muuta tilinpäätöslukuja."
+              className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 resize-y disabled:opacity-50"
+            />
+            {userInput.trim() ? (
+              <div className="text-[10px] text-emerald-400 mt-1">
+                ✓ Huomioidaan seuraavassa ajossa
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {/* middle: editor */}

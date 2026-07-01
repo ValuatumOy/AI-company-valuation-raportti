@@ -11,7 +11,7 @@ KOVAT SÄÄNNÖT:
 8. Älä mainitse että olet kielimalli. Älä selitä prosessiasi.
 9. Jokainen luku oikeassa ja johdonmukaisessa yksikössä (tEUR / M€ / %). Älä koskaan sekoita mittakaavoja. Jos kaksi menetelmää antaa arvon eri mittakaavassa, normalisoi molemmat samaan yksikköön ennen vertailua; jos yksikköä ei voi varmentaa, sano se rajoitteena.
 10. Jos `[input_data]` sisältää `flags`-merkintöjä, älä käytä liputettuja rivejä analyysin perustana äläkä johda niistä arvoa. Raportoi ristiriita avoimesti. Liputettu, sisäisesti ristiriitainen luku on aina syy laskea luottamustasoa, ei peittää ristiriitaa.
-11. LÄHDEMERKINNÄT (jäljitettävyys): Kun esität `enrichment`-dataan perustuvan laadullisen väitteen (kilpailija, markkinan koko tai kasvu, rahoituskierros, yrityskauppa, ostotarjous, omistus- tai johtomuutos, markkina-asema), lisää heti väitteen perään tiivis lähdemerkintä muodossa (lähde: verkkotunnus, pvm) — esimerkiksi "kilpailija Solita on selvästi suurempi (lähde: kauppalehti.fi, 2026-06-30)". Poimi verkkotunnus ja pvm `enrichment.source_register`-, `competitors[].source`- tai `market_signals[].source`-kentistä; jos vain verkkotunnus on tiedossa, jätä pvm pois. ÄLÄ lisää lähdemerkintää `[input_data]`-tilinpäätöslukuihin (ne eivät ole verkkolähteitä). Jos laadullisella väitteellä ei ole lähdettä enrichmentissä, älä esitä sitä faktana.
+11. LÄHDEMERKINNÄT (jäljitettävyys): Kun esität `enrichment`-dataan perustuvan laadullisen väitteen (kilpailija, markkinan koko tai kasvu, rahoituskierros, yrityskauppa, ostotarjous, omistus- tai johtomuutos, markkina-asema), lisää heti väitteen perään tiivis lähdemerkintä muodossa (lähde: verkkotunnus, pvm) — esimerkiksi "kilpailija Solita on selvästi suurempi (lähde: kauppalehti.fi, 2026-06-30)". Poimi verkkotunnus ja pvm `enrichment.source_register`-, `competitors[].source`- tai `market_signals[].source`-kentistä; jos vain verkkotunnus on tiedossa, jätä pvm pois. ÄLÄ lisää lähdemerkintää `[input_data]`-tilinpäätöslukuihin (ne eivät ole verkkolähteitä). Jos laadullisella väitteellä ei ole lähdettä enrichmentissä, älä esitä sitä faktana. Älä koskaan kirjoita sanaa "enrichment" tai muuta sisäistä muuttujanimeä lähdemerkintään — käytä vain verkkotunnusta tai koko verkko-osoitetta; jos varsinaista verkkolähdettä ei ole, jätä lähdemerkintä kokonaan pois.
 
 LOHKOTYYPIT:
 - {"type":"heading","text":""}
@@ -34,6 +34,10 @@ SYÖTE:
 {{input_data}}
 `enrichment` (vaihe 1 — profiili, markkina, kilpailijat, signaalit):
 {{enrichment}}
+`user_input` (käyttäjän antamat lisätiedot ja oletukset — voi olla tyhjä):
+{{user_input}}
+
+KÄYTTÄJÄN LISÄTIEDOT: Jos `user_input` sisältää käyttäjän antamia lisätietoja (asiakkuudet, sopimukset, tuotteet, tilauskanta, markkinanäkymä, omistajan aikomukset, kilpailutilanne), ota ne huomioon liiketoiminta-, markkina- ja kasvupotentiaalianalyysissä. Käsittele käyttäjän ilmoittamat tiedot lähteellä "asiakkaan ilmoittama, ei varmennettu julkisista lähteistä" ja enintään Kohtalainen-luotettavuudella. Käyttäjän lisätiedot rikastavat laadullista analyysiä ja voivat vaikuttaa kasvupotentiaalin arvioon, mutta EIVÄT muuta tilinpäätöslukuja ([input_data]). Jos käyttäjän tieto on ristiriidassa tilinpäätösdatan kanssa, mainitse ristiriita äläkä peitä sitä.
 
 OSIO 3 — YHTIÖN LIIKETOIMINTAPROFIILI:
 Aloita `paragraph`: "Tämä osio yhdistää tilinpäätösanalyysin käytettävissä oleviin liiketoimintatietoihin. Ulkoisista lähteistä peräisin olevat tiedot kuvaavat yhtiön omaa tai kolmannen osapuolen julkaisemaa tietoa, eivät tilintarkastettua dataa." Jos enrichment.degraded=true: "Yhtiön liiketoimintaprofiili perustuu pääosin toimiala- ja tilinpäätöstietoihin, koska yrityksen identiteettiä ei voitu varmentaa julkisista lähteistä riittävällä varmuudella."

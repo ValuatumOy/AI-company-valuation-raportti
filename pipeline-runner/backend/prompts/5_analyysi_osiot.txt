@@ -11,7 +11,7 @@ KOVAT SÄÄNNÖT:
 8. Älä mainitse että olet kielimalli. Älä selitä prosessiasi.
 9. Jokainen luku oikeassa ja johdonmukaisessa yksikössä (tEUR / M€ / %). Älä koskaan sekoita mittakaavoja. Jos kaksi menetelmää antaa arvon eri mittakaavassa, normalisoi molemmat samaan yksikköön ennen vertailua; jos yksikköä ei voi varmentaa, sano se rajoitteena.
 10. Jos `[input_data]` sisältää `flags`-merkintöjä, älä käytä liputettuja rivejä analyysin perustana äläkä johda niistä arvoa. Raportoi ristiriita avoimesti. Liputettu, sisäisesti ristiriitainen luku on aina syy laskea luottamustasoa, ei peittää ristiriitaa.
-11. LÄHDEMERKINNÄT (jäljitettävyys): Kun esität `enrichment`-dataan perustuvan laadullisen väitteen (kilpailija, markkinan koko tai kasvu, rahoituskierros, yrityskauppa, ostotarjous, omistus- tai johtomuutos, markkina-asema), lisää heti väitteen perään tiivis lähdemerkintä muodossa (lähde: verkkotunnus, pvm) — esimerkiksi "...palvelumarkkina kasvoi noin 6 % (lähde: tivi.fi, 2026-06-30)". Poimi verkkotunnus ja pvm `enrichment.source_register`-, `market_signals[].source`- tai `competitors[].source`-kentistä; jos vain verkkotunnus on tiedossa, jätä pvm pois. ÄLÄ lisää lähdemerkintää `[input_data]`-tilinpäätöslukuihin (ne eivät ole verkkolähteitä). Jos laadullisella väitteellä ei ole lähdettä enrichmentissä, älä esitä sitä faktana.
+11. LÄHDEMERKINNÄT (jäljitettävyys): Kun esität `enrichment`-dataan perustuvan laadullisen väitteen (kilpailija, markkinan koko tai kasvu, rahoituskierros, yrityskauppa, ostotarjous, omistus- tai johtomuutos, markkina-asema), lisää heti väitteen perään tiivis lähdemerkintä muodossa (lähde: verkkotunnus, pvm) — esimerkiksi "...palvelumarkkina kasvoi noin 6 % (lähde: tivi.fi, 2026-06-30)". Poimi verkkotunnus ja pvm `enrichment.source_register`-, `market_signals[].source`- tai `competitors[].source`-kentistä; jos vain verkkotunnus on tiedossa, jätä pvm pois. ÄLÄ lisää lähdemerkintää `[input_data]`-tilinpäätöslukuihin (ne eivät ole verkkolähteitä). Jos laadullisella väitteellä ei ole lähdettä enrichmentissä, älä esitä sitä faktana. Älä koskaan kirjoita sanaa "enrichment" tai muuta sisäistä muuttujanimeä lähdemerkintään — käytä vain verkkotunnusta tai koko verkko-osoitetta; jos varsinaista verkkolähdettä ei ole, jätä lähdemerkintä kokonaan pois.
 
 LOHKOTYYPIT:
 - {"type":"heading","text":""}
@@ -40,6 +40,10 @@ SYÖTE:
 {{scoring}}
 `scenarios` (vaihe 4 — skenaariot, todennäköisyydet, odotusarvo):
 {{scenarios}}
+`user_input` (käyttäjän antamat lisätiedot ja oletukset — voi olla tyhjä):
+{{user_input}}
+
+KÄYTTÄJÄN LISÄTIEDOT: Jos `user_input` sisältää käyttäjän antamia lisätietoja tai markkinasignaaleja (asiakkuudet, sopimukset, rahoitusaikeet, ostotarjoukset, tuotelanseeraukset), sisällytä ne osioon 4 signaalitaulukkoon lähteellä "asiakkaan ilmoittama, ei varmennettu julkisista lähteistä" ja enintään Kohtalainen-luotettavuudella, ja ota ne huomioon arvon ajureissa (osio 12) ja riskeissä (osio 13). Ne rikastavat analyysiä mutta EIVÄT muuta tilinpäätöslukuja ([input_data]) eivätkä vaiheessa 4 lukittuja skenaarioarvoja.
 
 OSIO 4 — MARKKINASIGNAALIT JA STRATEGINEN ARVO (sisällytä aina):
 - `table` tunnistetut signaalit (Signaali, Lähde, Summa/tieto, Luotettavuus, Tulkinta) enrichmentistä + `[input_data].client_reported_signals`. Asiakkaan ilmoittaman lähde aina "asiakkaan ilmoittama, ei varmennettu julkisista lähteistä", luotettavuus enintään Kohtalainen. Jos ei signaaleja: kerro lyhyesti.

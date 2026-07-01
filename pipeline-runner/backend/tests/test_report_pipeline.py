@@ -223,6 +223,20 @@ def test_stage3_fabrication_gate_ignores_years_and_percentages():
     assert _gate(validators.run_validator(code, safe, ctx))["passed"]  # year+% not euro figs
 
 
+def test_user_input_number_is_allowed_not_flagged_as_fabrication():
+    # A figure the USER supplied (via context.user_input) must be treated as a
+    # legitimate assumption, not a fabrication — the feature would be unusable
+    # otherwise. Same figure absent from user_input is blocked (prev test).
+    code = _v("stage3_numbers.py")
+    out = {"sections": [{"id": "8", "blocks": [
+        {"type": "paragraph", "text": "Käyttäjän oletuksen mukainen strateginen arvo 250 000 tEUR."}]}]}
+    ctx_with = {"input_data": {"actuals": {"revenue": 8903}},
+                "user_input": "Oletus: strateginen arvo 250 000 tEUR yrityskaupassa."}
+    assert _gate(validators.run_validator(code, out, ctx_with))["passed"]
+    ctx_without = {"input_data": {"actuals": {"revenue": 8903}}}
+    assert not _gate(validators.run_validator(code, out, ctx_without))["passed"]
+
+
 def test_source_url_cell_renders_clickable_domain_link():
     cell = render._num_cell("https://www.ytj.fi/yritys/123")
     assert '<a class="src"' in cell

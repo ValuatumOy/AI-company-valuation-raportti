@@ -39,6 +39,10 @@ SYÖTE:
 {{scoring}}
 `sections_numeric` (vaihe 3 — lukitut numero-osiot, älä muuta lukuja):
 {{sections_numeric}}
+`user_input` (käyttäjän antamat lisätiedot ja oletukset — voi olla tyhjä):
+{{user_input}}
+
+KÄYTTÄJÄN OLETUKSET: Jos `user_input` sisältää käyttäjän antamia oletuksia (skenaariotodennäköisyydet, kasvuoletus, markkinan koko, saavutettava markkinaosuus, tavoiteltava EBIT-%, WACC, aikajänne), käytä NIITÄ mallin oletusarvojen sijaan ja merkitse jokainen selvästi käyttäjän antamaksi ("käyttäjän oletus") sekä skenaariotaulukon `assumptions`-kentässä että näkyvässä tekstissä. Jos käyttäjä antoi vain osan oletuksista, käytä käyttäjän arvoja niiltä osin ja profiiliin sidottuja oletuksia muilta. Jos käyttäjä ei antanut oletuksia, toimi kuten ennen (johda todennäköisyydet analyysistä). Käyttäjän oletukset EIVÄT saa rikkoa lattiasääntöä (jokaisen skenaarion omistaja-arvo ≥ 0), todennäköisyyksien summaa (100 %) eivätkä odotusarvon laskentaa (Σ p×arvo); jos käyttäjän oletus olisi ristiriidassa näiden kanssa, noudata sääntöä ja mainitse rajoite.
 
 PERIAATTEET:
 1. Jokaisen skenaarion omistaja-arvo floorataan nollaan (osake on optio; ei koskaan alle 0).
