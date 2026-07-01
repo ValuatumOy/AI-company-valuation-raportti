@@ -72,11 +72,30 @@ _INPUT_TOK = re.compile(r"\[?\binput[_ ]?data([a-zäöå]*)\]?", re.IGNORECASE)
 _ENRICH_TOK = re.compile(r"\[?\benrichment[a-zäöå]*\]?", re.IGNORECASE)
 
 
+def _flat_text(v):
+    """Coerce a text-ish field the model may emit as a list/dict/number (instead
+    of a string) into a readable string — so it never renders as a raw '[...]' or
+    '{...}' dump. Mirrors the table-row robustness for every free-text field."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list):
+        return " ".join(p for p in (_flat_text(x) for x in v) if p)
+    if isinstance(v, dict):
+        for k in ("text", "value", "arvo", "label", "content", "teksti"):
+            if k in v:
+                return _flat_text(v[k])
+        return " ".join(p for p in (_flat_text(x) for x in v.values()) if p)
+    return str(v)   # int/float/bool -> exact prior scalar behavior (no reformatting)
+
+
 def _clean(s):
     """Strip leaked pipeline tokens; the reader must never see [input_data]."""
     if s is None:
         return ""
-    s = str(s)
+    if not isinstance(s, str):
+        s = _flat_text(s)   # lists/dicts/numbers -> readable string, never a dump
     s = _VAR_RE.sub("", s)
     s = _PLACEHOLDER_RE.sub("", s)
     s = _INPUT_TOK.sub(lambda m: "tilinpäätösdata" + m.group(1), s)
@@ -627,11 +646,41 @@ def _block_callout(b):
     title = b.get("title")
     th = (f'<div class="co-t"><span class="co-badge"></span>{_esc(title)}</div>'
           if title else "")
-    return f'<div class="callout {variant}">{th}<p>{_inline(b.get("text"))}</p></div>'
+    # Contract allows text OR paragraphs[] OR items[](+ordered) — render whichever
+    # is present (the old renderer only read `text`, silently dropping the others).
+    parts = []
+    if b.get("text") not in (None, ""):
+        parts.append(f'<p>{_inline(b.get("text"))}</p>')
+    for p in (b.get("paragraphs") or []):
+        parts.append(f'<p>{_inline(p)}</p>')
+    items = b.get("items")
+    if isinstance(items, list) and items:
+        tag = "ol" if b.get("ordered") else "ul"
+        lis = "".join(f'<li>{_inline(it)}</li>' for it in items)
+        parts.append(f'<{tag} class="co-list">{lis}</{tag}>')
+    if not parts:  # nothing structured — flatten whatever is there, never blank-drop
+        parts.append(f'<p>{_inline(b.get("text"))}</p>')
+    return f'<div class="callout {variant}">{th}{"".join(parts)}</div>'
+
+
+def _as_records(coll, keys):
+    """Coerce a collection into a list of dicts, whatever shape the model emits:
+    a dict record ({k: v}), a list of [k, v] lists, or already a list of dicts.
+    `keys` names the fields to fill from a record/pair. Prevents the 'collection
+    arrived as a dict/list' drift from silently dropping cards / rows / drivers."""
+    if isinstance(coll, dict):
+        return [{keys[0]: k, keys[1]: v} for k, v in coll.items()]
+    out = []
+    for it in coll or []:
+        if isinstance(it, dict):
+            out.append(it)
+        elif isinstance(it, list):
+            out.append({k: (it[i] if i < len(it) else "") for i, k in enumerate(keys)})
+    return out
 
 
 def _block_metric_cards(b):
-    cards = [c for c in (b.get("cards") or []) if isinstance(c, dict)]
+    cards = _as_records(b.get("cards"), ("label", "value"))
     n = max(1, min(len(cards), 4))
     cells = []
     for c in cards:
@@ -643,7 +692,7 @@ def _block_metric_cards(b):
 
 
 def _block_key_value(b):
-    items = [it for it in (b.get("items") or []) if isinstance(it, dict)]
+    items = _as_records(b.get("items"), ("key", "value"))
     title = b.get("title")
     rows = []
     for it in items:
@@ -790,7 +839,7 @@ def _block_scenario_table(b):
     drivers = "".join(
         f'<div class="driver"><span class="dk">{_esc(d.get("key"))}</span>'
         f'<span class="dv">{_esc(d.get("value"))}</span></div>'
-        for d in (b.get("drivers") or []) if isinstance(d, dict))
+        for d in _as_records(b.get("drivers"), ("key", "value")))
     peru = b.get("perusluvut") or {}
     avain = b.get("avainluvut") or {}
     return (
@@ -1259,6 +1308,7 @@ h4.blk{ font-size:8pt; font-weight:700; color:var(--gray); text-transform:upperc
 .callout{ padding:11px 14px; margin:12px 0; background:#fff; page-break-inside:avoid; }
 .callout .co-t{ font-family:var(--head); font-weight:700; font-size:9.5pt; margin-bottom:5px; display:flex; align-items:center; gap:7px; }
 .callout .co-badge{ width:9px; height:9px; display:inline-block; }
+.callout .co-list{ margin:4px 0 0; padding-left:18px; } .callout .co-list li{ margin:2px 0; }
 .callout.kill{ border-left:4px solid var(--red); background:var(--red-soft); }
 .callout.kill .co-t, .callout.kill .co-badge{ color:var(--red); background:initial; } .callout.kill .co-badge{ background:var(--red); }
 .callout.reality{ border:2px solid var(--green); background:var(--green-soft); }

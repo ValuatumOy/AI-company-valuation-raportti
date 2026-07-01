@@ -248,6 +248,43 @@ def test_table_handles_rows_given_as_dict():
     assert "Liikevaihto 100" in txt and "EBIT 10" in txt and "{'" not in h
 
 
+# ------------------------------------------ non-table block shape-drift hardening
+def test_text_fields_flatten_list_and_dict_never_dump():
+    assert render._norm_ws(render._strip_tags(
+        render._block_paragraph({"text": ["Eka.", "Toka."]}))) == "Eka. Toka."
+    assert "Otsikko" in render._block_heading({"text": {"text": "Otsikko"}})
+    assert "{'" not in render._block_paragraph({"text": {"a": "x"}})
+
+
+def test_metric_cards_accept_record_and_nested_value():
+    h = render._block_metric_cards({"cards": {"Liikevaihto": "1 598", "EBIT": "210"}})
+    t = render._norm_ws(render._strip_tags(h))
+    assert "Liikevaihto" in t and "1 598" in t and "{'" not in h
+    h2 = render._block_metric_cards({"cards": [{"label": "Arvo", "value": {"text": "669"}}]})
+    assert "669" in h2 and "{'" not in h2
+
+
+def test_key_value_accepts_record_dict():
+    h = render._block_key_value({"title": "Avainluvut", "items": {"ROE": "12 %"}})
+    t = render._norm_ws(render._strip_tags(h))
+    assert "ROE" in t and "12 %" in t and "{'" not in h
+
+
+def test_callout_renders_paragraphs_and_items():
+    h = render._block_callout(
+        {"variant": "kill", "title": "R", "paragraphs": ["Kappale."],
+         "items": ["A", "B"], "ordered": True})
+    assert "<ol" in h and "Kappale." in h and ">A</li>" in h and "{'" not in h
+
+
+def test_scenario_drivers_accept_record_dict():
+    h = render._block_scenario_table(
+        {"scenario": "optimistinen", "value_teur": 5000, "probability_pct": 20,
+         "drivers": {"EBIT-%": "8 %"}, "perusluvut": {}, "avainluvut": {}})
+    t = render._norm_ws(render._strip_tags(h))
+    assert "EBIT-%" in t and "8 %" in t and "{'" not in h
+
+
 # --------------------------------------------------------------- block safety
 def test_blocks_tolerate_missing_and_null_fields():
     secs = [{"id": "5", "blocks": [
