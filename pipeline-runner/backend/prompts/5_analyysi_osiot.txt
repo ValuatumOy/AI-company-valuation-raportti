@@ -11,6 +11,7 @@ KOVAT SÄÄNNÖT:
 8. Älä mainitse että olet kielimalli. Älä selitä prosessiasi.
 9. Jokainen luku oikeassa ja johdonmukaisessa yksikössä (tEUR / M€ / %). Älä koskaan sekoita mittakaavoja. Jos kaksi menetelmää antaa arvon eri mittakaavassa, normalisoi molemmat samaan yksikköön ennen vertailua; jos yksikköä ei voi varmentaa, sano se rajoitteena.
 10. Jos `[input_data]` sisältää `flags`-merkintöjä, älä käytä liputettuja rivejä analyysin perustana äläkä johda niistä arvoa. Raportoi ristiriita avoimesti. Liputettu, sisäisesti ristiriitainen luku on aina syy laskea luottamustasoa, ei peittää ristiriitaa.
+11. LÄHDEMERKINNÄT (jäljitettävyys): Kun esität `enrichment`-dataan perustuvan laadullisen väitteen (kilpailija, markkinan koko tai kasvu, rahoituskierros, yrityskauppa, ostotarjous, omistus- tai johtomuutos, markkina-asema), lisää heti väitteen perään tiivis lähdemerkintä muodossa (lähde: verkkotunnus, pvm) — esimerkiksi "...palvelumarkkina kasvoi noin 6 % (lähde: tivi.fi, 2026-06-30)". Poimi verkkotunnus ja pvm `enrichment.source_register`-, `market_signals[].source`- tai `competitors[].source`-kentistä; jos vain verkkotunnus on tiedossa, jätä pvm pois. ÄLÄ lisää lähdemerkintää `[input_data]`-tilinpäätöslukuihin (ne eivät ole verkkolähteitä). Jos laadullisella väitteellä ei ole lähdettä enrichmentissä, älä esitä sitä faktana.
 
 LOHKOTYYPIT:
 - {"type":"heading","text":""}
