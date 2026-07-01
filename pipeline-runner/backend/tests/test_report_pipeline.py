@@ -192,6 +192,37 @@ def test_grounding_passes_sourced_and_derived_figures():
     assert r["passed"] and "all prose figures reconcile" in adv["detail"]
 
 
+# ------------------------------------ stage-3 fabrication gate (BLOCKING)
+def _gate(r):
+    return next(c for c in r["checks"] if "invented euro figure" in c["name"])
+
+
+def test_stage3_fabrication_gate_passes_traceable_and_blocks_invented():
+    code = _v("stage3_numbers.py")
+    ctx = {"input_data": {"actuals": {"revenue": 8903, "ebit": 1200, "equity": 3820}}}
+    # every euro figure traces to input_data -> gate passes
+    ok = {"sections": [{"id": "8", "blocks": [
+        {"type": "paragraph", "text": "Oma pääoma 3 820 tEUR, liikevaihto 8 903 tEUR."}]}]}
+    assert _gate(validators.run_validator(code, ok, ctx))["passed"]
+    # a net figure derivable in one step (revenue - equity = 5 083) -> passes
+    deriv = {"sections": [{"id": "8", "blocks": [
+        {"type": "paragraph", "text": "Erotus on 5 083 tEUR."}]}]}
+    assert _gate(validators.run_validator(code, deriv, ctx))["passed"]
+    # an invented euro figure tracing to nothing -> BLOCKS the run
+    bad = {"sections": [{"id": "8", "blocks": [
+        {"type": "paragraph", "text": "Yhtiön piilotettu arvo on 987 654 tEUR."}]}]}
+    rb = validators.run_validator(code, bad, ctx)
+    assert not _gate(rb)["passed"] and not rb["passed"]
+
+
+def test_stage3_fabrication_gate_ignores_years_and_percentages():
+    code = _v("stage3_numbers.py")
+    ctx = {"input_data": {"actuals": {"revenue": 8903}}}
+    safe = {"sections": [{"id": "8", "blocks": [
+        {"type": "paragraph", "text": "Vuonna 2027 kasvu oli 4 321 % ja 12 kuukautta."}]}]}
+    assert _gate(validators.run_validator(code, safe, ctx))["passed"]  # year+% not euro figs
+
+
 def test_source_url_cell_renders_clickable_domain_link():
     cell = render._num_cell("https://www.ytj.fi/yritys/123")
     assert '<a class="src"' in cell

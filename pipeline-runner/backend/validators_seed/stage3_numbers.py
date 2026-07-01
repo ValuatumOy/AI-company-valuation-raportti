@@ -91,6 +91,48 @@ def _match(val, is_pct, allowed):
     return False
 
 
+def _match_hard(val, allowed):
+    # Blocking gate uses a wider ±1% grace (vs ±0.5% advisory) so a legitimately
+    # ROUNDED prose figure ("n. 4 300" for 4 287) is never wrongly blocked.
+    tol = max(1.0, 0.01 * abs(val))
+    av = abs(val)
+    return any(abs(val - a) <= tol or abs(av - abs(a)) <= tol for a in allowed)
+
+
+def _numbers_of(obj):
+    nums = set()
+    for _, v in _walk(obj):
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            nums.add(float(v))
+        elif isinstance(v, str):
+            for m in _NUM_RE.findall(v):
+                val, _ = _parse(m)
+                if val is not None:
+                    nums.add(val)
+    return nums
+
+
+def _nonprose_numbers(output):
+    """Every number in this stage's STRUCTURED blocks (tables, charts, metric
+    cards, key-value) + top-level scoring — i.e. the verified figures the prose
+    is allowed to restate. Prose (paragraph/callout) is deliberately excluded so a
+    figure can never 'trace' to itself."""
+    nums = set()
+    for sec in (output.get("sections") or []):
+        if not isinstance(sec, dict):
+            continue
+        for b in (sec.get("blocks") or []):
+            if isinstance(b, dict) and b.get("type") in ("paragraph", "callout"):
+                continue
+            nums |= _numbers_of(b)
+    for k, v in output.items():
+        if k != "sections":
+            nums |= _numbers_of(v)
+    return nums
+
+
 def _find_block(obj, names):
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -244,5 +286,53 @@ def validate(output: dict, context: dict) -> dict:
                 f"computed {round(computed_be, 1)} vs stated {round(be, 1)}")
     else:
         chk("breakeven check", True, "skipped: not present")
+
+    # --- 6. Fabrication gate (BLOCKING) -------------------------------------
+    # A euro figure in narrative prose (>=1000, not a %, not a 4-digit year) that
+    # traces to NOTHING verified — not input_data, not a one-step sum/difference
+    # of it, not any structured figure in this stage's own tables, and not the
+    # upstream enrichment/profile context — is very likely invented. Unlike the
+    # advisory sweep in check 1, this FAILS the stage: self-heal then re-prompts
+    # the model, and the deliver-gate blocks a run that stays unresolved.
+    # Dress-rehearsed against 6 real reports (Athlos, OGOship, Jungle Juice,
+    # SearchCo, Supercell, Virnex): ZERO false positives, and it flags injected
+    # fabrications (123 456 / 987 654 / 55 555 tEUR ...).
+    if len(base) <= 700:
+        bl = list(base)
+        onestep = set(base)
+        for a in bl:
+            for c in bl:
+                onestep.add(a - c)
+                onestep.add(a + c)
+        hard_allowed = onestep | _numbers_of(context or {}) | _nonprose_numbers(output)
+        fabricated = []
+        for sec in (output.get("sections") or []):
+            if not isinstance(sec, dict):
+                continue
+            sid = str(sec.get("id"))
+            for bi, b in enumerate(sec.get("blocks") or []):
+                if not isinstance(b, dict) or b.get("type") not in ("paragraph", "callout"):
+                    continue
+                v = b.get("text")
+                if not isinstance(v, str) or len(v) < 4:
+                    continue
+                for m in _NUM_RE.findall(v):
+                    val, is_pct = _parse(m)
+                    if val is None or is_pct:
+                        continue
+                    a = abs(val)
+                    if a < 1000:                          # only euro-scale amounts
+                        continue
+                    if a == int(a) and 1900 <= int(a) <= 2100:  # a year
+                        continue
+                    if not _match_hard(val, hard_allowed):
+                        fabricated.append(f"{m.strip()} @ section {sid} block {bi}")
+        chk("no invented euro figure in prose (>=1000, untraceable to data)",
+            not fabricated,
+            ("BLOCKED — figure(s) trace to no verified source: " + "; ".join(fabricated[:15]))
+            if fabricated else "all euro figures in prose trace to data / derivation / tables")
+    else:
+        chk("no invented euro figure in prose (>=1000, untraceable to data)", True,
+            f"skipped: input number set too large ({len(base)}) to derive safely")
 
     return {"passed": all(c["passed"] for c in checks), "checks": checks}
