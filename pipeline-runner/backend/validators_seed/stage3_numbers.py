@@ -145,6 +145,25 @@ def _find_block(obj, names):
     return None
 
 
+def _path(obj, *keys):
+    for k in keys:
+        if not isinstance(obj, dict):
+            return None
+        obj = obj.get(k)
+    return obj
+
+
+def _is_num(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _sum_list(lst):
+    if not isinstance(lst, list):
+        return None
+    vals = [x for x in lst if _is_num(x)]
+    return sum(vals) if vals else None
+
+
 def _find_first(obj, names):
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -251,6 +270,110 @@ def validate(output: dict, context: dict) -> dict:
     else:
         chk("DCF bridge reconciles", True,
             "skipped: discounted_fcff / terminal_value / equity_value_before_floor missing")
+
+    # --- 3b. DCF/EVA bridge reconciles via the model's OWN restated numbers --
+    # The check above only fires when the ground-truth data happens to carry
+    # keys literally named "net_debt"/"terminal_value", which the real engine
+    # data doesn't (it has bridge.interest_bearing_debt and no explicit
+    # terminal_value at all — only cumulative_discounted_fcff, which already
+    # bakes the terminal PV in). These checks instead validate the explicit
+    # `scoring.dcf_bridge` / `scoring.eva_bridge` fields the prompt now asks
+    # the model to restate from OSIO 9/10's own bridge tables — catching the
+    # reported bug class where a report's own bridge numbers didn't sum to
+    # its own stated total (e.g. "4001 - 1789 + 3 = 2215, not the reported 2365").
+    scoring = output.get("scoring") or {}
+    dcf_bridge = scoring.get("dcf_bridge") or {}
+    pv_fc = dcf_bridge.get("pv_forecast_period_teur")
+    pv_tv = dcf_bridge.get("pv_terminal_value_teur")
+    ev = dcf_bridge.get("enterprise_value_teur")
+    debt = dcf_bridge.get("interest_bearing_debt_teur")
+    cash_b = dcf_bridge.get("cash_teur")
+    equity = dcf_bridge.get("equity_value_before_floor_teur")
+
+    if _is_num(pv_fc) and _is_num(pv_tv) and _is_num(ev):
+        tol = max(2.0, 0.01 * abs(ev))
+        chk("DCF bridge: PV(ennustejakso) + PV(terminaali) = EV (±1% / ±2 tEUR)",
+            abs((pv_fc + pv_tv) - ev) <= tol,
+            f"{pv_fc} + {pv_tv} = {round(pv_fc + pv_tv, 2)} vs EV {ev}")
+    else:
+        chk("DCF bridge: PV(ennustejakso) + PV(terminaali) = EV", True,
+            "skipped: dcf_bridge.pv_forecast_period_teur / pv_terminal_value_teur / enterprise_value_teur missing")
+
+    if _is_num(ev) and _is_num(debt) and _is_num(cash_b) and _is_num(equity):
+        tol = max(2.0, 0.01 * abs(equity))
+        computed = ev - debt + cash_b
+        chk("DCF bridge: EV - korolliset velat + kassa = oman pääoman arvo (±1% / ±2 tEUR)",
+            abs(computed - equity) <= tol,
+            f"computed {round(computed, 2)} vs stated {equity}")
+    else:
+        chk("DCF bridge: EV - korolliset velat + kassa = oman pääoman arvo", True,
+            "skipped: dcf_bridge fields missing")
+
+    # Cross-check the model's restated bridge against the engine ground truth
+    # it was supposed to copy from (not re-derive).
+    gt_pv_fc = _sum_list(disc)
+    if _is_num(pv_fc) and _is_num(gt_pv_fc):
+        tol = max(2.0, 0.01 * abs(gt_pv_fc))
+        chk("DCF: stated PV(ennustejakso) matches sum(valuation_engine.dcf.discounted_fcff) (±1% / ±2 tEUR)",
+            abs(pv_fc - gt_pv_fc) <= tol, f"stated {pv_fc} vs sum {round(gt_pv_fc, 2)}")
+    else:
+        chk("DCF: stated PV(ennustejakso) matches engine sum", True, "skipped: not available")
+
+    gt_cum = dcf.get("cumulative_discounted_fcff")
+    gt_equity = dcf.get("equity_value_before_floor")
+    if _is_num(ev) and isinstance(gt_cum, list) and gt_cum and _is_num(gt_cum[0]):
+        tol = max(2.0, 0.01 * abs(gt_cum[0]))
+        chk("DCF: stated EV matches valuation_engine.dcf.cumulative_discounted_fcff[0] (±1% / ±2 tEUR)",
+            abs(ev - gt_cum[0]) <= tol, f"stated {ev} vs engine {gt_cum[0]}")
+    else:
+        chk("DCF: stated EV matches engine ground truth", True, "skipped: not available")
+
+    if _is_num(equity) and _is_num(gt_equity):
+        tol = max(2.0, 0.01 * abs(gt_equity))
+        chk("DCF: stated equity_value_before_floor matches valuation_engine.dcf.equity_value_before_floor (±1% / ±2 tEUR)",
+            abs(equity - gt_equity) <= tol, f"stated {equity} vs engine {gt_equity}")
+    else:
+        chk("DCF: stated equity_value_before_floor matches engine ground truth", True,
+            "skipped: not available")
+
+    # --- 3c. EVA bridge reconciles ------------------------------------------
+    eva = ve.get("eva") if isinstance(ve.get("eva"), dict) else {}
+    eva_bridge = scoring.get("eva_bridge") or {}
+    ic = eva_bridge.get("invested_capital_teur")
+    pv_exp = eva_bridge.get("pv_explicit_eva_teur")
+    pv_term = eva_bridge.get("pv_terminal_eva_teur")
+    eva_equity = eva_bridge.get("equity_value_before_floor_teur")
+
+    if _is_num(ic) and _is_num(pv_exp) and _is_num(pv_term) and _is_num(eva_equity):
+        tol = max(2.0, 0.01 * abs(eva_equity))
+        computed = ic + pv_exp + pv_term
+        chk("EVA bridge: investoitu pääoma + PV(EVA) + PV(terminaali-EVA) = oman pääoman arvo (±1% / ±2 tEUR)",
+            abs(computed - eva_equity) <= tol,
+            f"computed {round(computed, 2)} vs stated {eva_equity}")
+    else:
+        chk("EVA bridge reconciles", True, "skipped: eva_bridge fields missing")
+
+    gt_eva_equity = eva.get("equity_value_before_floor")
+    if _is_num(eva_equity) and _is_num(gt_eva_equity):
+        tol = max(2.0, 0.01 * abs(gt_eva_equity))
+        chk("EVA: stated equity_value_before_floor matches valuation_engine.eva.equity_value_before_floor (±1% / ±2 tEUR)",
+            abs(eva_equity - gt_eva_equity) <= tol, f"stated {eva_equity} vs engine {gt_eva_equity}")
+    else:
+        chk("EVA: stated equity_value_before_floor matches engine ground truth", True,
+            "skipped: not available")
+
+    # --- 3d. Accepted method weights sum to 100% ----------------------------
+    method_scoring = scoring.get("method_scoring") or []
+    accepted_weights = [
+        m.get("weight_pct") for m in method_scoring
+        if isinstance(m, dict) and m.get("status") == "hyväksytty" and _is_num(m.get("weight_pct"))
+    ]
+    if accepted_weights:
+        total = sum(accepted_weights)
+        chk("hyväksyttyjen menetelmien painot (weight_pct) summautuvat 100 %:iin (±0.5)",
+            abs(total - 100.0) <= 0.5, f"summa {round(total, 2)}")
+    else:
+        chk("menetelmäpainot summautuvat 100 %:iin", True, "skipped: ei hyväksyttyjä painoja")
 
     # --- 4. Term consistency: a labelled headline figure is one number -------
     headline_keys = {

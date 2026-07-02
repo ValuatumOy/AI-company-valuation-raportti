@@ -28,6 +28,35 @@ def _scenarios(output):
     return s if isinstance(s, list) else []
 
 
+def _blocks(output):
+    out = []
+    for sec in output.get("sections") or []:
+        if isinstance(sec, dict):
+            out.extend(b for b in (sec.get("blocks") or []) if isinstance(b, dict))
+    return out
+
+
+def _table_row(table, label_keywords):
+    """First row in a {columns, rows} table whose first cell matches one of
+    the given (lowercase) keywords. Row may be an array (contracted shape) or
+    a dict (tolerated, same as the renderer's coercion)."""
+    if not isinstance(table, dict):
+        return None
+    for row in table.get("rows") or []:
+        if isinstance(row, list):
+            cells = row
+        elif isinstance(row, dict):
+            cells = list(row.values())
+        else:
+            continue
+        if not cells:
+            continue
+        label = str(cells[0]).strip().lower()
+        if any(kw in label for kw in label_keywords):
+            return cells
+    return None
+
+
 def _prob(s):
     # *_pct keys are always percentages; bare fraction keys are fractions only
     # when <= 1 (so a 1% probability is not misread as 100%).
@@ -141,5 +170,28 @@ def validate(output: dict, context: dict) -> dict:
     else:
         chk("realistic_base_case anchors to stage-3 weighted base case", True,
             "skipped: scoring.weighted_base_case_teur not available")
+
+    # --- 8. scenario oma pääoma / omavaraisuusaste sign consistency ----------
+    # Reported bug: a scenario's perusluvut showed positive equity while its
+    # avainluvut showed a negative equity ratio in the same column — that
+    # combination is impossible for a normal (positive-assets) balance sheet.
+    sign_viol = []
+    for b in _blocks(output):
+        if b.get("type") != "scenario_table":
+            continue
+        name = b.get("scenario", "?")
+        equity_row = _table_row(b.get("perusluvut"), ("oma pääoma",))
+        ratio_row = (_table_row(b.get("avainluvut"), ("omavaraisuusaste",))
+                     or _table_row(b.get("perusluvut"), ("omavaraisuusaste",)))
+        if not equity_row or not ratio_row:
+            continue
+        for i in range(1, min(len(equity_row), len(ratio_row))):  # cell 0 = row label
+            eq, ratio = _num(equity_row[i]), _num(ratio_row[i])
+            if eq is not None and ratio is not None and eq > 0 and ratio < 0:
+                sign_viol.append(
+                    f"{name} sarake {i}: oma pääoma {eq} > 0 mutta omavaraisuusaste {ratio} % < 0")
+    chk("skenaarion oma pääoma > 0 ei esiinny negatiivisen omavaraisuusasteen kanssa samassa sarakkeessa",
+        not sign_viol,
+        "; ".join(sign_viol) if sign_viol else "ok (tai kumpaakin taulukkoa ei löytynyt)")
 
     return {"passed": all(c["passed"] for c in checks), "checks": checks}

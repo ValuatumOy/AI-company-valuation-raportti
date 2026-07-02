@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import tempfile
 
-from .runner import SECTION_ORDER
+from .runner import APPENDIX_SECTION_IDS, SECTION_ORDER
 
 REPORTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "_reports"))
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -518,8 +518,9 @@ def _svg_heatmap(x_axis, series):
                      f'rx="2" fill="{fill}"/>')
             if v is not None:
                 tc = "#fff" if (v - vmin) / span < 0.28 else C["ink"]
+                dec = 0 if v == round(v) else 1
                 g.append(f'<text x="{x + cw / 2:.1f}" y="{yy + ch / 2 + 3:.1f}" text-anchor="middle" '
-                         f'font-size="8.5" fill="{tc}">{_fmt(v, 1)}</text>')
+                         f'font-size="8.5" fill="{tc}">{_fmt(v, dec)}</text>')
     return _svg(600, H, "".join(g))
 
 
@@ -1042,15 +1043,57 @@ def _snapshot(report, derived):
     )
 
 
-def _toc(report, sections):
+_MANDATE_LABELS = [
+    ("valuation_date", "Arvopäivä"),
+    ("report_date", "Raportin päivä"),
+    ("purpose", "Käyttötarkoitus"),
+    ("intended_users", "Tarkoitetut käyttäjät"),
+    ("standard_of_value", "Arvon standardi"),
+    ("ownership_interest", "Arvostettava omistusosuus"),
+    ("marketability", "Markkinoitavuus"),
+    ("going_concern", "Jatkuvan toiminnan oletus"),
+    ("currency_unit", "Valuutta / yksikkö"),
+]
+
+
+def _mandate(report):
+    """Toimeksianto (engagement/mandate) block: valuation date, purpose,
+    standard of value, etc. — shown before the ToC so a reader knows what kind
+    of opinion they're holding before reaching any numbers."""
+    meta = report.get("meta") or {}
+    mandate = meta.get("mandate")
+    if not isinstance(mandate, dict) or not mandate:
+        return ""
+    values = dict(mandate)
+    values.setdefault("report_date", meta.get("report_date"))
+    values.setdefault("currency_unit", meta.get("unit"))
     rows = "".join(
-        f'<div class="toc-row"><span class="tn">{_esc(s.get("id"))}</span>'
+        f'<div class="kv"><span class="k">{_esc(label)}</span>'
+        f'<span class="v" style="white-space:normal;text-align:right;max-width:110mm">{_esc(values[key])}</span></div>'
+        for key, label in _MANDATE_LABELS if values.get(key)
+    )
+    if not rows:
+        return ""
+    return (
+        '<div style="margin-bottom:20px">'
+        '<h4 class="blk" style="margin-top:0">Toimeksianto</h4>'
+        f'{rows}</div>'
+    )
+
+
+def _toc(report, sections):
+    # Display numbers are sequential (1..N) regardless of the internal
+    # section `id` — SECTION_ORDER has no "7" by design, and showing that raw
+    # id would make the ToC jump 6→8 for no reason a reader can see.
+    rows = "".join(
+        f'<div class="toc-row"><span class="tn">{i}</span>'
         f'<span class="tt">{_esc(s.get("title"))}</span></div>'
-        for s in sections)
+        for i, s in enumerate(sections, start=1))
     return (
         '<section class="page">'
         f'{_header(report)}'
         '<div class="pbody">'
+        f'{_mandate(report)}'
         '<div class="sec-head"><span class="sec-num" style="background:var(--green);color:#fff">·</span>'
         '<div class="sh-t"><h2>Sisällys</h2><div class="sh-sub">AI-Arvonmääritysraportti</div></div></div>'
         '<div class="sec-rule"></div>'
@@ -1074,7 +1117,7 @@ def _method_visuals(derived):
             f'{left}{right}</div>')
 
 
-def _section(report, sec, derived=None):
+def _section(report, sec, derived=None, display_no=None):
     blocks = "".join(x for x in (_render_block(b) for b in (sec.get("blocks") or [])) if x)
     # Section 8 (arvonmääritys) already carries the model's own method table +
     # method-value chart, so we do NOT inject derived visuals here — on distressed
@@ -1083,14 +1126,30 @@ def _section(report, sec, derived=None):
     if not blocks.strip():
         blocks = ('<p class="muted" style="font-style:italic">'
                   'Tietoa ei ollut saatavilla tähän osioon.</p>')
+    num = display_no if display_no is not None else sec.get("id")
     return (
         '<section class="page report-section">'
         f'{_header(report)}'
         '<div class="pbody">'
-        f'<div class="sec-head"><span class="sec-num">{_esc(sec.get("id"))}</span>'
+        f'<div class="sec-head"><span class="sec-num">{_esc(num)}</span>'
         f'<div class="sh-t"><h2>{_esc(sec.get("title"))}</h2></div></div>'
         '<div class="sec-rule"></div>'
         f'{blocks}</div>{_footer()}</section>'
+    )
+
+
+def _appendix_divider(report):
+    return (
+        '<section class="page appendix-divider">'
+        f'{_header(report)}'
+        '<div class="pbody" style="display:flex;align-items:center;justify-content:center;flex:1 1 auto">'
+        '<div style="max-width:110mm;text-align:center">'
+        '<div style="font-size:8pt;text-transform:uppercase;letter-spacing:.14em;color:var(--lime-deep);'
+        'font-weight:700;margin-bottom:8px">Liite</div>'
+        '<h2 style="font-size:22pt;margin-bottom:10px">Liitteet</h2>'
+        '<p class="muted">Ennusteen täydet vuositason luvut, lähderekisteri ja metodologiakuvaus. '
+        'Tukiaineistoa raportin pääsisällölle, ei sen osa.</p>'
+        f'</div></div>{_footer()}</section>'
     )
 
 
@@ -1203,9 +1262,19 @@ def render_html(report):
     sections = _ensure_disclaimer(_ordered_sections(report), _brand(report)[1])
     # Snapshot page intentionally omitted (design contract — section 1 TIIVISTELMÄ
     # carries the key figures; its derived visuals now live in section 8).
+    # Insert one "Liitteet" divider right before the first appendix section
+    # (source register / methodology / full forecast detail) so the main body
+    # stays a coherent read and the appendix is clearly marked as such.
+    section_html_parts = []
+    divider_shown = False
+    for i, s in enumerate(sections, start=1):
+        if not divider_shown and str(s.get("id")) in APPENDIX_SECTION_IDS:
+            section_html_parts.append(_appendix_divider(report))
+            divider_shown = True
+        section_html_parts.append(_section(report, s, derived, display_no=i))
     body = (_cover(report, derived)
             + _toc(report, sections)
-            + "".join(_section(report, s, derived) for s in sections))
+            + "".join(section_html_parts))
     meta = report.get("meta") or {}
     title = _esc(meta.get("company_name") or "AI-Arvonmääritysraportti")
     fonts = _font_style()

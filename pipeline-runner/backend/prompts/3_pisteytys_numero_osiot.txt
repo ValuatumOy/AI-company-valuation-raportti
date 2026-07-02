@@ -44,13 +44,20 @@ OSA B — NUMERO-OSIOT:
 
 OSIO 5 — HISTORIALLINEN KEHITYS: `table` avainluvut (Liikevaihto, Kasvu-%, Bruttotulos, EBITDA, EBITDA-%, EBIT, EBIT-%, Nettotulos, Henkilöstö, Oma pääoma, Oma pääoma ilman pääomalainoja, Korolliset velat, Rahat, Nettovelka — vain rivit joiden data on). `heading`+3–5 `paragraph`: historian vaiheet, kannattavuus, kulurakenne, tase, velka/kassa, onko kasvu kannattavaa. Kriittisen pisteen laskelma `callout` jos laskettavissa (kiinteät/bruttokate-%). Normalisointihuomiot. `chart` bar_line Liikevaihto+EBIT-%, `chart` bar_grouped Kassa vs korolliset velat.
 
-OSIO 6 — ENNUSTEET: aloita `paragraph` ennusteen luonteesta (jos järjestelmän: "Ennusteet on tuotettu järjestelmän deterministisillä ennustesäännöillä; tekoäly ei ole muuttanut lukuja, vaan sen rooli on arvioida ennusteen uskottavuus."). `table` ennusteen avainluvut vuosittain. `heading`+2–4 numeroitua `paragraph` uskottavuudesta (vastaako historiaa, käänne, terminaalitaso, käyttöpääomavääristymät, mekaanisuus).
+OSIO 6 — ENNUSTEET: aloita `paragraph` ennusteen luonteesta (jos järjestelmän: "Ennusteet on tuotettu järjestelmän deterministisillä ennustesäännöillä; tekoäly ei ole muuttanut lukuja, vaan sen rooli on arvioida ennusteen uskottavuus."). `table` ennusteen AVAINVUODET vain (ensimmäinen ennustevuosi, suunnilleen puolivälin vuosi, viimeinen ennustevuosi/terminaalivuosi — enintään 3–4 saraketta vuosia kohti) — täydet vuosittaiset luvut menevät OSIOON 17, älä toista niitä tässä kokonaisuudessaan. `heading`+2–4 numeroitua `paragraph` uskottavuudesta (vastaako historiaa, käänne, terminaalitaso, käyttöpääomavääristymät, mekaanisuus).
 
 OSIO 8 — ARVONMÄÄRITYS: `table` painotettu lopputulos (Menetelmä, Arvo, Paino, Kontribuutio). `paragraph` painojen lähteestä. Jos negatiivinen: rivit "Laskennallinen base case ennen flooria", "Omistaja-arvon lattia 0 tEUR", "Optio-/strateginen arvo: ks. skenaariot". Jos positiivinen: "Oman pääoman arvo (painotettu)". Arvostusväli/hajonta. Pääomalainojen/nettovelan/negatiivisen OPO:n käsittely `callout`. `chart` bar.
+Riippumaton markkinaristiintarkistus (ei painotettu menetelmä — vain viite):
+- Jos `[input_data].peers` sisältää yhtiöitä joilla on `ev_teur`, `revenue_teur` ja/tai `ebitda_teur`: laske jokaiselle verrokille EV/Liikevaihto ja EV/EBITDA annetuista luvuista. `table` verrokkikertoimet (Yhtiö, EV, Liikevaihto, EBITDA, EV/Liikevaihto, EV/EBITDA — vain sarakkeet joissa dataa). Laske mediaani EV/Liikevaihto ja mediaani EV/EBITDA, sovella yhtiön omaan liikevaihtoon/EBITDAan tuloksena viitteellinen yritysarvo. `paragraph`: tulos on karkea ristiintarkistus, ei koko/kasvu/kannattavuus/likviditeettieroja oikaistu ellei `[input_data]` anna oikaisukerrointa; vertaa tulosta painotettuun lopputulokseen ja sano suoraan jos ne poikkeavat merkittävästi.
+- Jos `[input_data].peers` on tyhjä tai ilman tarvittavia kenttiä: `callout` (variant "warning", title "Ei riippumatonta markkinaristiintarkistusta") teksti: "Raportti ei sisällä riippumatonta markkinakerroin-ristiintarkistusta (EV/liikevaihto, EV/EBITDA), koska input-data ei sisältänyt verrokkiyhtiöiden kertoimia. Arvonmääritys nojaa yksinomaan [käytetyt menetelmät] -menetelmiin ilman ulkoista markkinavahvistusta — tämä on merkittävä rajoite, joka on huomioitava luottamustasossa." Toista tämä rajoite myös OSIOSSA 2 lyhyesti, älä vain OSIOSSA 15.
 
-OSIO 9 — DISKONTATTU KASSAVIRTA: jos DCF annettu: `table` WACC-parametrit, `table` FCFF+diskontatut vuosittain+summat. `paragraph` "DCF-menetelmän tulos ennen floor-käsittelyä: [arvo] tEUR." Jos negatiivinen: base case -alijäämä, lattia 0. Todellisuustarkistus `callout` 2–4 kohtaa. Jos ei DCF:ää: vakiolause ettei voida käyttää.
+OSIO 9 — DISKONTATTU KASSAVIRTA: jos DCF annettu (`[input_data].valuation_engine.dcf`): `table` WACC-parametrit. `table` FCFF+diskontatut vuosittain (Vuosi, FCFF, Diskontattu FCFF) + summarivi "PV, ennustejakso yhteensä" = diskontattujen FCFF-arvojen summa. `table` SILTA (title "Yritysarvosta oman pääoman arvoon"), rivit tässä täsmällisessä järjestyksessä ja tässä täsmällisessä laskentatavassa — ÄLÄ laske terminaaliarvoa itse Gordonin kaavalla, se johdetaan suoraan annetuista luvuista: (1) "PV, ennustejakso yhteensä" = diskontattujen FCFF:ien summa; (2) "Terminaaliarvon nykyarvo" = `cumulative_discounted_fcff[0]` miinus PV ennustejakso (rivi 1); (3) "Yritysarvo (EV)" = `cumulative_discounted_fcff[0]` (= rivi 1 + rivi 2); (4) "− Korolliset velat" = `bridge.interest_bearing_debt`; (5) "+ Kassa" = `bridge.cash`; (6) "= Oman pääoman arvo ennen lattiaa" = `equity_value_before_floor`. Jokaisen rivin on täsmättävä merkilleen `valuation_engine.dcf`-lukuihin. `paragraph` "DCF-menetelmän tulos ennen floor-käsittelyä: [arvo] tEUR." — sama luku kuin sillan rivi 6. Jos negatiivinen: base case -alijäämä, lattia 0. Todellisuustarkistus `callout` 2–4 kohtaa. Jos ei DCF:ää: vakiolause ettei voida käyttää.
 
-OSIO 10 — TOINEN MENETELMÄ (yleensä EVA): mitä mittaa, sopivuus, oletus, rajoite, tulos; jos negatiivinen, base case -alijäämä. `table` komponenteista.
+OSIO 10 — TOINEN MENETELMÄ (yleensä EVA): mitä mittaa, sopivuus, oletus, rajoite. Jos EVA käyttää samaa ennustepolkua ja WACC:ia kuin DCF, sano suoraan että kyse on saman ennusteen sisäisestä ristiintarkastuksesta — älä kutsu sitä riippumattomaksi vahvistukseksi. `table` SILTA komponenteista (title "Investoidusta pääomasta oman pääoman arvoon"), rivit tässä järjestyksessä: (1) "Investoitu pääoma" = `invested_capital`; (2) "PV, diskontatut EVA:t (ennustejakso)" = `discounted_eva`-listan summa; (3) "Jatkuvan arvon (terminaali-EVA) nykyarvo" = `equity_value_before_floor` miinus rivi 1 miinus rivi 2 — näytä tämä AINA omana rivinään, älä jätä piiloon vaikka se olisi suuri osa lopputuloksesta; (4) "= Oman pääoman arvo ennen lattiaa" = `equity_value_before_floor`. Jos negatiivinen, base case -alijäämä.
+
+OSIO 17 — LIITE: ENNUSTEEN TÄYDET VUOSITASON LUVUT: `paragraph` "Täydet vuosittaiset ennusteluvut kaikilta ennustevuosilta — sama data kuin osion 6 tiivistetyssä taulukossa, tässä kokonaisuudessaan." `table` KAIKKI `[input_data].forecast`-vuodet samoilla riveillä kuin osion 6 taulukossa. Tämä osio on liite eikä sitä lasketa raportin pääsivumäärään.
+
+Täytä `dcf_bridge` ja `eva_bridge` alla AINA kun vastaava menetelmä on annettu — niiden luvut ovat samat kuin OSIO 9/10 silta-taulukoiden rivit, ei erillinen laskelma. Nämä kentät ovat sitä varten, että silta voidaan tarkistaa ohjelmallisesti; jätä kenttä `null`:ksi vain jos menetelmää ei ole annettu lainkaan.
 
 OUTPUT (palauta täsmälleen tämä JSON):
 {
@@ -59,13 +66,16 @@ OUTPUT (palauta täsmälleen tämä JSON):
     "weighted_base_case_teur": null,
     "weights_source": "toimitettu|pisteytys",
     "owner_value_floor_teur": 0,
-    "data_quality_class": "Heikko|Kohtalainen|Hyvä"
+    "data_quality_class": "Heikko|Kohtalainen|Hyvä",
+    "dcf_bridge": {"pv_forecast_period_teur": null, "pv_terminal_value_teur": null, "enterprise_value_teur": null, "interest_bearing_debt_teur": null, "cash_teur": null, "equity_value_before_floor_teur": null},
+    "eva_bridge": {"invested_capital_teur": null, "pv_explicit_eva_teur": null, "pv_terminal_eva_teur": null, "equity_value_before_floor_teur": null}
   },
   "sections": [
     {"id":"5","title":"HISTORIALLINEN TALOUDELLINEN KEHITYS","blocks":[]},
     {"id":"6","title":"ENNUSTEET","blocks":[]},
     {"id":"8","title":"ARVONMÄÄRITYS","blocks":[]},
     {"id":"9","title":"DISKONTATTU KASSAVIRTA","blocks":[]},
-    {"id":"10","title":"TOINEN KESKEINEN ARVONMÄÄRITYSMENETELMÄ","blocks":[]}
+    {"id":"10","title":"TOINEN KESKEINEN ARVONMÄÄRITYSMENETELMÄ","blocks":[]},
+    {"id":"17","title":"LIITE: ENNUSTEEN TÄYDET VUOSITASON LUVUT","blocks":[]}
   ]
 }

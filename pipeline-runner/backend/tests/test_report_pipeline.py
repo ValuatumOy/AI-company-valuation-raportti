@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from app import assemble, render, validators
+from app import assemble, render, sensitivity, validators
 
 VDIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -69,6 +69,54 @@ def test_cover_guard_rejects_per_glyph_corruption(monkeypatch):
         render._cover_guard(_report(), render._derive(_report()))
 
 
+# --------------------------------------------------------------- mandate block
+def test_mandate_block_renders_when_present():
+    rep = _report()
+    rep["meta"]["mandate"] = {
+        "valuation_date": "2026-06-26", "purpose": "Indikatiivinen arviointi",
+        "standard_of_value": "Käypä arvo jatkavan toiminnan periaatteella",
+    }
+    text = render._norm_ws(render._strip_tags(render.render_html(rep)))
+    assert "Toimeksianto" in text
+    assert "Indikatiivinen arviointi" in text
+    assert "Käypä arvo jatkavan toiminnan periaatteella" in text
+
+
+def test_mandate_block_absent_without_data():
+    text = render._norm_ws(render._strip_tags(render.render_html(_report())))
+    assert "Toimeksianto" not in text
+
+
+# --------------------------------------------------------------- appendix + numbering
+def test_toc_and_section_numbering_has_no_gap():
+    # SECTION_ORDER has no id "7" by design — with every canonical section
+    # present, the displayed numbering must still run 1..N with no gap,
+    # rather than showing the raw id (which would jump 6 -> 8).
+    from app.runner import SECTION_ORDER
+    rep = {"meta": {"company_name": "X"},
+           "cover": {"headline_value": "1 tEUR", "base_case_value": "1 tEUR"},
+           "sections": [{"id": sid, "title": f"T{sid}", "blocks": []} for sid in SECTION_ORDER]}
+    html = render.render_html(rep)
+    text = render._norm_ws(render._strip_tags(html))
+    assert "7 T8" in text  # id "8" is the 7th real section — no jump to "8 T8"
+    assert "8 T8" not in text
+
+
+def test_appendix_divider_appears_once_before_appendix_sections():
+    rep = {"meta": {"company_name": "X"},
+           "cover": {"headline_value": "1 tEUR", "base_case_value": "1 tEUR"},
+           "sections": [{"id": "1", "title": "A", "blocks": []},
+                        {"id": "14", "title": "B", "blocks": []},
+                        {"id": "15", "title": "LÄHTEET", "blocks": []},
+                        {"id": "16", "title": "METODOLOGIA", "blocks": []},
+                        {"id": "17", "title": "LIITE", "blocks": []}]}
+    html = render.render_html(rep)
+    marker = '<section class="page appendix-divider">'
+    assert html.count(marker) == 1
+    assert html.index(marker) > html.index(">B</h2>")
+    assert html.index(marker) < html.index(">LÄHTEET</h2>")
+
+
 # --------------------------------------------------------------- assembler
 def test_assembler_orders_sections_without_section_7():
     run = {"results": [
@@ -87,6 +135,78 @@ def test_assembler_orders_sections_without_section_7():
     assert ids == ["1", "2", "3", "4", "5", "6", "8", "9", "10", "11", "12", "13", "14", "15", "16"]
     assert "7" not in ids
     assert rep["report_type"] == "ai_valuation_report"
+
+
+# --------------------------------------------------------------- sensitivity
+def _engine_input_data():
+    # Clean end-of-year discounting (wacc=10%) so exponents come out exactly
+    # 1 and 2 — easy to hand-verify. cumulative_discounted_fcff[0]=400 and
+    # equity_value_before_floor=450 are picked ground truths (bridge_adj=50).
+    return {
+        "valuation_engine": {
+            "wacc_parameters": {"wacc_pct": 10.0},
+            "dcf": {
+                "fcff": [100.0, 110.0],
+                "discounted_fcff": [100 / 1.1, 110 / 1.1 ** 2],
+                "cumulative_discounted_fcff": [400.0, 200.0],
+                "equity_value_before_floor": 450.0,
+            },
+        },
+        "forecast": {"net_sales": [5000.0, 5500.0], "ebit_pct": [8.0, 9.0]},
+    }
+
+
+def test_sensitivity_returns_both_matrices_when_data_available():
+    blocks = sensitivity.build_sensitivity_blocks(_engine_input_data())
+    assert len(blocks) == 2
+    for b in blocks:
+        assert b["chart_type"] == "heatmap_or_matrix"
+        assert len(b["x_axis"]) == 5
+        assert len(b["series"]) == 5
+        assert all(len(row["values"]) == 5 for row in b["series"])
+
+
+def test_sensitivity_wacc_growth_center_cell_matches_ground_truth():
+    blocks = sensitivity.build_sensitivity_blocks(_engine_input_data())
+    wg = next(b for b in blocks if b["chart_id"] == "wacc_growth_sensitivity")
+    center = wg["series"][2]["values"][2]  # middle row/col = base wacc/growth
+    assert abs(center - 450.0) <= 1.0
+
+
+def test_sensitivity_revenue_ebit_center_cell_matches_ground_truth():
+    blocks = sensitivity.build_sensitivity_blocks(_engine_input_data())
+    rm = next(b for b in blocks if b["chart_id"] == "revenue_ebit_sensitivity")
+    center = rm["series"][2]["values"][2]  # base revenue x base EBIT-%
+    assert abs(center - 450.0) <= 1.0
+
+
+def test_sensitivity_higher_wacc_means_lower_value():
+    blocks = sensitivity.build_sensitivity_blocks(_engine_input_data())
+    wg = next(b for b in blocks if b["chart_id"] == "wacc_growth_sensitivity")
+    low_wacc_row = wg["series"][0]["values"][2]
+    high_wacc_row = wg["series"][-1]["values"][2]
+    assert low_wacc_row > high_wacc_row
+
+
+def test_sensitivity_returns_empty_without_dcf_data():
+    assert sensitivity.build_sensitivity_blocks({}) == []
+    assert sensitivity.build_sensitivity_blocks(
+        {"valuation_engine": {"dcf": {}}}) == []
+
+
+def test_assemble_injects_sensitivity_blocks_into_section_11():
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},
+        {"order": 4, "status": "ok", "parsed_json": {"sections": [
+            {"id": "11", "title": "HERKKYYS", "blocks": [{"type": "heading", "text": "x"}]}]}},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"}]}},
+    ]}
+    rep = assemble.assemble(run)
+    sec11 = next(s for s in rep["sections"] if s["id"] == "11")
+    types = [b["type"] for b in sec11["blocks"]]
+    assert types == ["heading", "chart", "chart"]
 
 
 # --------------------------------------------------------------- validators
@@ -140,6 +260,31 @@ def test_stage4_validator_handles_one_percent_probability():
         "realistic_base_case_teur": 1000}
     r = validators.run_validator(_v("stage4_scenarios.py"), out, {})
     assert r["passed"], r
+
+
+def _scenario_block(equity, ratio):
+    return {"type": "scenario_table", "scenario": "realistinen",
+            "value_teur": 1000, "probability_pct": 50,
+            "perusluvut": {"columns": ["Tunnusluku", "2034"],
+                            "rows": [["Oma pääoma", equity]]},
+            "avainluvut": {"columns": ["Tunnusluku", "2034"],
+                            "rows": [["Omavaraisuusaste", ratio]]}}
+
+
+def test_stage4_validator_passes_consistent_equity_ratio():
+    out = _s4()
+    out["sections"] = [{"id": "11", "blocks": [_scenario_block(150, 22.5)]}]
+    r = validators.run_validator(_v("stage4_scenarios.py"), out, {})
+    assert r["passed"], r
+
+
+def test_stage4_validator_catches_positive_equity_negative_ratio():
+    # The reported bug: perusskenaarion oma pääoma positiivinen mutta
+    # omavaraisuusaste negatiivinen samassa sarakkeessa.
+    out = _s4()
+    out["sections"] = [{"id": "11", "blocks": [_scenario_block(150, -27.8)]}]
+    r = validators.run_validator(_v("stage4_scenarios.py"), out, {})
+    assert not r["passed"]
 
 
 def test_stage6_validator_passes_nbsp_formatted_cover():
@@ -221,6 +366,91 @@ def test_stage3_fabrication_gate_ignores_years_and_percentages():
     safe = {"sections": [{"id": "8", "blocks": [
         {"type": "paragraph", "text": "Vuonna 2027 kasvu oli 4 321 % ja 12 kuukautta."}]}]}
     assert _gate(validators.run_validator(code, safe, ctx))["passed"]  # year+% not euro figs
+
+
+# ------------------------------------ stage-3 DCF/EVA bridge reconciliation
+def _bridge_ctx():
+    return {"input_data": {"valuation_engine": {
+        "wacc_parameters": {"wacc_pct": 9.46},
+        "dcf": {
+            "years": [2025, 2026], "fcff": [100.0, 110.0],
+            "discounted_fcff": [95.0, 90.0],
+            "cumulative_discounted_fcff": [2000.0, 1905.0],
+            "equity_value_before_floor": 2450.0,
+        },
+        "eva": {"invested_capital": 1200.0, "discounted_eva": [50.0, 40.0],
+                "equity_value_before_floor": 2300.0},
+    }}}
+
+
+def _bridge_output(**bridge_over):
+    # Internally consistent AND matches _bridge_ctx()'s engine ground truth:
+    # pv_forecast (185) + pv_terminal (1815) = EV (2000) = cumulative[0];
+    # EV (2000) - debt (-31) + cash (419) = equity (2450) = engine's own figure.
+    dcf_bridge = {"pv_forecast_period_teur": 185.0, "pv_terminal_value_teur": 1815.0,
+                  "enterprise_value_teur": 2000.0, "interest_bearing_debt_teur": -31.0,
+                  "cash_teur": 419.0, "equity_value_before_floor_teur": 2450.0}
+    dcf_bridge.update(bridge_over)
+    return {"scoring": {
+        "method_scoring": [
+            {"method": "DCF", "status": "hyväksytty", "weight_pct": 50, "value_teur": 2450},
+            {"method": "EVA", "status": "hyväksytty", "weight_pct": 50, "value_teur": 2300}],
+        "dcf_bridge": dcf_bridge,
+        "eva_bridge": {"invested_capital_teur": 1200.0, "pv_explicit_eva_teur": 90.0,
+                       "pv_terminal_eva_teur": 1010.0, "equity_value_before_floor_teur": 2300.0},
+    }, "sections": []}
+
+
+def _bridge_chk(r, needle):
+    return next(c for c in r["checks"] if needle in c["name"])
+
+
+def test_stage3_dcf_bridge_reconciles():
+    r = validators.run_validator(_v("stage3_numbers.py"), _bridge_output(), _bridge_ctx())
+    assert _bridge_chk(r, "PV(ennustejakso) + PV(terminaali) = EV")["passed"]
+    assert _bridge_chk(r, "EV - korolliset velat + kassa")["passed"]
+    assert _bridge_chk(r, "stated equity_value_before_floor matches valuation_engine.dcf")["passed"]
+
+
+def test_stage3_dcf_bridge_catches_internal_arithmetic_error():
+    # The reported production bug: EV - debt + cash != the report's own stated
+    # equity value (a 200+ tEUR unexplained gap).
+    bad = _bridge_output(equity_value_before_floor_teur=2662.0)
+    r = validators.run_validator(_v("stage3_numbers.py"), bad, _bridge_ctx())
+    assert not _bridge_chk(r, "EV - korolliset velat + kassa")["passed"]
+
+
+def test_stage3_dcf_bridge_catches_drift_from_engine_ground_truth():
+    # Internally self-consistent (185+1315=1500=EV; 1500+31+419=1950=equity)
+    # but both numbers have drifted away from what the engine actually gave
+    # (EV 2000, equity 2450) — a "report contradicts its own inputs" bug,
+    # distinct from an internal-arithmetic error.
+    bad = _bridge_output(enterprise_value_teur=1500.0, pv_terminal_value_teur=1315.0,
+                          equity_value_before_floor_teur=1950.0)
+    r = validators.run_validator(_v("stage3_numbers.py"), bad, _bridge_ctx())
+    assert not _bridge_chk(r, "stated EV matches valuation_engine.dcf.cumulative_discounted_fcff[0]")["passed"]
+
+
+def test_stage3_eva_bridge_catches_hidden_terminal_component():
+    out = _bridge_output()
+    # EVA total states 2300 but the visible components (1200 + 90) only add to
+    # 1290 if pv_terminal_eva is wrong — exactly the reported "hidden terminal
+    # EVA" bug (a total that can't be verified from the shown line items).
+    out["scoring"]["eva_bridge"]["pv_terminal_eva_teur"] = 100.0
+    r = validators.run_validator(_v("stage3_numbers.py"), out, _bridge_ctx())
+    assert not _bridge_chk(r, "EVA bridge: investoitu pääoma")["passed"]
+
+
+def test_stage3_weight_sum_check():
+    out = _bridge_output()
+    out["scoring"]["method_scoring"][0]["weight_pct"] = 70  # 70 + 50 = 120%
+    r = validators.run_validator(_v("stage3_numbers.py"), out, _bridge_ctx())
+    assert not _bridge_chk(r, "menetelmien painot")["passed"]
+
+
+def test_stage3_bridge_checks_skip_gracefully_when_absent():
+    r = validators.run_validator(_v("stage3_numbers.py"), {"scoring": {}, "sections": []}, {})
+    assert r["passed"], r
 
 
 def test_user_input_number_is_allowed_not_flagged_as_fabrication():
@@ -508,5 +738,7 @@ def test_golden_pdf_has_no_blank_pages(tmp_path):
     out = str(tmp_path / "g.pdf")
     render.render_pdf(rep, out)
     n_sections = len(render._ensure_disclaimer(render._ordered_sections(rep)))
-    # cover + TOC + one page per section, and crucially NO trailing blank pages
-    assert _pdf_page_count(out) == n_sections + 2
+    # cover + TOC + appendix divider (section 16's disclaimer is always
+    # ensured, so the divider always fires) + one page per section — and
+    # crucially NO trailing blank pages.
+    assert _pdf_page_count(out) == n_sections + 3

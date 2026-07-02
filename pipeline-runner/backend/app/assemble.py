@@ -7,9 +7,11 @@ arrays from every stage into one list sorted by the canonical section order
 1,2,3,4,5,6,8,9,10,11,12,13,14,15,16 (there is no section 7), and returns the
 final report object that feeds the renderer.
 """
+from . import sensitivity
 from .runner import SECTION_ORDER
 
 _WRAPPER_MARKERS = ("report_type", "cover", "machine_readable", "meta")
+_SENSITIVITY_SECTION_ID = "11"
 
 
 def _ok_outputs_by_order(run):
@@ -47,6 +49,20 @@ def merge_sections(outputs_by_order):
     return [by_id[k] for k in sorted(by_id, key=_order_index)]
 
 
+def _inject_sensitivity_blocks(sections, input_data):
+    """Append the deterministic WACC×growth and revenue×EBIT-margin matrices
+    to section 11 — computed in code (see app/sensitivity.py), never by the
+    LLM, per the hard rule against inventing sensitivity matrices."""
+    blocks = sensitivity.build_sensitivity_blocks(input_data)
+    if not blocks:
+        return sections
+    for sec in sections:
+        if isinstance(sec, dict) and str(sec.get("id")) == _SENSITIVITY_SECTION_ID:
+            sec["blocks"] = list(sec.get("blocks") or []) + blocks
+            break
+    return sections
+
+
 def assemble(run):
     """Build the final report dict from a finished run. Best-effort: returns
     whatever can be assembled even if stage 6 did not complete."""
@@ -64,7 +80,9 @@ def assemble(run):
     if wrapper is None:
         wrapper = dict(outputs[max(outputs)])
 
-    wrapper["sections"] = merge_sections(outputs)
+    sections = merge_sections(outputs)
+    _inject_sensitivity_blocks(sections, outputs.get(0))
+    wrapper["sections"] = sections
 
     # Attach the structured scoring (stage 3) + scenarios (stage 4) objects so
     # the renderer can derive the signature visuals (range bar, method-value

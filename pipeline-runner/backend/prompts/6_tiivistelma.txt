@@ -46,6 +46,15 @@ SYÖTE:
 
 KANSI:
 - `meta`: yrityksen nimi, Y-tunnus, toimiala, päivämäärä.
+- `meta.mandate` (toimeksiannon määrittely — pakollinen, näytetään raportin ensimmäisillä sivuilla):
+  - `valuation_date`: arvopäivä = `[input_data].meta.report_date` (datan tilinpäätös-/mallinnushetki). Jos puuttuu, sano "Ei yksilöity aineistossa".
+  - `purpose`: käyttötarkoitus. Oletus (käytä ellei `[input_data]` tai `client_reported_signals` viittaa tiettyyn tilanteeseen kuten yrityskauppa/sukupolvenvaihdos, jolloin mainitse se): "Yhtiön arvon indikatiivinen, yleiskäyttöinen arviointi omistajien ja johdon päätöksenteon tueksi. Ei ole laadittu tiettyä transaktiota, oikeudenkäyntiä tai verotusta varten."
+  - `intended_users`: "Yhtiön johto ja omistajat. Ei ole tarkoitettu kolmansille osapuolille (esim. rahoittajat, ostajaehdokkaat) sellaisenaan ilman erillistä arviota."
+  - `standard_of_value`: "Käypä arvo jatkavan toiminnan periaatteella (markkinaehtoinen arvo, going concern), ei likvidaatioarvo."
+  - `ownership_interest`: "100 % yhtiön osake-/omistajakannasta. Ei vähemmistö- tai määräysvalta-alennuksia/-lisiä ellei toisin mainita."
+  - `marketability`: "Yhtiö on listaamaton. Arvo ei sisällä erillistä epälikvidiysalennusta, ellei sitä ole sovellettu menetelmäkohtaisesti (esim. VC-menetelmän likviditeettialennus) — tarkista `[input_data]`."
+  - `going_concern`: "Jatkuvan toiminnan periaatetta sovelletaan." — JOS data_quality/flags tai kassariski viittaa akuuttiin maksuvalmiuskriisiin tai toiminnan jatkuvuuden epävarmuuteen, sano se suoraan tässä sen sijaan että käytät oletuslausetta.
+  - `currency_unit`: valuutta ja yksikkö, esim. "EUR, esitetty tuhansina euroina (tEUR)".
 - Pääluku = skenaarioiden odotusarvo (`scenarios.expected_value_teur`), AINA yhdessä realistisen base casen kanssa (`scenarios.realistic_base_case_teur`). Esitä molemmat — älä koskaan pelkkää odotusarvoa. Jos base case negatiivinen: pääluku odotusarvo, alla "Realistinen base case (floorattu): [arvo]", "Base case ennen flooria: [arvo]", "Omistaja-arvon lattia: 0 tEUR". Vain jos yhtäkään menetelmää eikä skenaariota ei voitu muodostaa: "Ei määritettävissä luotettavasti annetulla datalla".
 
 OSIO 1 — TIIVISTELMÄ:
@@ -55,7 +64,7 @@ OSIO 1 — TIIVISTELMÄ:
 - `heading` "Mistä arvio riippuu eniten" + 3 numeroitua `paragraph`.
 - `callout` "Mikä kaataisi tämän arvion": alkaa "Arvio menettää perustansa, jos …". Jos negatiivinen base case + optioarvo, kaksisuuntainen muotoilu (ylös: kasvu onnistuu; alas: rahoitus katkeaa).
 
-OSIO 2 — DATAN LAATU: `paragraph` "Datan laatuluokka: [scoring.data_quality_class]." + perustelu. `heading` "Mitä käytettiin" + `key_value`: tilikaudet, tulos/tase, ennusteet, moottorin output, credit_risk, enrichment-lähteet, kilpailija-/markkinatieto, asiakkaan signaalit, Y-tunnus-varmistus. `heading` "Tunnistetut rajoitteet" + 3–7 numeroitua `paragraph`; raportoi `flags`-ristiriidat avoimesti.
+OSIO 2 — DATAN LAATU: `paragraph` "Datan laatuluokka: [scoring.data_quality_class]." + perustelu. `heading` "Mitä käytettiin" + `key_value`: tilikaudet, tulos/tase, ennusteet, moottorin output, credit_risk, enrichment-lähteet, kilpailija-/markkinatieto, asiakkaan signaalit, Y-tunnus-varmistus. `heading` "Tunnistetut rajoitteet" + 3–7 numeroitua `paragraph`; raportoi `flags`-ristiriidat avoimesti. Jos `[input_data].peers` on tyhjä tai ilman kertoimia, tämä ON yksi numeroiduista rajoitteista tässä listassa (ei vain mainita osiossa 15) — sano lyhyesti sama asia kuin osion 8 varoitus.
 
 OSIO 15 — LÄHTEET: `paragraph` viittaus käytettyihin taulukoihin. Toimialavertailu: jos peers-dataa ei ole, "Toimialavertailua ei voida muodostaa, koska input-data ei sisältänyt verrokki- tai toimialakertoimia." `table` lähderekisteri (sis. enrichmentin kilpailija-/markkinalähteet). Sarakkeet: Lähde, Kuvaus, Haettu. Lähde-sarakkeessa käytä KOKO verkko-osoitetta (https://…) suoraan `enrichment.source_register[].source`-kentästä aina kun se on saatavilla, jotta lähde on klikattavissa raportissa; vain jos pelkkä verkkotunnus on tiedossa, käytä sitä.
 
@@ -65,7 +74,8 @@ OUTPUT (palauta täsmälleen tämä JSON):
 {
   "report_type": "ai_valuation_report",
   "language": "fi",
-  "meta": {"company_name":"","y_tunnus":"","industry":"","domicile":"","report_date":"","unit":"tEUR","level":"parent"},
+  "meta": {"company_name":"","y_tunnus":"","industry":"","domicile":"","report_date":"","unit":"tEUR","level":"parent",
+    "mandate": {"valuation_date":"","purpose":"","intended_users":"","standard_of_value":"","ownership_interest":"","marketability":"","going_concern":"","currency_unit":""}},
   "cover": {"headline_label":"","headline_value":"","base_case_value":"","secondary_lines":[]},
   "confidence": {"level":"","deciding_rule":""},
   "data_quality": {"class":""},
