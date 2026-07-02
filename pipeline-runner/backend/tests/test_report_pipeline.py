@@ -310,12 +310,15 @@ def _headcount_input_data():
         "actuals": {
             "years": [2023, 2024],
             "income_statement": {"ebit": [50.0, 60.0]},
+            # per_employee is fetched with money=True (tEUR/employee) — the live
+            # report bug was fetching these unscaled, so every ratio rounded to
+            # "0"/"-0" (66 200 €/employee came back as raw 0.0662).
             "per_employee": {
-                "net_sales": [66200, 83200],
-                "value_added": [52400, 50000],
-                "personnel_costs": [-47600, -55400],
-                "ebitda": [4800, -5400],
-                "net_earnings": [18200, -11400],
+                "net_sales": [66.2, 83.2],
+                "value_added": [52.4, 50.0],
+                "personnel_costs": [-47.6, -55.4],
+                "ebitda": [4.8, -5.4],
+                "net_earnings": [18.2, -11.4],
             },
         },
     }
@@ -334,6 +337,8 @@ def test_headcount_efficiency_table_has_years_as_columns_and_ebit_per_employee()
     # ebit_per_employee is derived locally: 50.0 tEUR / 5 employees * 1000 = 10 000 €
     assert next(r for r in table["rows"] if r[0] == "Liiketulos / henkilö") == ["Liiketulos / henkilö", "10 000", "10 000"]
     assert next(r for r in table["rows"] if r[0] == "Henkilöstö") == ["Henkilöstö", "5", "6"]
+    # per_employee fields scale tEUR -> EUR the same way (66.2 tEUR -> 66 200 €)
+    assert next(r for r in table["rows"] if r[0] == "Liikevaihto / henkilö") == ["Liikevaihto / henkilö", "66 200", "83 200"]
 
 
 def test_headcount_efficiency_returns_empty_without_headcount():
@@ -386,6 +391,37 @@ def test_assemble_replaces_old_vertical_dcf_table_with_deterministic_detail():
         isinstance(b, dict) and b.get("columns") == ["Vuosi", "FCFF", "Diskontattu FCFF"]
         for b in sec9["blocks"]
     )
+
+
+def test_assemble_replaces_old_horizontal_llm_fcff_table_too():
+    # Live-report bug: OSIO 9 still tells the model to write its own
+    # years-as-columns FCFF build-up table (same shape as the deterministic
+    # one), which the narrow vuosi/fcff/diskontattu column check never caught
+    # — so both tables rendered back to back on the DCF page.
+    llm_table = {
+        "type": "table", "title": "DCF-laskelma: FCFF ja nykyarvo vuosittain",
+        "columns": ["Erä", "2026E", "2027E"],
+        "rows": [
+            ["EBIT", -11.4, -2.2],
+            ["Liiketoiminnan kassavirta", 7.3, 7.4],
+            ["Diskontattu FCFF", 9.4, 6.7],
+        ],
+    }
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},
+        {"order": 3, "status": "ok", "parsed_json": {"sections": [
+            {"id": "9", "title": "DCF", "blocks": [llm_table]}]}},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"}]}}],
+    }
+    rep = assemble.assemble(run)
+    sec9 = next(s for s in rep["sections"] if s["id"] == "9")
+    table_ids = [b.get("table_id") for b in sec9["blocks"] if isinstance(b, dict)]
+    assert "deterministic_dcf_fcff_drivers" in table_ids
+    assert not any(b is llm_table for b in sec9["blocks"])
+    assert sum(1 for b in sec9["blocks"] if isinstance(b, dict)
+               and "dcf-laskelma" in str(b.get("title", "")).lower()) == 1
 
 
 def test_assemble_normalizes_dcf_eva_equivalence_in_sections_and_scoring():

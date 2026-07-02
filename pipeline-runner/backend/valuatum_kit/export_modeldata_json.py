@@ -374,15 +374,17 @@ def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[
                 "interest_bearing_debt": arr(data_map, actual_years, "liab_ib_total", money=True),
                 "non_interest_bearing_debt": arr(data_map, actual_years, "non_interest_bearing_debt", money=True),
             },
-            # Per-employee ratios the engine already computes. These are pre-scaled
-            # EUR-per-employee figures, not millions like the rest of this file —
-            # money=True (x1000) is deliberately NOT applied here.
+            # Per-employee ratios the engine already computes, in tEUR/employee —
+            # confirmed live: unscaled values rounded to 0/-0 across every year
+            # (e.g. 66 200 €/employee came back as 0.0662), so these are millions
+            # like every other money field. headcount_efficiency.py scales x1000
+            # to a plain EUR/employee figure at render time.
             "per_employee": {
-                "net_sales": arr(data_map, actual_years, "cr_ns_per_employee"),
-                "value_added": arr(data_map, actual_years, "cr_added_value_per_employee"),
-                "personnel_costs": arr(data_map, actual_years, "cr_employee_expenses_per_employee"),
-                "ebitda": arr(data_map, actual_years, "cr_ebitda_per_employee"),
-                "net_earnings": arr(data_map, actual_years, "cr_net_earnings_per_employee"),
+                "net_sales": arr(data_map, actual_years, "cr_ns_per_employee", money=True),
+                "value_added": arr(data_map, actual_years, "cr_added_value_per_employee", money=True),
+                "personnel_costs": arr(data_map, actual_years, "cr_employee_expenses_per_employee", money=True),
+                "ebitda": arr(data_map, actual_years, "cr_ebitda_per_employee", money=True),
+                "net_earnings": arr(data_map, actual_years, "cr_net_earnings_per_employee", money=True),
             },
         },
         "forecast": forecast,

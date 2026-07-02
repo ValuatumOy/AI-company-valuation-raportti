@@ -46,6 +46,12 @@ def _ebit_per_employee(ebit_teur, headcount):
     return out
 
 
+def _to_eur(values_teur):
+    """actuals.per_employee is fetched in tEUR/employee (see export_modeldata_json.py) —
+    scale to a plain EUR/employee figure, same as the locally-derived EBIT row."""
+    return [v * 1000 if _is_num(v) else None for v in values_teur]
+
+
 def build_headcount_efficiency_blocks(input_data):
     headcount = (input_data or {}).get("headcount") or {}
     years = headcount.get("years")
@@ -70,7 +76,7 @@ def build_headcount_efficiency_blocks(input_data):
         ("Henkilökulut / henkilö", "personnel_costs"),
         ("Käyttökate / henkilö", "ebitda"),
     ):
-        r = _row(label, _align(_get_list(per_emp, key), n))
+        r = _row(label, _to_eur(_align(_get_list(per_emp, key), n)))
         if r:
             rows.append(r)
 
@@ -78,7 +84,7 @@ def build_headcount_efficiency_blocks(input_data):
     if ebit_row:
         rows.append(ebit_row)
 
-    net_row = _row("Nettotulos / henkilö", _align(_get_list(per_emp, "net_earnings"), n))
+    net_row = _row("Nettotulos / henkilö", _to_eur(_align(_get_list(per_emp, "net_earnings"), n)))
     if net_row:
         rows.append(net_row)
 

@@ -87,7 +87,18 @@ def _is_old_fcff_table(block):
     has_year = any(c in ("vuosi", "year") for c in cols)
     has_fcff = any("fcff" in c for c in cols)
     has_discounted = any(("diskont" in c or "discount" in c) for c in cols)
-    return has_year and has_fcff and has_discounted
+    if has_year and has_fcff and has_discounted:
+        return True  # old narrow vertical shape: Vuosi | FCFF | Diskontattu FCFF
+    # The OSIO 9 prompt also asks the model to write its own horizontal FCFF
+    # build-up table (same shape as the deterministic one) — same title/row
+    # markers, years-as-columns instead of a "vuosi"/"fcff" column name, so the
+    # check above never matches it and it survives alongside the real one.
+    title = str(block.get("title") or "").lower()
+    if "fcff" not in title and "dcf-laskelma" not in title:
+        return False
+    labels = _row_labels(block)
+    fcff_markers = ("ebit", "fcff", "diskontattu fcff", "liiketoiminnan kassavirta")
+    return sum(any(m in lab for m in fcff_markers) for lab in labels) >= 2
 
 
 def _is_old_dcf_bridge_table(block):
