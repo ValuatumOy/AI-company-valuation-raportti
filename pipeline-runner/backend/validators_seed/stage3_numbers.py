@@ -500,4 +500,43 @@ def validate(output: dict, context: dict) -> dict:
         chk("no invented euro figure in prose (>=1000, untraceable to data)", True,
             f"skipped: input number set too large ({len(base)}) to derive safely")
 
+    # --- years-as-columns tables must carry a label column --------------------
+    # Reported bug (Supercell p10/p12): history and forecast tables rendered as
+    # bare number grids — columns were years but every row lacked its first
+    # "Erä" label cell, so the reader could not tell revenue from equity.
+    _YEARISH = re.compile(r"^(19|20)\d{2}\s*E?$", re.I)
+
+    def _cell_is_numeric(c):
+        if isinstance(c, bool):
+            return False
+        if isinstance(c, (int, float)):
+            return True
+        if isinstance(c, str):
+            v, _ = _parse(c.strip())
+            return v is not None
+        return False
+
+    unlabeled = []
+    for sec in (output.get("sections") or []):
+        if not isinstance(sec, dict):
+            continue
+        sid = str(sec.get("id"))
+        for bi, b in enumerate(sec.get("blocks") or []):
+            if not isinstance(b, dict) or b.get("type") != "table":
+                continue
+            cols = b.get("columns")
+            if not isinstance(cols, list) or len(cols) < 3:
+                continue
+            yearish = sum(1 for c in cols if _YEARISH.match(str(c).strip()))
+            if yearish < 2:
+                continue
+            rows = [r for r in (b.get("rows") or []) if isinstance(r, list) and r]
+            if rows and all(_cell_is_numeric(r[0]) for r in rows):
+                unlabeled.append(
+                    f"section {sid} block {bi} ('{b.get('title') or '?'}'): "
+                    f"vuosisarakkeet mutta yhdelläkään rivillä ei ole nimeä ensimmäisessä "
+                    f"solussa — lisää jokaisen rivin alkuun rivin nimi (esim. 'Liikevaihto')")
+    chk("vuosisarakkeisissa taulukoissa on rivinimet (Erä-sarake)",
+        not unlabeled, "; ".join(unlabeled[:8]) if unlabeled else "ok")
+
     return {"passed": all(c["passed"] for c in checks), "checks": checks}

@@ -218,4 +218,40 @@ def validate(output: dict, context: dict) -> dict:
         sec16 is not None and "sijoitusneuvo" in str(sec16).lower(),
         "section 16 missing or lacks the mandatory Vastuuvapaus text")
 
+    # --- 5. years-as-columns tables must carry a label column ----------------
+    # Reported bug (Supercell appendix): the full-forecast table rendered as a
+    # bare number grid — year columns but no row names, unreadable.
+    _yearish = re.compile(r"^(19|20)\d{2}\s*E?$", re.I)
+
+    def _numeric_cell(c):
+        if isinstance(c, bool):
+            return False
+        if isinstance(c, (int, float)):
+            return True
+        if isinstance(c, str):
+            v, _ = _parse(c.strip())
+            return v is not None
+        return False
+
+    unlabeled = []
+    for sec in (secs or []):
+        if not isinstance(sec, dict):
+            continue
+        sid = str(sec.get("id"))
+        for bi, b in enumerate(sec.get("blocks") or []):
+            if not isinstance(b, dict) or b.get("type") != "table":
+                continue
+            cols = b.get("columns")
+            if not isinstance(cols, list) or len(cols) < 3 or sum(
+                    1 for c in cols if _yearish.match(str(c).strip())) < 2:
+                continue
+            rows = [r for r in (b.get("rows") or []) if isinstance(r, list) and r]
+            if rows and all(_numeric_cell(r[0]) for r in rows):
+                unlabeled.append(
+                    f"section {sid} block {bi} ('{b.get('title') or '?'}'): "
+                    f"vuosisarakkeet mutta riveillä ei nimiä — lisää jokaisen rivin "
+                    f"alkuun rivin nimi (esim. 'Liikevaihto')")
+    chk("vuosisarakkeisissa taulukoissa on rivinimet (Erä-sarake)",
+        not unlabeled, "; ".join(unlabeled[:8]) if unlabeled else "ok")
+
     return {"passed": all(c["passed"] for c in checks), "checks": checks}

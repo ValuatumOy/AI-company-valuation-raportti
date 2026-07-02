@@ -71,6 +71,26 @@ _PLACEHOLDER_RE = re.compile(r"\[\[[^\]]*\]\]")
 # the replacement noun, which also ends in -data, so it stays grammatical.
 _INPUT_TOK = re.compile(r"\[?\binput[_ ]?data([a-zäöå]*)\]?", re.IGNORECASE)
 _ENRICH_TOK = re.compile(r"\[?\benrichment[a-zäöå]*\]?", re.IGNORECASE)
+# Raw schema field names the model quotes from its instructions/context
+# ("market_signals ja client_reported_signals ovat tyhjät", "(tukee_kasvua)").
+# Each maps to reader-facing Finnish; inflections are handled by matching the
+# stem and letting the replacement stand alone.
+_SCHEMA_TOKENS = [
+    (re.compile(r"\(?\btukee[_ ]kasvua\b\)?", re.I), "(tukee kasvua)"),
+    (re.compile(r"\(?\brajoittaa[_ ]kasvua\b\)?", re.I), "(rajoittaa kasvua)"),
+    (re.compile(r"\bclient[_ ]reported[_ ]signals\b[a-zäöå]*", re.I), "asiakkaan ilmoittamat signaalit"),
+    (re.compile(r"\bmarket[_ ]signals\b[a-zäöå]*", re.I), "markkinasignaalit"),
+    (re.compile(r"\brevenue[_ ]anomaly[_ ]review\b[a-zäöå]*", re.I), "liikevaihtopoikkeaman tarkistus"),
+    (re.compile(r"\bsource[_ ]register\b[a-zäöå]*", re.I), "lähderekisteri"),
+    (re.compile(r"\bno[_ ]of[_ ]shares[_ ]total\b", re.I), "osakemäärä"),
+    (re.compile(r"\bfair[_ ]value[_ ]dcf\b", re.I), "osakekohtainen DCF-arvo"),
+    (re.compile(r"\bbusiness[_ ]profile\b[a-zäöå]*", re.I), "liiketoimintaprofiili"),
+    (re.compile(r"\bgrowth[_ ]assessment\b[a-zäöå]*", re.I), "kasvuarvio"),
+    (re.compile(r"\bvaluation[_ ]engine\b[a-zäöå]*", re.I), "arvonmääritysmoottori"),
+    (re.compile(r"\bkey[_ ]ratios\b[a-zäöå]*", re.I), "tunnusluvut"),
+    (re.compile(r"\bcredit[_ ]risk\b[a-zäöå]*", re.I), "luottoriskitiedot"),
+    (re.compile(r"\buser[_ ]input\b[a-zäöå]*", re.I), "käyttäjän antamat lisätiedot"),
+]
 
 
 def _flat_text(v):
@@ -101,6 +121,8 @@ def _clean(s):
     s = _PLACEHOLDER_RE.sub("", s)
     s = _INPUT_TOK.sub(lambda m: "tilinpäätösdata" + m.group(1), s)
     s = _ENRICH_TOK.sub("julkinen lähde", s)
+    for pat, repl in _SCHEMA_TOKENS:
+        s = pat.sub(repl, s)
     return s
 
 
@@ -301,6 +323,23 @@ def _source_inline(v):
     return _esc(v)
 
 
+def _fmt_raw_number(v):
+    """Finnish-format a raw numeric JSON value for a table cell. LLM stages
+    sometimes emit full-precision engine floats (4289677.53181) which read as
+    US-formatted garbage in a Finnish PDF. Ints that look like years (1900-2100)
+    pass through untouched — '2 026' as a column value would be worse."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if isinstance(v, int) and 1900 <= v <= 2100:
+        return None
+    if abs(v) >= 1000:
+        return _fmt(float(round(v)))
+    r = round(float(v), 2)
+    if r == int(r):
+        return str(int(r))
+    return f"{r}".replace(".", ",")
+
+
 def _num_cell(v):
     """Render a table value, colouring positive growth green / negative red."""
     # A bare URL in a source column reads as scraped data in a client PDF; show
@@ -312,7 +351,8 @@ def _num_cell(v):
             href = html.escape(v.strip(), quote=True)
             return f'<a class="src" href="{href}">{_esc(m.group(1))}</a>'
     n = _to_num(v)
-    txt = _esc(v)
+    formatted = _fmt_raw_number(v)
+    txt = _esc(formatted) if formatted is not None else _esc(v)
     if n is not None and isinstance(v, str) and ("%" in v or v.strip().startswith(("+", "-", "−"))):
         cls = "neg" if n < 0 else ("pos" if v.strip().startswith("+") else "")
         if cls:

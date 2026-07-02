@@ -545,6 +545,42 @@ def test_stage4_validator_catches_positive_equity_negative_ratio():
     assert not r["passed"]
 
 
+def _zero_scenario_block(ebits, debt=17669):
+    # Supercell bug shape: pessimistic scenario claims 0 tEUR while its own
+    # perusluvut hold EBIT positive in every column.
+    cols = ["2026E", "2030E", "2035E"]
+    return {"type": "scenario_table", "scenario": "pessimistinen",
+            "value_teur": 0, "probability_pct": 20,
+            "perusluvut": {"columns": ["Erä"] + cols,
+                            "rows": [["Liikevaihto", 1694537, 1694537, 1694537],
+                                     ["Liikevoitto"] + ebits,
+                                     ["Korolliset velat", debt, debt, debt]]},
+            "avainluvut": {"columns": ["Erä"] + cols, "rows": []}}
+
+
+def test_stage4_validator_catches_zero_value_scenario_with_positive_ebit():
+    out = _s4()
+    out["sections"] = [{"id": "11", "blocks": [
+        _zero_scenario_block([239886, 239886, 239886])]}]
+    ctx = {"input_data": {"valuation_engine": {
+        "wacc_parameters": {"wacc_pct": 9.46},
+        "dcf": {"bridge": {"cash": 653764.0}}}}}
+    r = validators.run_validator(_v("stage4_scenarios.py"), out, ctx)
+    assert not r["passed"]
+    c = next(c for c in r["checks"] if "nolla-arvoinen" in c["name"])
+    assert not c["passed"]
+    assert "ristiriidassa" in c["detail"]
+
+
+def test_stage4_validator_allows_zero_value_scenario_with_collapsing_ebit():
+    # A genuinely distressed path (EBIT goes negative) may be worth zero.
+    out = _s4()
+    out["sections"] = [{"id": "11", "blocks": [
+        _zero_scenario_block([50, -20, -90])]}]
+    r = validators.run_validator(_v("stage4_scenarios.py"), out, {})
+    assert r["passed"], r
+
+
 def test_stage6_validator_passes_nbsp_formatted_cover():
     # Finnish thousands separators may be NBSP (U+00A0) / narrow NBSP (U+202F).
     ctx = {"scenarios": {"expected_value_teur": 1598, "realistic_base_case_teur": 1000}}
@@ -951,6 +987,74 @@ def test_renderer_drops_noncanonical_section_ids():
     ordered = render._ordered_sections(rep)
     assert [s["id"] for s in ordered] == ["1", "16"]
     assert "GHOST" not in render.render_html(rep)
+
+
+def test_raw_float_cells_render_finnish_formatted():
+    # Supercell bug: LLM tables carried full-precision engine floats which
+    # rendered as US-formatted garbage ("4289677.53181") in a Finnish PDF.
+    h = render._render_table(["Erä", "2026", "2030"],
+                             [["Liikevaihto", 4289677.53181, 15024511.43214],
+                              ["Kasvu-%", 44.4, 13.11],
+                              ["Vuosi (koskematon)", 2026, 2030]])
+    assert "4 289 678" in h
+    assert "15 024 511" in h
+    assert "4289677" not in h
+    assert "44,4" in h and "13,11" in h
+    assert ">2026<" in h and ">2030<" in h  # year ints stay unformatted
+
+
+def test_clean_replaces_leaked_schema_tokens():
+    # Supercell bug: raw pipeline field names leaked into client prose.
+    s = render._clean("julkinen lähde market_signals ja asiakkaan "
+                      "client_reported_signals ovat tyhjät (tukee_kasvua); "
+                      "no_of_shares_total ja fair_value_dcf puuttuvat; "
+                      "revenue_anomaly_review: ei selitystä")
+    for leaked in ("market_signals", "client_reported_signals", "tukee_kasvua",
+                   "no_of_shares_total", "fair_value_dcf", "revenue_anomaly_review"):
+        assert leaked not in s, s
+    assert "markkinasignaalit" in s
+    assert "osakemäärä" in s
+
+
+def test_stage3_validator_catches_unlabeled_year_table():
+    # Supercell p10: history table with year columns but bare-number rows.
+    out = {"scoring": {"method_scoring": [
+        {"method": "DCF", "status": "hyväksytty", "weight_pct": 100, "value_teur": 100}]},
+        "sections": [{"id": "5", "blocks": [
+            {"type": "table", "title": "Avainluvut historialta",
+             "columns": ["2021", "2022", "2023", "2024", "2025"],
+             "rows": [[1795282, 1550932, 1424584, 1694537, 2970611],
+                      [44.43, 43.7, 41.49, 14.56, 41.48]]}]}]}
+    r = validators.run_validator(_v("stage3_numbers.py"), out, {})
+    c = next(c for c in r["checks"] if "rivinimet" in c["name"])
+    assert not c["passed"]
+
+
+def test_stage3_validator_accepts_labeled_year_table():
+    out = {"scoring": {"method_scoring": [
+        {"method": "DCF", "status": "hyväksytty", "weight_pct": 100, "value_teur": 100}]},
+        "sections": [{"id": "5", "blocks": [
+            {"type": "table", "title": "Avainluvut historialta",
+             "columns": ["Erä", "2021", "2022"],
+             "rows": [["Liikevaihto", 1795282, 1550932],
+                      ["EBITDA-%", 44.43, 43.7]]}]}]}
+    r = validators.run_validator(_v("stage3_numbers.py"), out, {})
+    c = next(c for c in r["checks"] if "rivinimet" in c["name"])
+    assert c["passed"], c
+
+
+def test_stage4_validator_catches_unlabeled_scenario_table():
+    out = _s4()
+    out["sections"] = [{"id": "11", "blocks": [
+        {"type": "scenario_table", "scenario": "realistinen",
+         "value_teur": 1000, "probability_pct": 50,
+         "perusluvut": {"columns": ["2026E", "2030E", "2035E"],
+                         "rows": [[4289678, 15024511, 17862833],
+                                  [1499260, 3441496, 1380522]]},
+         "avainluvut": {"columns": ["2026E", "2030E"], "rows": []}}]}]
+    r = validators.run_validator(_v("stage4_scenarios.py"), out, {})
+    c = next(c for c in r["checks"] if "skenaariotaulukoiden riveillä" in c["name"])
+    assert not c["passed"]
 
 
 @pytest.mark.skipif(not render.pdf_available(), reason="no local Chromium")

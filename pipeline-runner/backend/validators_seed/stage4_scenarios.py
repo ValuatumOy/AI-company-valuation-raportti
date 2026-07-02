@@ -194,4 +194,78 @@ def validate(output: dict, context: dict) -> dict:
         not sign_viol,
         "; ".join(sign_viol) if sign_viol else "ok (tai kumpaakin taulukkoa ei löytynyt)")
 
+    # --- 9. zero-value scenario must not contradict its own fundamentals -----
+    # Reported bug (Supercell): the pessimistic scenario was assigned 0 tEUR
+    # equity at 50% probability while its OWN perusluvut showed EBIT ~240 000
+    # tEUR positive and flat in every column, and the company held ~638 000
+    # tEUR net cash — a perpetually profitable scenario cannot be worth zero.
+    # Rough conservative perpetuity: EBIT * (1-tax) / WACC + cash - debt. If
+    # that proxy is clearly positive while the scenario claims ~0, fail the
+    # stage so the model either values the stated fundamentals or lowers them.
+    ve = ((context or {}).get("input_data") or {}).get("valuation_engine") or {}
+    wacc = _num((ve.get("wacc_parameters") or {}).get("wacc_pct"))
+    wacc = (wacc / 100.0) if wacc and wacc > 1.0 else (wacc or 0.10)
+    wacc = max(wacc, 0.08)
+    bridge_cash = _num(((ve.get("dcf") or {}).get("bridge") or {}).get("cash")) or 0.0
+
+    zero_viol = []
+    by_name = {str(s.get("name", "")).lower(): s for s in scen if isinstance(s, dict)}
+    for b in _blocks(output):
+        if b.get("type") != "scenario_table":
+            continue
+        name = str(b.get("scenario", "?"))
+        s = by_name.get(name.lower()) or {}
+        v = _value(s) if s else _num(b.get("value_teur"))
+        if v is None or v > 1.0:
+            continue  # only scenarios claiming ~zero equity
+        ebit_row = _table_row(b.get("perusluvut"), ("liikevoitto", "liiketulos", "ebit"))
+        if not ebit_row:
+            continue
+        ebits = [_num(c) for c in ebit_row[1:]]
+        ebits = [e for e in ebits if e is not None]
+        if not ebits or any(e <= 0 for e in ebits):
+            continue  # declining/loss-making scenario — zero is coherent
+        debt_row = _table_row(b.get("perusluvut"), ("korolliset velat", "korollinen velka"))
+        debt = max((_num(c) or 0.0) for c in debt_row[1:]) if debt_row and len(debt_row) > 1 else 0.0
+        proxy = ebits[-1] * 0.8 / wacc + bridge_cash - debt
+        if proxy > 0.05 * max(abs(rv or 0.0), 1.0):
+            zero_viol.append(
+                f"{name}: arvo {v} tEUR mutta oman taulukon EBIT pysyy positiivisena "
+                f"({round(ebits[-1])} tEUR) — karkea perpetuiteetti EBIT×0,8/WACC + kassa "
+                f"− velat ≈ {round(proxy)} tEUR > 0. Nolla-arvo on ristiriidassa skenaarion "
+                f"omien lukujen kanssa: joko laske skenaarion fundamenteille arvo tai "
+                f"muuta fundamentit vastaamaan nolla-arvoa")
+    chk("nolla-arvoinen skenaario ei saa näyttää pysyvästi positiivista EBITiä omassa taulukossaan",
+        not zero_viol, "; ".join(zero_viol) if zero_viol else "ok")
+
+    # --- 10. scenario tables must carry row labels ----------------------------
+    # Reported bug (Supercell p17-19): perusluvut/avainluvut rendered as bare
+    # number grids — the reader could not tell which row was revenue vs equity.
+    _yearish = re.compile(r"^(19|20)\d{2}\s*E?$", re.I)
+
+    def _numeric_cell(c):
+        return not isinstance(c, bool) and (
+            isinstance(c, (int, float)) or (isinstance(c, str) and _num(c) is not None))
+
+    unlabeled = []
+    for b in _blocks(output):
+        if b.get("type") != "scenario_table":
+            continue
+        name = b.get("scenario", "?")
+        for part in ("perusluvut", "avainluvut"):
+            t = b.get(part)
+            if not isinstance(t, dict):
+                continue
+            cols = t.get("columns")
+            if not isinstance(cols, list) or sum(
+                    1 for c in cols if _yearish.match(str(c).strip())) < 2:
+                continue
+            rows = [r for r in (t.get("rows") or []) if isinstance(r, list) and r]
+            if rows and all(_numeric_cell(r[0]) for r in rows):
+                unlabeled.append(
+                    f"{name}.{part}: rivit ovat pelkkiä numeroita — lisää jokaisen "
+                    f"rivin alkuun rivin nimi (esim. 'Liikevaihto')")
+    chk("skenaariotaulukoiden riveillä on nimet (ensimmäinen solu ei ole numero)",
+        not unlabeled, "; ".join(unlabeled[:6]) if unlabeled else "ok")
+
     return {"passed": all(c["passed"] for c in checks), "checks": checks}
