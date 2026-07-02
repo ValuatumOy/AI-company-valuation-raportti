@@ -6,7 +6,10 @@ import os
 
 import pytest
 
-from app import assemble, dcf_detail, render, revenue_anomalies, runner, sensitivity, validators
+from app import (
+    assemble, dcf_detail, headcount_efficiency, render, revenue_anomalies, runner,
+    sensitivity, validators,
+)
 
 VDIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -299,6 +302,59 @@ def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
     assert "diskontattu FCFF" in callout["title"]
     assert "EBITistä" in callout["text"]
     assert "nykyarvorivi" in callout["text"]
+
+
+def _headcount_input_data():
+    return {
+        "headcount": {"years": [2023, 2024], "values": [5, 6]},
+        "actuals": {
+            "years": [2023, 2024],
+            "income_statement": {"ebit": [50.0, 60.0]},
+            "per_employee": {
+                "net_sales": [66200, 83200],
+                "value_added": [52400, 50000],
+                "personnel_costs": [-47600, -55400],
+                "ebitda": [4800, -5400],
+                "net_earnings": [18200, -11400],
+            },
+        },
+    }
+
+
+def test_headcount_efficiency_table_has_years_as_columns_and_ebit_per_employee():
+    blocks = headcount_efficiency.build_headcount_efficiency_blocks(_headcount_input_data())
+    table = next(b for b in blocks if b.get("table_id") == "deterministic_headcount_efficiency")
+    assert table["columns"] == ["Erä", "2023", "2024"]
+    labels = [r[0] for r in table["rows"]]
+    assert labels == [
+        "Henkilöstö", "Liikevaihto / henkilö", "Jalostusarvo / henkilö",
+        "Henkilökulut / henkilö", "Käyttökate / henkilö", "Liiketulos / henkilö",
+        "Nettotulos / henkilö",
+    ]
+    # ebit_per_employee is derived locally: 50.0 tEUR / 5 employees * 1000 = 10 000 €
+    assert next(r for r in table["rows"] if r[0] == "Liiketulos / henkilö") == ["Liiketulos / henkilö", "10 000", "10 000"]
+    assert next(r for r in table["rows"] if r[0] == "Henkilöstö") == ["Henkilöstö", "5", "6"]
+
+
+def test_headcount_efficiency_returns_empty_without_headcount():
+    assert headcount_efficiency.build_headcount_efficiency_blocks({}) == []
+    assert headcount_efficiency.build_headcount_efficiency_blocks(
+        {"headcount": {"years": [2023], "values": [None]}}) == []
+
+
+def test_assemble_injects_headcount_efficiency_into_section_5():
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _headcount_input_data()},
+        {"order": 2, "status": "ok", "parsed_json": {"sections": [
+            {"id": "5", "title": "HISTORIALLINEN KEHITYS", "blocks": [
+                {"type": "heading", "text": "x"}]}]}},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"}]}},
+    ]}
+    rep = assemble.assemble(run)
+    sec5 = next(s for s in rep["sections"] if s["id"] == "5")
+    assert sec5["blocks"][-1]["table_id"] == "deterministic_headcount_efficiency"
 
 
 def test_assemble_replaces_old_vertical_dcf_table_with_deterministic_detail():

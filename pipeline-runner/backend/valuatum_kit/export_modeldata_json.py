@@ -27,6 +27,11 @@ EXTRA_VARS = [
     "number_of_employees",
     "no_of_employees",
     "avg_number_of_employees",
+    "cr_ns_per_employee",
+    "cr_added_value_per_employee",
+    "cr_employee_expenses_per_employee",
+    "cr_ebitda_per_employee",
+    "cr_net_earnings_per_employee",
     "other_operating_income",
     "gross_profit",
     "personnel_costs",
@@ -368,6 +373,16 @@ def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[
                 "trade_payables": arr(data_map, actual_years, ["trade_payables", "cr_current_trade_creditors"], money=True),
                 "interest_bearing_debt": arr(data_map, actual_years, "liab_ib_total", money=True),
                 "non_interest_bearing_debt": arr(data_map, actual_years, "non_interest_bearing_debt", money=True),
+            },
+            # Per-employee ratios the engine already computes. These are pre-scaled
+            # EUR-per-employee figures, not millions like the rest of this file —
+            # money=True (x1000) is deliberately NOT applied here.
+            "per_employee": {
+                "net_sales": arr(data_map, actual_years, "cr_ns_per_employee"),
+                "value_added": arr(data_map, actual_years, "cr_added_value_per_employee"),
+                "personnel_costs": arr(data_map, actual_years, "cr_employee_expenses_per_employee"),
+                "ebitda": arr(data_map, actual_years, "cr_ebitda_per_employee"),
+                "net_earnings": arr(data_map, actual_years, "cr_net_earnings_per_employee"),
             },
         },
         "forecast": forecast,
