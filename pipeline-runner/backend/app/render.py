@@ -13,6 +13,7 @@ import html
 import math
 import os
 import re
+from contextvars import ContextVar
 import shutil
 import subprocess
 import tempfile
@@ -110,13 +111,34 @@ def _esc(s):
 _MD_BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
 _MD_ITALIC = re.compile(r"(?<![\*\w])\*([^*\n]+)\*(?!\w)")
 
+# Prose carries source citations as bare "(lähde: domain.fi, 2026-06-30)" text
+# (see prompts rule 11) while the §15 source-register table holds the matching
+# full URL. Readers had to hunt down the table to click through — this makes
+# the inline citation itself a link, using the domain map built once per
+# render_html() call (ContextVar, not a module global, so concurrent renders
+# in different request threads never cross-contaminate each other's sources).
+_source_domain_map: ContextVar[dict] = ContextVar("_source_domain_map", default={})
+_SOURCE_CITE_RE = re.compile(r"\(lähde:\s*([a-zA-Z0-9][\w.-]*\.[a-zA-Z]{2,})((?:\s*,\s*[^)]*)?)\)")
+
+
+def _linkify_citation(m):
+    domain, rest = m.group(1), m.group(2)
+    url = _source_domain_map.get().get(domain.lower())
+    if not url:
+        return m.group(0)
+    href = html.escape(url, quote=True)
+    return f'(lähde: <a class="src" href="{href}">{domain}</a>{rest})'
+
 
 def _inline(s):
     """Escape, then render the markdown emphasis the prompt contract promises
-    (**lihava**, *kursiivi*) — otherwise raw asterisks reach the client PDF."""
+    (**lihava**, *kursiivi*) — otherwise raw asterisks reach the client PDF.
+    Also turns an inline "(lähde: domain, pvm)" citation into a clickable link
+    when that domain's full URL is known from elsewhere in the report."""
     t = _esc(s)
     t = _MD_BOLD.sub(r"<strong>\1</strong>", t)
     t = _MD_ITALIC.sub(r"<em>\1</em>", t)
+    t = _SOURCE_CITE_RE.sub(_linkify_citation, t)
     return t
 
 
@@ -1296,9 +1318,32 @@ def _page_css(report):
 """
 
 
+def _collect_source_urls(report):
+    """Walk every string in the report (table rows, key_value items, source
+    registers...) and index each bare URL by domain, so prose citations that
+    only name the domain can be linked back to the full URL found elsewhere."""
+    domain_map = {}
+
+    def walk(x):
+        if isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+        elif isinstance(x, str):
+            m = _URL_CELL_RE.match(x.strip())
+            if m:
+                domain_map.setdefault(m.group(1).lower(), x.strip())
+
+    walk(report.get("sections"))
+    return domain_map
+
+
 def render_html(report):
     if not isinstance(report, dict):
         raise ValueError("report ei ole objekti")
+    _source_domain_map.set(_collect_source_urls(report))
     derived = _derive(report)
     try:
         _cover_guard(report, derived)

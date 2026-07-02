@@ -767,6 +767,36 @@ def test_key_value_source_url_renders_clickable_domain_link():
     assert ">ytj.fi</a>" in h
 
 
+def test_inline_citation_links_to_url_found_elsewhere_in_report():
+    rep = _report()
+    rep["sections"].append({
+        "id": "8", "title": "PROFIILI", "blocks": [
+            {"type": "paragraph", "text": "Kilpailija Solita on selvästi suurempi "
+                                           "(lähde: kauppalehti.fi, 2026-06-30)."},
+        ],
+    })
+    rep["sections"].append({
+        "id": "15", "title": "LÄHTEET", "blocks": [
+            {"type": "table", "columns": ["Lähde", "Tieto"],
+             "rows": [["https://www.kauppalehti.fi/uutiset/x", "Solita-uutinen"]]},
+        ],
+    })
+    html = render.render_html(rep)
+    assert '<a class="src" href="https://www.kauppalehti.fi/uutiset/x">kauppalehti.fi</a>' in html
+    assert "(lähde: <a" in html and ", 2026-06-30)" in html
+
+
+def test_inline_citation_stays_plain_text_when_url_unknown():
+    # No matching URL anywhere in the report — must not fabricate a link.
+    # (Reset the ContextVar explicitly: render_html() normally does this per
+    # call, but this test calls a block renderer directly.)
+    render._source_domain_map.set({})
+    h = render._block_paragraph(
+        {"text": "Kilpailija Solita on selvästi suurempi (lähde: kauppalehti.fi, 2026-06-30)."})
+    assert "<a" not in h
+    assert "(lähde: kauppalehti.fi, 2026-06-30)" in h
+
+
 def test_table_coerces_dict_rows_and_never_dumps_raw_dict():
     # Regression: the Virnex forecast table. Stage 3 emitted transposed rows as
     # {"row","values"} dicts; the old renderer stringified them to a raw '{...}'
