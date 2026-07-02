@@ -191,22 +191,26 @@ def _scale_from_teur(teur):
 
 
 def _report_scale(report, derived):
-    """One headline unit for the whole report, from the largest cover figure."""
+    """One headline unit for the cover's primary valuation figure.
+
+    Scenario expected value may be much larger than the base case; letting that
+    drive the cover unit makes the primary value look like a peer figure to the
+    scenario output. Keep the cover scale anchored to the realistic base case.
+    """
     cand = []
     sc = report.get("_scenarios") or {}
-    for k in ("expected_value_teur", "realistic_base_case_teur"):
-        v = _to_num(sc.get(k))
-        if v is not None:
-            cand.append(v)
+    v = _to_num(sc.get("realistic_base_case_teur"))
+    if v is not None:
+        cand.append(v)
     cover = report.get("cover") or {}
-    for k in ("headline_value", "base_case_value"):
-        v = _to_num(_short(cover.get(k)))
+    if cover.get("base_case_value") not in (None, ""):
+        v = _to_num(_short(cover.get("base_case_value")))
         if v is not None:
             cand.append(v)
-    rng = (derived or {}).get("range") or {}
-    for k in ("low", "high"):
-        if isinstance(rng.get(k), (int, float)):
-            cand.append(rng[k])
+    elif cover.get("headline_value") not in (None, ""):
+        v = _to_num(_short(cover.get("headline_value")))
+        if v is not None:
+            cand.append(v)
     return _scale_from_teur(max((abs(c) for c in cand), default=0))
 
 
@@ -229,6 +233,36 @@ def _scaled_cover_str(s, scale):
         return cleaned
     n = _to_num(m.group(1))
     return f"{_fmt(n / div, dec)} {unit}" if n is not None else cleaned
+
+
+def _display_industry(meta):
+    """Cover-safe industry label.
+
+    Stage output can contain an analysis note such as
+    "Ei tiedossa (input-datassa industry_code puuttuu; julkinen lähde mukaan ...)".
+    That is a data-quality caveat, not a cover line. Prefer the source-backed
+    industry embedded in the note; otherwise omit the cover industry.
+    """
+    s = _clean((meta or {}).get("industry")).strip()
+    if not s:
+        return ""
+    low = s.lower()
+    bad_markers = ("ei tiedossa", "input-data", "input_data", "industry_code", "puutt")
+    if any(m in low for m in bad_markers):
+        without_caveat = re.sub(
+            r"\s*\([^)]*(?:input[-_ ]?data|industry_code|puutt)[^)]*\)",
+            "",
+            s,
+            flags=re.IGNORECASE,
+        ).strip(" .;")
+        if without_caveat and "ei tiedossa" not in without_caveat.lower():
+            return without_caveat
+        m = re.search(r"mukaan\s+([^);.]+)", s, flags=re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip(" .;)")
+            return candidate[:1].upper() + candidate[1:] if candidate else ""
+        return ""
+    return s
 
 
 _URL_CELL_RE = re.compile(r"^\s*https?://(?:www\.)?([^/\s]+)(?:/\S*)?\s*$", re.I)
@@ -681,12 +715,21 @@ def _as_records(coll, keys):
 
 
 def _block_metric_cards(b):
-    cards = _as_records(b.get("cards"), ("label", "value"))
+    cards = []
+    for c in _as_records(b.get("cards"), ("label", "value")):
+        label = _clean(c.get("label")).lower()
+        if "luottamustaso" in label:
+            continue
+        cards.append(c)
+    if not cards:
+        return ""
     n = max(1, min(len(cards), 4))
     cells = []
     for c in cards:
         accent = " accent" if c.get("emphasis") else ""
-        cells.append(f'<div class="mcard{accent}"><div class="mval">{_esc(c.get("value"))}</div>'
+        val = _clean(c.get("value"))
+        vcls = "mval long" if len(val) > 24 else "mval"
+        cells.append(f'<div class="mcard{accent}"><div class="{vcls}">{_esc(c.get("value"))}</div>'
                      f'<div class="mlabel">{_esc(c.get("label"))}</div></div>')
     return (f'<div class="mgrid" style="grid-template-columns:repeat({n},1fr);">'
             f'{"".join(cells)}</div>')
@@ -778,6 +821,7 @@ def _render_table(columns, rows, title=None, unit=None):
     if title or unit:
         u = f' <span class="muted">({_esc(unit)})</span>' if unit else ""
         cap = f'<h4 class="blk">{_esc(title)}{u}</h4>'
+    wide = " wide" if isinstance(columns, list) and len(columns) >= 7 else ""
     ths = "".join(f"<th>{_esc(c)}</th>" for c in (columns or []))
     trs = []
     for r in rows or []:
@@ -787,7 +831,7 @@ def _render_table(columns, rows, title=None, unit=None):
             align = ' style="text-align:left"' if j == 0 else ""
             tds.append(f"<td{align}>{_num_cell(c)}</td>")
         trs.append("<tr>" + "".join(tds) + "</tr>")
-    return (f'{cap}<table class="tbl"><thead><tr>{ths}</tr></thead>'
+    return (f'{cap}<table class="tbl{wide}"><thead><tr>{ths}</tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table>')
 
 
@@ -907,32 +951,28 @@ def _cover(report, derived):
     meta = report.get("meta") or {}
     _, legal = _brand(report)
     scale = _report_scale(report, derived)
-    hv = cover.get("headline_value")    # probability-weighted expected value
+    hv = cover.get("headline_value")
     bcv = cover.get("base_case_value")  # realistic base case (DCF/EVA-based)
     rng = derived.get("range")
     range_html = ""
     if rng:
-        range_html = _range_bar(rng["low"], rng["high"], rng["mid"],
-                                caption="Arvostusväli", caption_right="skenaariot", scale=scale)
+        range_html = _range_bar(rng["low"], rng["high"], None,
+                                caption="Skenaariohaarukka", caption_right="osio 11",
+                                scale=scale)
+    industry = _display_industry(meta)
     meta_bits = [f'Y-tunnus {_esc(meta.get("y_tunnus"))}' if meta.get("y_tunnus") else "",
-                 _esc(meta.get("industry")),
+                 _esc(industry),
                  f'{_esc(meta.get("report_date"))} · {_esc(legal)}' if meta.get("report_date") else ""]
     meta_lines = "<br>".join(x for x in meta_bits if x)
-    conf = report.get("confidence") or {}
 
-    # Lead with the realistic base case (method-based, stable). The probability-
-    # weighted expected value is supporting context, with a one-line note when the
-    # two differ — so "expected lower than base case" never reads as a mistake.
+    # Lead with one valuation: the realistic base case. Scenario expected value
+    # is a scenario-analysis output, not a competing cover valuation.
     hero_val = bcv if bcv not in (None, "") else hv
     hero_label = ("Realistinen arvo (base case)" if bcv not in (None, "")
                   else (cover.get("headline_label") or "Arvonmäärityksen tulos"))
     base_num = _to_num(_short(bcv)) if bcv not in (None, "") else None
     exp_num = _to_num(_short(hv)) if hv not in (None, "") else None
 
-    # When the realistic base case does not support positive owner value, a
-    # positive expected value comes only from a low-probability optimistic
-    # scenario — surfacing it as a 26pt hero is the tool talking its book. Demote
-    # it to a plain option-value line instead.
     zero_floor = base_num is not None and base_num <= 0
     if zero_floor:
         second_block = ('<div class="cv-note" style="margin-top:2px">'
@@ -940,23 +980,17 @@ def _cover(report, derived):
                         'Mahdollinen arvo on optio- tai strategista arvoa, joka on '
                         'kuvattu skenaarioissa eikä esitetä raportin päälukuna.</div>')
     else:
-        sec_html = ""
-        if hv not in (None, "") and (base_num is None or exp_num is None
-                                     or abs((exp_num or 0) - (base_num or 0)) > 1):
-            sec_html = (f'<div class="cv-big" style="font-size:26pt">'
-                        f'<span class="cap">Skenaarioilla painotettu odotusarvo</span>'
-                        f'{html.escape(_scaled_cover_str(hv, scale))}</div>')
-        note = ""
+        note = "Skenaarioiden odotusarvo ja todennäköisyyspainot käsitellään skenaario-osiossa; yllä oleva luku on raportin pääluku."
         if base_num is not None and exp_num is not None:
             gap = max(1.0, 0.02 * abs(base_num))
             if exp_num > base_num + gap:
-                note = ("Skenaarioilla painotettu odotusarvo on base casea korkeampi "
-                        "optimistisen skenaarion vuoksi — arvo nojaa onnistuvaan kasvuun.")
+                note = ("Skenaarioanalyysissä optimistinen polku nostaa odotusarvoa; "
+                        "raportin päälukuna säilyy realistinen base case.")
             elif exp_num < base_num - gap:
-                note = ("Skenaarioilla painotettu odotusarvo on base casea matalampi, "
-                        "koska pessimistinen skenaario painaa todennäköisyyspainotettua keskiarvoa.")
+                note = ("Skenaarioanalyysissä pessimistinen polku laskee odotusarvoa; "
+                        "raportin päälukuna säilyy realistinen base case.")
         note_html = f'<div class="cv-note">{_esc(note)}</div>' if note else ""
-        second_block = sec_html + note_html
+        second_block = note_html
 
     return (
         '<section class="page cover">'
@@ -971,8 +1005,6 @@ def _cover(report, derived):
         f'{range_html}</div>'
         + (f'<div class="cv-headline" style="border-top:none;padding-top:14px;margin-top:14px">'
            f'{second_block}</div>' if second_block else "")
-        + _conf_pills(conf.get("level"), conf.get("deciding_rule"))
-        + _cover_colophon(report, meta)
         + '</section>'
     )
 
@@ -1190,17 +1222,16 @@ def _cover_guard(report, derived):
     text = _norm_ws(_strip_tags(_cover(report, derived)))
     scale = _report_scale(report, derived)
     missing = []
-    for label, val in (("headline_value", cover.get("headline_value")),
-                       ("base_case_value", cover.get("base_case_value"))):
-        if val is None or str(val).strip() == "":
-            missing.append(f"{label} puuttuu/tyhjä")
-            continue
-        # a figure is intact if its raw OR its report-unit-scaled form rendered
-        if (_norm_ws(_short(val)) not in text
-                and _norm_ws(_scaled_cover_str(val, scale)) not in text):
-            missing.append(f"{label}={val!r}")
+    label = "base_case_value" if "base_case_value" in cover else "headline_value"
+    val = cover.get(label)
+    if val is None or str(val).strip() == "":
+        missing.append(f"{label} puuttuu/tyhjä")
+    # a figure is intact if its raw OR its report-unit-scaled form rendered
+    elif (_norm_ws(_short(val)) not in text
+          and _norm_ws(_scaled_cover_str(val, scale)) not in text):
+        missing.append(f"{label}={val!r}")
     if missing:
-        raise CoverGuardError("Kannen luvut eivät renderöityneet eheinä: "
+        raise CoverGuardError("Kannen pääluku ei renderöitynyt ehjänä: "
                               + "; ".join(missing) + " — kansiteksti: " + text[:300])
 
 
@@ -1351,11 +1382,12 @@ strong{ font-weight:700; color:var(--ink); }
 h3.blk{ font-size:10.5pt; font-weight:700; color:var(--green); margin:14px 0 6px; }
 h4.blk{ font-size:8pt; font-weight:700; color:var(--gray); text-transform:uppercase; letter-spacing:.08em; margin:13px 0 6px; }
 .mgrid{ display:grid; gap:8px; }
-.mcard{ border:1px solid var(--line-strong); border-top:3px solid var(--green); padding:11px 12px; }
+.mcard{ border:1px solid var(--line-strong); border-top:3px solid var(--green); padding:9px 11px; min-height:22mm; }
 .mcard.accent{ border-top-color:var(--lime); }
-.mcard .mval{ font-family:var(--head); font-weight:700; font-size:18pt; color:var(--green); line-height:1;
-  font-variant-numeric:tabular-nums lining-nums; letter-spacing:-.01em; }
-.mcard .mlabel{ font-size:7.6pt; color:var(--gray); margin-top:6px; line-height:1.25; }
+.mcard .mval{ font-family:var(--head); font-weight:700; font-size:13pt; color:var(--green); line-height:1.08;
+  font-variant-numeric:tabular-nums lining-nums; letter-spacing:0; overflow-wrap:anywhere; }
+.mcard .mval.long{ font-family:var(--sans); font-size:9.4pt; line-height:1.22; font-weight:700; color:var(--green); }
+.mcard .mlabel{ font-size:7.8pt; color:var(--gray); margin-top:5px; line-height:1.25; }
 .rangebar{ width:100%; }
 .rb-caption{ display:flex; justify-content:space-between; font-size:7.6pt; color:var(--gray); margin-bottom:6px;
   font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
@@ -1388,8 +1420,15 @@ table.tbl{ width:100%; border-collapse:collapse; font-size:8.4pt; margin:6px 0 1
 table.tbl th, table.tbl td{ padding:4.5px 7px; text-align:right; border-bottom:1px solid var(--line);
   font-variant-numeric:tabular-nums lining-nums; overflow-wrap:anywhere; word-break:break-word; }
 table.tbl td:first-child{ max-width:80mm; }
+table.tbl.wide{ table-layout:fixed; font-size:7.1pt; line-height:1.15; }
+table.tbl.wide th, table.tbl.wide td{ padding:3px 4px; }
+table.tbl.wide th:first-child, table.tbl.wide td:first-child{ width:38mm; max-width:38mm; white-space:normal; }
+table.tbl.wide th:not(:first-child), table.tbl.wide td:not(:first-child){
+  white-space:nowrap; overflow-wrap:normal; word-break:normal;
+}
 table.tbl thead th{ color:var(--green); font-weight:700; border-bottom:1.5px solid var(--green);
   font-family:var(--head); font-size:7.8pt; text-align:right; }
+table.tbl.wide thead th{ font-size:6.8pt; }
 table.tbl thead th:first-child{ text-align:left; }
 table.tbl tbody tr:nth-child(even) td{ background:#FAFBFA; }
 a.src{ color:var(--gray); text-decoration:none; border-bottom:1px solid var(--line-strong); }
@@ -1417,8 +1456,8 @@ a.src{ color:var(--gray); text-decoration:none; border-bottom:1px solid var(--li
 .cover .cv-meta{ margin-top:18px; font-size:10pt; color:var(--gray); line-height:1.7; }
 .cv-headline{ margin-top:34px; border-top:2px solid var(--green); border-bottom:1px solid var(--line);
   padding:20px 0 10px; display:grid; grid-template-columns:auto 1fr; gap:36px; align-items:end; }
-.cv-big{ font-family:var(--head); font-weight:800; font-size:50pt; color:var(--green); line-height:.92;
-  font-variant-numeric:tabular-nums lining-nums; letter-spacing:-.02em; white-space:nowrap; }
+.cv-big{ font-family:var(--head); font-weight:800; font-size:34pt; color:var(--green); line-height:.98;
+  font-variant-numeric:tabular-nums lining-nums; letter-spacing:0; white-space:nowrap; }
 .cv-big .cap{ display:block; font-family:var(--sans); font-size:8.5pt; font-weight:700; color:var(--gray);
   text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; white-space:normal; }
 .cv-note{ margin-top:10px; font-size:9pt; color:var(--gray); max-width:160mm; line-height:1.45; }

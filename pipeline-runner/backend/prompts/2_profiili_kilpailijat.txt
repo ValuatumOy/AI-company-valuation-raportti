@@ -41,6 +41,7 @@ KÄYTTÄJÄN LISÄTIEDOT: Jos `user_input` sisältää käyttäjän antamia lis�
 
 OSIO 3 — YHTIÖN LIIKETOIMINTAPROFIILI:
 Aloita `paragraph`: "Tämä osio yhdistää tilinpäätösanalyysin käytettävissä oleviin liiketoimintatietoihin. Ulkoisista lähteistä peräisin olevat tiedot kuvaavat yhtiön omaa tai kolmannen osapuolen julkaisemaa tietoa, eivät tilintarkastettua dataa." Jos enrichment.degraded=true: "Yhtiön liiketoimintaprofiili perustuu pääosin toimiala- ja tilinpäätöstietoihin, koska yrityksen identiteettiä ei voitu varmentaa julkisista lähteistä riittävällä varmuudella."
+- Jos `[input_data].meta.industry` tai `industry_code` puuttuu mutta `enrichment` sisältää julkisesta lähteestä varmennetun toimialan, verkkosivun kuvauksen tai liiketoimintaprofiilin, käytä tätä toimialakuvauksena normaalisti. Älä aloita osion näkyvää tekstiä muodolla "Ei tiedossa" tai sisäisellä puutehuomiolla. Mahdollinen puute kuuluu data quality -rajoitteisiin, ei yhtiöprofiilin ensivaikutelmaksi.
 - `heading` "Mitä yhtiö tekee" + `paragraph`: vain enrichment-datan perusteella, älä keksi.
 - `heading` "Miten tämä selittää tilinpäätöksen rakenteen" + 3–5 numeroitua `paragraph`: yhdistä profiili tilinpäätökseen (esim. aktivoidut kehittämismenot vs alustaliiketoiminta, henkilöstökulurakenne, käyttöpääoma).
 - `table` lähderekisteri enrichmentin lähteistä.

@@ -1,8 +1,8 @@
 # Vaihe 6 – Tiivistelmä + kokoaja FINAL CONSISTENCY VALIDATOR.
-# Runs on the stage-6 wrapper output. Confirms the cover carries BOTH the
-# expected value and the realistic base case (the bug that shipped twice was a
-# cover that showed only one), that they match the stage-4 scenarios, and that
-# no prose figure is absent from machine_readable.
+# Runs on the stage-6 wrapper output. Confirms the cover carries one intact
+# primary valuation figure: the realistic base case. Scenario expected value is
+# validated in stage 4 and discussed in the scenario section; it must not become
+# a competing cover headline.
 import re
 
 # Numbers may use any space as a thousands separator: ASCII, NBSP (U+00A0),
@@ -123,29 +123,25 @@ def validate(output: dict, context: dict) -> dict:
         (f"{len(orphans)} figure(s) not in machine_readable — review: "
          + "; ".join(orphans[:25])) if orphans else "ok")
 
-    # --- cover must carry BOTH expected value and realistic base case --------
+    # --- cover must carry the realistic base case as the primary value -------
     cover = output.get("cover") or {}
     hv_raw = cover.get("headline_value")
     bcv_raw = cover.get("base_case_value")
     hv = _first_num(hv_raw)
     bcv = _first_num(bcv_raw)
-    chk("cover has headline_value",
-        hv_raw not in (None, "") and hv is not None,
-        "missing/parse-fail cover.headline_value")
-    chk("cover has base_case_value (both figures required)",
+    chk("cover has base_case_value (primary cover value)",
         bcv_raw not in (None, "") and bcv is not None,
-        "missing/parse-fail cover.base_case_value — cover must show BOTH")
+        "missing/parse-fail cover.base_case_value")
 
     scenarios = (context or {}).get("scenarios", {}) or {}
-    ev = _first_num(scenarios.get("expected_value_teur"))
     rbc = _first_num(scenarios.get("realistic_base_case_teur"))
 
-    # --- 2. cover headline_value == scenarios.expected_value_teur ------------
-    if hv is not None and ev is not None:
-        chk("cover headline_value == scenarios.expected_value_teur (±1 tEUR)",
-            abs(hv - ev) <= 1.0, f"cover {hv} vs scenarios {ev}")
+    # --- 2. cover headline_value, if present, is also the base case ----------
+    if hv is not None and rbc is not None:
+        chk("cover headline_value == scenarios.realistic_base_case_teur (±1 tEUR)",
+            abs(hv - rbc) <= 1.0, f"cover {hv} vs realistic base {rbc}")
     else:
-        chk("cover headline_value == scenarios.expected_value_teur", True,
+        chk("cover headline_value == realistic base case", True,
             "skipped: value not available")
 
     # --- 3. cover base_case_value == scenarios.realistic_base_case_teur ------

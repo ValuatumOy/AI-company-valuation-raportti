@@ -220,6 +220,117 @@ def sync_code_and_limits():
             store.update_stage(cur["id"], {**cur, **patch})
 
 
+def _patch_prompt_text(order, text):
+    """Surgically apply production prompt wording fixes without a broad reseed.
+
+    Prompt bodies are editable in the UI, so we do not blindly overwrite them on
+    boot. These narrow patches insert the report-presentation rules requested
+    after the Virnex review while preserving any unrelated operator edits.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+
+    if order == 2:
+        marker = "Mahdollinen puute kuuluu data quality -rajoitteisiin"
+        if marker in text:
+            return text
+        anchor = (
+            'Aloita `paragraph`: "Tämä osio yhdistää tilinpäätösanalyysin '
+            'käytettävissä oleviin liiketoimintatietoihin. Ulkoisista lähteistä '
+            'peräisin olevat tiedot kuvaavat yhtiön omaa tai kolmannen osapuolen '
+            'julkaisemaa tietoa, eivät tilintarkastettua dataa." Jos '
+            'enrichment.degraded=true: "Yhtiön liiketoimintaprofiili perustuu '
+            'pääosin toimiala- ja tilinpäätöstietoihin, koska yrityksen '
+            'identiteettiä ei voitu varmentaa julkisista lähteistä riittävällä '
+            'varmuudella."'
+        )
+        insert = (
+            '\n- Jos `[input_data].meta.industry` tai `industry_code` puuttuu '
+            'mutta `enrichment` sisältää julkisesta lähteestä varmennetun '
+            'toimialan, verkkosivun kuvauksen tai liiketoimintaprofiilin, käytä '
+            'tätä toimialakuvauksena normaalisti. Älä aloita osion näkyvää '
+            'tekstiä muodolla "Ei tiedossa" tai sisäisellä puutehuomiolla. '
+            'Mahdollinen puute kuuluu data quality -rajoitteisiin, ei '
+            'yhtiöprofiilin ensivaikutelmaksi.'
+        )
+        return text.replace(anchor, anchor + insert) if anchor in text else text
+
+    if order == 3:
+        marker = "DCF/EVA-ekvivalenssi"
+        if marker in text:
+            return text
+        return _load_prompt("3_pisteytys_numero_osiot.txt")
+
+    if order == 6:
+        out = text
+        cover_marker = "Kannen pääluku = realistinen base case"
+        if cover_marker not in out:
+            return _load_prompt("6_tiivistelma.txt")
+
+        industry_marker = "Älä koskaan kirjoita kanteen tai meta.industry-kenttään"
+        if industry_marker not in out:
+            anchor = "- `meta`: yrityksen nimi, Y-tunnus, toimiala, päivämäärä."
+            insert = (
+                '\n  - `industry`: käytä ensisijaisesti '
+                '`[input_data].meta.industry`-kenttää. Jos se tai '
+                '`industry_code` puuttuu mutta `enrichment` sisältää julkisesta '
+                'lähteestä varmennetun toimialan, liiketoimintakuvauksen tai '
+                'yhtiöprofiilin, kirjoita tähän lukijalle ymmärrettävä toimiala '
+                'sen perusteella (esim. "Ohjelmistokehitys ja digitaaliset '
+                'palvelut"). Älä koskaan kirjoita kanteen tai '
+                'meta.industry-kenttään "Ei tiedossa", "input-datassa puuttuu", '
+                '"industry_code puuttuu" tai muuta sisäistä puutehuomiota. Jos '
+                'toimialaa ei voida varmentaa edes julkisista lähteistä, jätä '
+                '`industry` tyhjäksi ja käsittele puute vain osiossa 2.'
+            )
+            out = out.replace(anchor, anchor + insert) if anchor in out else out
+
+        cards_marker = "Älä lisää luottamustasoa tai sen perustelua metric_cards-lohkoon"
+        if cards_marker not in out:
+            old = (
+                "- `metric_cards`: Realistinen base case ENSIN (raportin pääluku, "
+                "emphasis:true) JA Skenaarioilla painotettu odotusarvo (molemmat "
+                "aina), Skenaariohaarukka (pess–opt floorattu), Luottamustaso "
+                "(+ määräävä sääntö), Käytetyt/Hylätyt menetelmät. Lisää "
+                "Markkinasignaali-kortti jos löytyi/ilmoitettu. Realistinen base "
+                "case on raportin ankkuriarvo (perustuu "
+                "arvonmääritysmenetelmiin); skenaarioilla painotettu odotusarvo "
+                "on todennäköisyyspainotettu vertailuluku, ei pääluku."
+            )
+            new = (
+                "- `metric_cards`: Realistinen base case ENSIN (raportin pääluku, "
+                "emphasis:true) JA Skenaarioilla painotettu odotusarvo (molemmat "
+                "aina), Skenaariohaarukka (pess–opt floorattu), "
+                "Käytetyt/Hylätyt menetelmät. Lisää Markkinasignaali-kortti jos "
+                "löytyi/ilmoitettu. Älä lisää luottamustasoa tai sen perustelua "
+                "metric_cards-lohkoon; se kuuluu osioon 2, ei ensimmäiseksi "
+                "lukijan näkemäksi kortiksi. Realistinen base case on raportin "
+                "ankkuriarvo (perustuu arvonmääritysmenetelmiin); skenaarioilla "
+                "painotettu odotusarvo on todennäköisyyspainotettu vertailuluku, "
+                "ei pääluku."
+            )
+            out = out.replace(old, new)
+        return out
+
+    return text
+
+
+def sync_prompt_patches():
+    """Apply narrow prompt text migrations to the persisted default pipeline."""
+    pipelines = store.list_pipelines()
+    if not pipelines:
+        return
+    pipeline = next(
+        (p for p in pipelines if p.get("name") == DEFAULT_PIPELINE_NAME), pipelines[0]
+    )
+    for cur in pipeline.get("stages", []):
+        if cur.get("order") not in (2, 3, 6):
+            continue
+        patched = _patch_prompt_text(cur["order"], cur.get("prompt_template"))
+        if patched != cur.get("prompt_template"):
+            store.update_stage(cur["id"], {**cur, "prompt_template": patched})
+
+
 def ensure_seeded():
     db.init_db()
     row = db.query_one("SELECT id FROM pipelines LIMIT 1")
@@ -228,5 +339,7 @@ def ensure_seeded():
         if pipeline and _pipeline_needs_auto_reseed(pipeline):
             reseed_defaults(force=True)
         sync_code_and_limits()
+        sync_prompt_patches()
         return
     reseed_defaults(force=True)
+    sync_prompt_patches()

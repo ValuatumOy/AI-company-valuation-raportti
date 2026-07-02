@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from app import assemble, render, sensitivity, validators
+from app import assemble, dcf_detail, render, sensitivity, validators
 
 VDIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -48,11 +48,12 @@ def _report():
 
 
 # --------------------------------------------------------------- cover guard
-def test_render_html_contains_both_cover_figures():
-    html = render.render_html(_report())
+def test_cover_shows_single_primary_value_not_scenario_expected_value():
+    html = render._cover(_report(), render._derive(_report()))
     text = render._norm_ws(render._strip_tags(html))
-    assert "1 598 tEUR" in text
     assert "1 000 tEUR" in text
+    assert "1 598 tEUR" not in text
+    assert "Skenaarioilla painotettu odotusarvo" not in text
 
 
 def test_cover_guard_passes_on_intact_cover():
@@ -63,10 +64,50 @@ def test_cover_guard_rejects_per_glyph_corruption(monkeypatch):
     orig = render._cover
     monkeypatch.setattr(
         render, "_cover",
-        lambda r, d: orig(r, d).replace("1 598 tEUR", "1 5 9 8 t E U R"),
+        lambda r, d: orig(r, d).replace("1 000 tEUR", "1 0 0 0 t E U R"),
     )
     with pytest.raises(render.CoverGuardError):
         render._cover_guard(_report(), render._derive(_report()))
+
+
+def test_cover_cleans_industry_and_omits_trust_boilerplate():
+    rep = _report()
+    rep["meta"]["industry"] = (
+        "Ei tiedossa (input-datassa industry ja industry_code puuttuvat; "
+        "julkinen lähde mukaan ohjelmistokehitys- ja digitaalisten palveluiden toimiala)"
+    )
+    rep["confidence"] = {
+        "level": "Matala",
+        "deciding_rule": "Terminaaliarvon dominanssi ja tietopuutteet.",
+    }
+    rep["_provenance"] = {"run_id": "cf3ce067"}
+    text = render._norm_ws(render._strip_tags(render.render_html(rep)))
+    assert "Ei tiedossa" not in text
+    assert "input-datassa" not in text
+    assert "Ohjelmistokehitys- ja digitaalisten palveluiden toimiala" in text
+    assert "Arvion luottamustaso" not in text
+    assert "Raportti-ID" not in text
+    assert "Laadittu automaattisesti" not in text
+    assert "Tarkastanut ja hyväksynyt" not in text
+
+
+def test_metric_cards_filter_confidence_card():
+    html = render._block_metric_cards({"cards": [
+        {"label": "Realistinen base case", "value": "2 352 tEUR"},
+        {"label": "Luottamustaso", "value": "Matala – pitkä perustelu"},
+    ]})
+    text = render._norm_ws(render._strip_tags(html))
+    assert "Realistinen base case" in text
+    assert "Luottamustaso" not in text
+    assert "pitkä perustelu" not in text
+
+
+def test_wide_table_gets_compact_class():
+    html = render._render_table(
+        ["Erä", "2026", "2027", "2028", "2029", "2030", "2031"],
+        [["FCFF", 100, 110, 120, 130, 140, 150]],
+    )
+    assert 'class="tbl wide"' in html
 
 
 # --------------------------------------------------------------- mandate block
@@ -146,13 +187,42 @@ def _engine_input_data():
         "valuation_engine": {
             "wacc_parameters": {"wacc_pct": 10.0},
             "dcf": {
+                "years": [2026, 2027],
+                "ebit": [400.0, 495.0],
+                "depreciation_total": [20.0, 25.0],
+                "taxes_paid": [-80.0, -99.0],
+                "tax_fin_expenses": [1.0, 1.0],
+                "tax_fin_income": [0.0, 0.0],
+                "change_in_working_capital": [-10.0, -15.0],
+                "operating_cash_flow": [331.0, 407.0],
+                "change_in_non_interest_bearing_financial_liabilities": [0.0, 0.0],
+                "gross_capex": [-231.0, -297.0],
+                "free_operating_cash_flow": [100.0, 110.0],
+                "other_items_fcf": [0.0, 0.0],
                 "fcff": [100.0, 110.0],
                 "discounted_fcff": [100 / 1.1, 110 / 1.1 ** 2],
                 "cumulative_discounted_fcff": [400.0, 200.0],
+                "bridge": {"interest_bearing_debt": -10.0, "cash": 60.0},
                 "equity_value_before_floor": 450.0,
             },
+            "eva": {"noplat": [320.0, 396.0]},
         },
-        "forecast": {"net_sales": [5000.0, 5500.0], "ebit_pct": [8.0, 9.0]},
+        "forecast": {
+            "years": [2026, 2027],
+            "net_sales": [5000.0, 5500.0],
+            "net_sales_growth_pct": [10.0, 10.0],
+            "ebitda": [500.0, 620.0],
+            "ebit": [400.0, 495.0],
+            "ebit_pct": [8.0, 9.0],
+        },
+        "forecast_parameters": {
+            "tax_rate_pct": [20.0, 20.0],
+            "capex_pct_of_sales": [3.0, 3.2],
+            "working_capital": {
+                "trade_receivables_pct_of_sales": [12.0, 12.0],
+                "trade_payables_pct_of_sales": [7.0, 7.0],
+            },
+        },
     }
 
 
@@ -207,6 +277,102 @@ def test_assemble_injects_sensitivity_blocks_into_section_11():
     sec11 = next(s for s in rep["sections"] if s["id"] == "11")
     types = [b["type"] for b in sec11["blocks"]]
     assert types == ["heading", "chart", "chart"]
+
+
+def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
+    blocks = dcf_detail.build_dcf_detail_blocks(_engine_input_data())
+    table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
+    assert table["columns"] == ["Erä", "2026", "2027", "TRM"]
+    labels = [r[0] for r in table["rows"]]
+    assert "EBIT" in labels
+    assert "- Maksetut verot" in labels
+    assert "- Käyttöpääoman muutos" in labels
+    assert "- Bruttoinvestoinnit" in labels
+    assert "Vapaa kassavirta (FCFF)" in labels
+    assert "Diskontattu FCFF" in labels
+    assert "Kumulatiivinen diskontattu FCFF" in labels
+    assert next(r for r in table["rows"] if r[0] == "Diskontattu FCFF")[-1] == "218"
+    bridge = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_equity_bridge")
+    assert ["Yritysarvo (EV)", "400"] in bridge["rows"]
+    assert ["Oman pääoman arvo ennen lattiaa", "450"] in bridge["rows"]
+    callout = next(b for b in blocks if b.get("type") == "callout")
+    assert "diskontattu FCFF" in callout["title"]
+    assert "EBITistä" in callout["text"]
+    assert "nykyarvorivi" in callout["text"]
+
+
+def test_assemble_replaces_old_vertical_dcf_table_with_deterministic_detail():
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},
+        {"order": 3, "status": "ok", "parsed_json": {"sections": [
+            {"id": "9", "title": "DCF", "blocks": [
+                {"type": "table", "title": "WACC-parametrit", "columns": ["Erä", "Arvo"],
+                 "rows": [["WACC", "10 %"]]},
+                {"type": "table", "title": "Vapaat kassavirrat ja nykyarvo",
+                 "columns": ["Vuosi", "FCFF", "Diskontattu FCFF"],
+                 "rows": [[2026, 100, 91], [2027, 110, 91],
+                          ["Terminaalijakso", "", 218], ["Yhteensä (EV)", "", 400]]},
+                {"type": "table", "title": "Yritysarvosta oman pääoman arvoon",
+                 "columns": ["Erä", "Arvo"],
+                 "rows": [["Yritysarvo (EV)", 400], ["Oman pääoman arvo", 450]]},
+                {"type": "paragraph", "text": "DCF-menetelmän tulos ennen floor-käsittelyä: 450 tEUR."},
+            ]}]}},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"}]}}],
+    }
+    rep = assemble.assemble(run)
+    sec9 = next(s for s in rep["sections"] if s["id"] == "9")
+    table_ids = [b.get("table_id") for b in sec9["blocks"] if isinstance(b, dict)]
+    assert "deterministic_dcf_fcff_drivers" in table_ids
+    assert "deterministic_dcf_equity_bridge" in table_ids
+    assert not any(
+        isinstance(b, dict) and b.get("columns") == ["Vuosi", "FCFF", "Diskontattu FCFF"]
+        for b in sec9["blocks"]
+    )
+
+
+def test_assemble_normalizes_dcf_eva_equivalence_in_sections_and_scoring():
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},
+        {"order": 3, "status": "ok", "parsed_json": {
+            "scoring": {
+                "method_scoring": [
+                    {"method": "DCF", "status": "hyväksytty", "weight_pct": 40, "value_teur": 450},
+                    {"method": "EVA", "status": "hyväksytty", "weight_pct": 60, "value_teur": 430},
+                ],
+                "weighted_base_case_teur": 438,
+            },
+            "sections": [
+                {"id": "8", "title": "ARVONMÄÄRITYS", "blocks": [
+                    {"type": "table", "title": "Painotettu arvonmääritys",
+                     "columns": ["Menetelmä", "Arvo", "Paino", "Kontribuutio"],
+                     "rows": [["DCF", 450, "40 %", 180], ["EVA", 430, "60 %", 258]]},
+                    {"type": "paragraph", "text": "DCF ja EVA painotetaan 40/60 menetelmien pisteillä."},
+                    {"type": "chart", "title": "Menetelmien antamat arvot", "chart_type": "bar",
+                     "x_axis": ["DCF", "EVA"], "series": [{"values": [450, 430]}]},
+                ]},
+                {"id": "10", "title": "EVA", "blocks": [
+                    {"type": "paragraph", "text": "EVA antaa arvoksi 430 tEUR."},
+                ]},
+            ]}},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"}]}}],
+    }
+    rep = assemble.assemble(run)
+    methods = {m["method"]: m for m in rep["_scoring"]["method_scoring"]}
+    assert methods["DCF"]["weight_pct"] == 100
+    assert methods["EVA"]["status"] == "viite"
+    assert methods["EVA"]["weight_pct"] == 0
+    assert methods["EVA"]["value_teur"] == 450.0
+    assert rep["_scoring"]["weighted_base_case_teur"] == 450.0
+    sec8 = next(s for s in rep["sections"] if s["id"] == "8")
+    assert sec8["blocks"][0]["table_id"] == "deterministic_dcf_eva_equivalence"
+    assert not any(b.get("title") == "Menetelmien antamat arvot" for b in sec8["blocks"] if isinstance(b, dict))
+    sec10 = next(s for s in rep["sections"] if s["id"] == "10")
+    assert sec10["blocks"][1]["table_id"] == "deterministic_eva_reconciliation"
+    assert ["Oman pääoman arvo ennen lattiaa", "450"] in sec10["blocks"][1]["rows"]
 
 
 # --------------------------------------------------------------- validators
@@ -290,16 +456,16 @@ def test_stage4_validator_catches_positive_equity_negative_ratio():
 def test_stage6_validator_passes_nbsp_formatted_cover():
     # Finnish thousands separators may be NBSP (U+00A0) / narrow NBSP (U+202F).
     ctx = {"scenarios": {"expected_value_teur": 1598, "realistic_base_case_teur": 1000}}
-    out = {"cover": {"headline_value": "1 598 tEUR", "base_case_value": "1 000 tEUR"},
+    out = {"cover": {"headline_value": "1 000 tEUR", "base_case_value": "1 000 tEUR"},
            "machine_readable": {"expected_value": 1598, "base": 1000},
            "sections": [_DISCLAIMER_SEC]}
     r = validators.run_validator(_v("stage6_final.py"), out, ctx)
     assert r["passed"], r
 
 
-def test_stage6_validator_requires_both_cover_figures():
+def test_stage6_validator_requires_primary_base_case_cover_value():
     ctx = {"scenarios": {"expected_value_teur": 1400, "realistic_base_case_teur": 1000}}
-    good = {"cover": {"headline_value": "1 400 tEUR", "base_case_value": "1 000 tEUR"},
+    good = {"cover": {"headline_value": "1 000 tEUR", "base_case_value": "1 000 tEUR"},
             "machine_readable": {"expected_value": 1400, "base": 1000},
             "sections": [{"id": "1", "blocks": [
                 {"type": "paragraph", "text": "Odotusarvo 1 400 tEUR ja base case 1 000 tEUR."}]}]}
@@ -308,6 +474,9 @@ def test_stage6_validator_requires_both_cover_figures():
     missing = json.loads(json.dumps(good))
     missing["cover"].pop("base_case_value")
     assert not validators.run_validator(_v("stage6_final.py"), missing, ctx)["passed"]
+    wrong_headline = json.loads(json.dumps(good))
+    wrong_headline["cover"]["headline_value"] = "1 400 tEUR"
+    assert not validators.run_validator(_v("stage6_final.py"), wrong_headline, ctx)["passed"]
 
 
 # --------------------------------------------------- stage 2/5 grounding (advisory)
@@ -379,7 +548,7 @@ def _bridge_ctx():
             "equity_value_before_floor": 2450.0,
         },
         "eva": {"invested_capital": 1200.0, "discounted_eva": [50.0, 40.0],
-                "equity_value_before_floor": 2300.0},
+                "equity_value_before_floor": 2450.0},
     }}}
 
 
@@ -393,11 +562,11 @@ def _bridge_output(**bridge_over):
     dcf_bridge.update(bridge_over)
     return {"scoring": {
         "method_scoring": [
-            {"method": "DCF", "status": "hyväksytty", "weight_pct": 50, "value_teur": 2450},
-            {"method": "EVA", "status": "hyväksytty", "weight_pct": 50, "value_teur": 2300}],
+            {"method": "DCF", "status": "hyväksytty", "weight_pct": 100, "value_teur": 2450},
+            {"method": "EVA", "status": "viite", "weight_pct": 0, "value_teur": 2450}],
         "dcf_bridge": dcf_bridge,
         "eva_bridge": {"invested_capital_teur": 1200.0, "pv_explicit_eva_teur": 90.0,
-                       "pv_terminal_eva_teur": 1010.0, "equity_value_before_floor_teur": 2300.0},
+                       "pv_terminal_eva_teur": 1160.0, "equity_value_before_floor_teur": 2450.0},
     }, "sections": []}
 
 
@@ -439,6 +608,22 @@ def test_stage3_eva_bridge_catches_hidden_terminal_component():
     out["scoring"]["eva_bridge"]["pv_terminal_eva_teur"] = 100.0
     r = validators.run_validator(_v("stage3_numbers.py"), out, _bridge_ctx())
     assert not _bridge_chk(r, "EVA bridge: investoitu pääoma")["passed"]
+
+
+def test_stage3_catches_dcf_eva_engine_divergence():
+    ctx = _bridge_ctx()
+    ctx["input_data"]["valuation_engine"]["eva"]["equity_value_before_floor"] = 2300.0
+    r = validators.run_validator(_v("stage3_numbers.py"), _bridge_output(), ctx)
+    assert not _bridge_chk(r, "DCF/EVA equivalence: equity values match")["passed"]
+
+
+def test_stage3_catches_eva_double_weighting():
+    out = _bridge_output()
+    out["scoring"]["method_scoring"][1].update(
+        {"status": "hyväksytty", "weight_pct": 50, "value_teur": 2450}
+    )
+    r = validators.run_validator(_v("stage3_numbers.py"), out, _bridge_ctx())
+    assert not _bridge_chk(r, "EVA is reference-only")["passed"]
 
 
 def test_stage3_weight_sum_check():

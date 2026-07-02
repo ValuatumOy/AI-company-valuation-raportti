@@ -362,8 +362,47 @@ def validate(output: dict, context: dict) -> dict:
         chk("EVA: stated equity_value_before_floor matches engine ground truth", True,
             "skipped: not available")
 
+    if _is_num(gt_equity) and _is_num(gt_eva_equity):
+        tol = max(2.0, 0.01 * abs(gt_equity))
+        chk("DCF/EVA equivalence: equity values match when same forecast/WACC is used (±1% / ±2 tEUR)",
+            abs(gt_equity - gt_eva_equity) <= tol,
+            f"DCF {gt_equity} vs EVA {gt_eva_equity}")
+    else:
+        chk("DCF/EVA equivalence", True, "skipped: DCF or EVA equity not available")
+
     # --- 3d. Accepted method weights sum to 100% ----------------------------
     method_scoring = scoring.get("method_scoring") or []
+    dcf_methods = [
+        m for m in method_scoring
+        if isinstance(m, dict) and "dcf" in str(m.get("method", "")).lower()
+    ]
+    eva_methods = [
+        m for m in method_scoring
+        if isinstance(m, dict) and "eva" in str(m.get("method", "")).lower()
+    ]
+    if dcf_methods and eva_methods:
+        eva_weighted = [
+            m for m in eva_methods
+            if (
+                str(m.get("status", "")).lower().startswith("hyv")
+                or (_is_num(m.get("weight_pct")) and m.get("weight_pct") > 0)
+            )
+        ]
+        chk("DCF/EVA equivalence: EVA is reference-only, not separately weighted",
+            not eva_weighted,
+            "EVA has accepted status or positive weight" if eva_weighted else "ok")
+        dcf_vals = [m.get("value_teur") for m in dcf_methods if _is_num(m.get("value_teur"))]
+        eva_vals = [m.get("value_teur") for m in eva_methods if _is_num(m.get("value_teur"))]
+        if dcf_vals and eva_vals:
+            tol = max(2.0, 0.01 * abs(dcf_vals[0]))
+            chk("DCF/EVA equivalence: method table values match (±1% / ±2 tEUR)",
+                abs(dcf_vals[0] - eva_vals[0]) <= tol,
+                f"DCF {dcf_vals[0]} vs EVA {eva_vals[0]}")
+        else:
+            chk("DCF/EVA equivalence: method table values match", True, "skipped: values missing")
+    else:
+        chk("DCF/EVA equivalence: EVA reference-only", True, "skipped: DCF/EVA method rows missing")
+
     accepted_weights = [
         m.get("weight_pct") for m in method_scoring
         if isinstance(m, dict) and m.get("status") == "hyväksytty" and _is_num(m.get("weight_pct"))

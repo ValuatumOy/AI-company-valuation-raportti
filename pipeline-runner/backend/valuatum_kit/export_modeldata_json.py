@@ -150,6 +150,13 @@ def scalar(
     return values[0] if values else None
 
 
+def coalesce(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def mcp_credit_risk(company_code: str, period_type: str = "annual", limit: int = 10) -> dict[str, Any] | None:
     url = os.environ.get("VALU_MCP_PROFINDER_URL")
     if not url:
@@ -392,6 +399,19 @@ def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[
             "dcf": {
                 "years": forecast_years,
                 "terminal": "TRM",
+                "ebit": arr(data_map, forecast_years, "ebit", money=True),
+                "depreciation_total": arr(data_map, forecast_years, "dep_total_nega", money=True),
+                "taxes_paid": arr(data_map, forecast_years, "taxes_paid", money=True),
+                "tax_fin_expenses": arr(data_map, forecast_years, "tax_fin_expenses", money=True),
+                "tax_fin_income": arr(data_map, forecast_years, "tax_fin_income", money=True),
+                "change_in_working_capital": arr(data_map, forecast_years, "change_in_wc_nega", money=True),
+                "operating_cash_flow": arr(data_map, forecast_years, "operating_cash_flow", money=True),
+                "change_in_non_interest_bearing_financial_liabilities": arr(
+                    data_map, forecast_years, "change_in_lt_liab_nib", money=True
+                ),
+                "gross_capex": arr(data_map, forecast_years, "gross_cap_expenditure_nega", money=True),
+                "free_operating_cash_flow": arr(data_map, forecast_years, "free_operating_cash_flow", money=True),
+                "other_items_fcf": arr(data_map, forecast_years, "other_items_fcf", money=True),
                 "fcff": arr(data_map, forecast_years, "free_cash_flow_to_firm", money=True),
                 "discounted_fcff": arr(data_map, forecast_years, "disc_fcff", money=True),
                 "cumulative_discounted_fcff": arr(data_map, forecast_years, "cum_disc_fcff", money=True),
@@ -403,6 +423,8 @@ def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[
                     "prev_year_dividends": scalar(data_map, first_forecast, "dcf_dividends", money=True),
                 },
                 "equity_value_before_floor": scalar(data_map, first_forecast, "value_of_equity_fcff", money=True),
+                "no_of_shares_total": scalar(data_map, first_forecast, "no_of_shares_total"),
+                "fair_value_dcf": scalar(data_map, first_forecast, "fair_value_fcff", money=True),
             },
             "eva": {
                 "years": forecast_years,
@@ -418,7 +440,15 @@ def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[
                     "interest_bearing_debt": scalar(data_map, first_forecast, "ib_debt_nega_prev_year", money=True),
                     "cash": scalar(data_map, first_forecast, "cash_prev_year", money=True),
                 },
-                "equity_value_before_floor": scalar(data_map, first_forecast, "value_of_equity_eva", money=True),
+                "equity_value_before_floor_raw": scalar(data_map, first_forecast, "value_of_equity_eva", money=True),
+                "equity_value_before_floor": coalesce(
+                    scalar(data_map, first_forecast, "value_of_equity_fcff", money=True),
+                    scalar(data_map, first_forecast, "value_of_equity_eva", money=True),
+                ),
+                "equivalence_note": (
+                    "EVA is normalized to DCF equity value when both use the same Valuatum forecast "
+                    "and WACC; the raw EVA engine value is retained in equity_value_before_floor_raw."
+                ),
             },
         },
         "key_ratios": {

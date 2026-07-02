@@ -7,10 +7,11 @@ arrays from every stage into one list sorted by the canonical section order
 1,2,3,4,5,6,8,9,10,11,12,13,14,15,16 (there is no section 7), and returns the
 final report object that feeds the renderer.
 """
-from . import sensitivity
+from . import dcf_detail, sensitivity, valuation_equivalence
 from .runner import SECTION_ORDER
 
 _WRAPPER_MARKERS = ("report_type", "cover", "machine_readable", "meta")
+_DCF_SECTION_ID = "9"
 _SENSITIVITY_SECTION_ID = "11"
 
 
@@ -63,6 +64,81 @@ def _inject_sensitivity_blocks(sections, input_data):
     return sections
 
 
+def _table_columns(block):
+    cols = block.get("columns")
+    return [str(c).strip().lower() for c in cols] if isinstance(cols, list) else []
+
+
+def _row_labels(block):
+    out = []
+    for r in block.get("rows") or []:
+        if isinstance(r, list) and r:
+            out.append(str(r[0]).strip().lower())
+    return out
+
+
+def _is_old_fcff_table(block):
+    if not isinstance(block, dict) or block.get("type") != "table":
+        return False
+    if str(block.get("table_id", "")).startswith("deterministic_dcf_"):
+        return False
+    cols = _table_columns(block)
+    has_year = any(c in ("vuosi", "year") for c in cols)
+    has_fcff = any("fcff" in c for c in cols)
+    has_discounted = any(("diskont" in c or "discount" in c) for c in cols)
+    return has_year and has_fcff and has_discounted
+
+
+def _is_old_dcf_bridge_table(block):
+    if not isinstance(block, dict) or block.get("type") != "table":
+        return False
+    if str(block.get("table_id", "")).startswith("deterministic_dcf_"):
+        return False
+    title = str(block.get("title") or "").lower()
+    if "yritysarvosta" in title and "oman pääoman" in title:
+        return True
+    labels = _row_labels(block)
+    bridge_markers = ("terminaaliarvon", "yritysarvo", "oman pääoman arvo")
+    return sum(any(m in lab for m in bridge_markers) for lab in labels) >= 2
+
+
+def _inject_dcf_detail_blocks(sections, input_data):
+    """Replace the prompt-generated DCF cash-flow table with deterministic
+    year-as-columns FCFF driver and EV-to-equity bridge tables."""
+    blocks = dcf_detail.build_dcf_detail_blocks(input_data)
+    if not blocks:
+        return sections
+    for sec in sections:
+        if not (isinstance(sec, dict) and str(sec.get("id")) == _DCF_SECTION_ID):
+            continue
+        current = list(sec.get("blocks") or [])
+        if any(
+            isinstance(b, dict) and b.get("table_id") == "deterministic_dcf_fcff_drivers"
+            for b in current
+        ):
+            return sections
+        kept = []
+        insert_at = None
+        for b in current:
+            if _is_old_fcff_table(b) or _is_old_dcf_bridge_table(b):
+                if insert_at is None:
+                    insert_at = len(kept)
+                continue
+            kept.append(b)
+        if insert_at is None:
+            insert_at = 0
+            for i, b in enumerate(kept):
+                if not isinstance(b, dict):
+                    continue
+                text = (str(b.get("title") or "") + " " + " ".join(_table_columns(b))).lower()
+                if b.get("type") == "table" and "wacc" in text:
+                    insert_at = i + 1
+                    break
+        sec["blocks"] = kept[:insert_at] + blocks + kept[insert_at:]
+        break
+    return sections
+
+
 def assemble(run):
     """Build the final report dict from a finished run. Best-effort: returns
     whatever can be assembled even if stage 6 did not complete."""
@@ -81,6 +157,7 @@ def assemble(run):
         wrapper = dict(outputs[max(outputs)])
 
     sections = merge_sections(outputs)
+    _inject_dcf_detail_blocks(sections, outputs.get(0))
     _inject_sensitivity_blocks(sections, outputs.get(0))
     wrapper["sections"] = sections
 
@@ -93,4 +170,5 @@ def assemble(run):
     s4 = outputs.get(4)
     if isinstance(s4, dict):
         wrapper.setdefault("_scenarios", s4)
+    valuation_equivalence.normalize_report(wrapper, outputs.get(0))
     return wrapper
