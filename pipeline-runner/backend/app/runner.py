@@ -9,7 +9,7 @@ import re
 import time
 from datetime import datetime, timezone
 
-from . import openrouter, store, validators
+from . import openrouter, revenue_anomalies, store, validators
 from .models import DATA_FETCHER_MODEL
 from fetchers.company_data import fetch_company_data
 
@@ -128,6 +128,8 @@ def _contribute(context, stage, output):
         # Later prompts need expected_value_teur and realistic_base_case_teur,
         # so keep the whole stage-4 object under the scenarios key.
         context["scenarios"] = output
+    if stage["order"] == 0:
+        context["revenue_anomalies"] = revenue_anomalies.detect(output)
 
     sections = output.get("sections")
     if isinstance(sections, list):
@@ -331,6 +333,7 @@ async def run_stages(run, stages, only=None, from_order=None):
     context = {}
     if input_data is not None:
         context["input_data"] = input_data
+        context["revenue_anomalies"] = revenue_anomalies.detect(input_data)
     # User-supplied context / assumptions (free text). Always present so a prompt
     # referencing {{user_input}} never fails on a missing variable, and so the
     # numbers a user states (e.g. an assumed WACC or market size) land in the

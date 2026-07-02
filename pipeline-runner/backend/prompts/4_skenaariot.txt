@@ -49,9 +49,10 @@ PERIAATTEET:
 2. Realistinen skenaario = vaiheen 3 painotettu base case (floorattuna). Tämä on ankkuri.
 3. Optimistinen skenaario rakennetaan vaiheen 2 kasvupotentiaalista — ei keksittynä. Jos analyysi tukee moninkertaista kasvua (iso markkina, skaalautuva malli, näyttöä), optimistinen arvo SAA olla moninkertainen base caseen nähden, ja se on esitettävä yhtä rehellisesti kuin riskit. Älä ole perusteettoman pessimistinen.
 4. Pessimistinen skenaario = rahoitus katkeaa / käänne ei toteudu → likvidaatio, omistaja-arvo 0 tai lähellä.
+5. LIIKEVAIHDON POIKKEAMA: Jos `growth_assessment.revenue_anomaly_context` kertoo, että suuri liikevaihdon nousu/lasku johtui tai saattoi johtua rakenteellisesta muutoksesta (yritysosto/myynti, sopimusmuutos, discontinued operations, tuloutus-/raportointimuutos) tai että selitystä ei voitu varmentaa julkisista lähteistä, ÄLÄ käytä historiallista hyppyä yksinään todisteena toistuvasta skaalautuvasta kasvusta. Se saa vaikuttaa optimistiseen skenaarioon vain lähteistettynä orgaanisena näyttönä tai käyttäjän muokattavana oletuksena. Jos selitys jäi epävarmaksi, laske optimistisen skenaarion todennäköisyysperustelun varmuutta ja mainitse epävarmuus näkyvästi.
 
 TODENNÄKÖISYYDET — JOHDETAAN ANALYYSISTÄ, EI OLETUSARVOISTA:
-Johda kunkin skenaarion todennäköisyys vaiheen 2 `growth_assessment`:n tekijöistä. Perustele jokainen todennäköisyys eksplisiittisillä, lukijan näkemillä tekijöillä: markkinan koko ja kasvu, kilpailuasema ja kilpailijoiden vahvuus, kassan ja taseen kestävyys, rahoituksen saatavuus, näyttö kasvusta (onko kasvanut ennen, onko teknologia validoitu), asiakaspysyvyys. Todennäköisyydet summautuvat 100 %:iin, esitetään 5 %-yksikön välein. Jokainen todennäköisyys on merkittävä käyttäjän muokattavaksi.
+Johda kunkin skenaarion todennäköisyys vaiheen 2 `growth_assessment`:n tekijöistä. Perustele jokainen todennäköisyys eksplisiittisillä, lukijan näkemillä tekijöillä: markkinan koko ja kasvu, kilpailuasema ja kilpailijoiden vahvuus, kassan ja taseen kestävyys, rahoituksen saatavuus, näyttö orgaanisesta kasvusta (ei pelkkä rakenteellinen liikevaihtopiikki), teknologian validointi, asiakaspysyvyys. Todennäköisyydet summautuvat 100 %:iin, esitetään 5 %-yksikön välein. Jokainen todennäköisyys on merkittävä käyttäjän muokattavaksi.
 ÄLÄ aseta todennäköisyyttä halutun loppuluvun perusteella. Jos analyysi tukee korkeaa optimistista todennäköisyyttä (vahva markkina + näyttö), se on perusteltua; jos ei, älä nosta sitä keinotekoisesti. Esitä päättelyketju auki.
 
 ODOTUSARVO JA RINNAKKAISNÄYTTÖ:
@@ -70,6 +71,7 @@ RAKENNE (osio 11):
 - `key_value` "Optimistisen skenaarion oletukset": markkinan koko, saavutettava markkinaosuus, tavoiteltava EBIT-%, aikajänne — jokainen lähteellä tai "käyttäjän muokattava oletus".
 - `paragraph`: mitä optimistinen onnistuminen vaatii + mihin riskipolku katkeaa (vähintään kappale kumpikin), johdettuna vaiheen 2 analyysistä.
 - `callout` "Todennäköisyyksien perustelu": miksi nämä todennäköisyydet — eksplisiittiset tekijät vaiheen 2 analyysista. Sano että ne ovat muokattavia ja että onnistumistodennäköisyys on raportin epävarmin osa.
+- Jos liikevaihtopoikkeama on tunnistettu, sisällytä calloutiin yksi virke siitä, miten poikkeaman orgaaninen/rakenteellinen/varmentamaton luonne vaikutti todennäköisyyksiin.
 
 OUTPUT (palauta täsmälleen tämä JSON):
 {

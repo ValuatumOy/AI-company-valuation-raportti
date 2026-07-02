@@ -230,7 +230,18 @@ def _patch_prompt_text(order, text):
     if not isinstance(text, str) or not text:
         return text
 
+    prompt_markers = {
+        1: ("LIIKEVAIHDON POIKKEAMAN LISÄHAKU", "1_enrichment.txt"),
+        4: ("LIIKEVAIHDON POIKKEAMA", "4_skenaariot.txt"),
+        5: ("liikevaihtopoikkeaman mahdollinen selitys", "5_analyysi_osiot.txt"),
+    }
+    marker_file = prompt_markers.get(order)
+    if marker_file and marker_file[0] not in text:
+        return _load_prompt(marker_file[1])
+
     if order == 2:
+        if "LIIKEVAIHDON POIKKEAMAN TULKINTA" not in text:
+            return _load_prompt("2_profiili_kilpailijat.txt")
         marker = "Mahdollinen puute kuuluu data quality -rajoitteisiin"
         if marker in text:
             return text
@@ -262,6 +273,8 @@ def _patch_prompt_text(order, text):
         return _load_prompt("3_pisteytys_numero_osiot.txt")
 
     if order == 6:
+        if "LÄHDEMERKINNÄT (jäljitettävyys)" not in text:
+            return _load_prompt("6_tiivistelma.txt")
         out = text
         cover_marker = "Kannen pääluku = realistinen base case"
         if cover_marker not in out:
@@ -324,7 +337,7 @@ def sync_prompt_patches():
         (p for p in pipelines if p.get("name") == DEFAULT_PIPELINE_NAME), pipelines[0]
     )
     for cur in pipeline.get("stages", []):
-        if cur.get("order") not in (2, 3, 6):
+        if cur.get("order") not in (1, 2, 3, 4, 5, 6):
             continue
         patched = _patch_prompt_text(cur["order"], cur.get("prompt_template"))
         if patched != cur.get("prompt_template"):

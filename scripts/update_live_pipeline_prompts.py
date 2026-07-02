@@ -7,7 +7,7 @@ Usage (PowerShell):
 Optional:
   $env:API_BASE = "https://valu-pipeline-production-88f2.up.railway.app"
 
-Only stages 2, 3 and 6 are changed. Other stage settings (model, max_tokens,
+Only stages 1-6 are changed. Other stage settings (model, max_tokens,
 validator_code, web_search, etc.) are preserved from production.
 """
 import json
@@ -22,8 +22,11 @@ API_BASE = os.getenv("API_BASE", "https://valu-pipeline-production-88f2.up.railw
 APP_TOKEN = os.getenv("APP_TOKEN", "")
 ROOT = Path(__file__).resolve().parents[1]
 PROMPTS = {
+    1: ROOT / "pipeline-runner" / "backend" / "prompts" / "1_enrichment.txt",
     2: ROOT / "pipeline-runner" / "backend" / "prompts" / "2_profiili_kilpailijat.txt",
     3: ROOT / "pipeline-runner" / "backend" / "prompts" / "3_pisteytys_numero_osiot.txt",
+    4: ROOT / "pipeline-runner" / "backend" / "prompts" / "4_skenaariot.txt",
+    5: ROOT / "pipeline-runner" / "backend" / "prompts" / "5_analyysi_osiot.txt",
     6: ROOT / "pipeline-runner" / "backend" / "prompts" / "6_tiivistelma.txt",
 }
 

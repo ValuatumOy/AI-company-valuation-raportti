@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from app import assemble, dcf_detail, render, sensitivity, validators
+from app import assemble, dcf_detail, render, revenue_anomalies, runner, sensitivity, validators
 
 VDIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -506,6 +506,48 @@ def test_grounding_passes_sourced_and_derived_figures():
     assert r["passed"] and "all prose figures reconcile" in adv["detail"]
 
 
+def test_grounding_surfaces_public_claims_without_inline_source_marks():
+    out = {"sections": [{"id": "3", "blocks": [
+        {"type": "paragraph", "text": "Markkina kasvaa nopeasti ja kilpailija on selvästi suurempi."}]}]}
+    r = validators.run_validator(_v("stage_grounding.py"), out, _grounding_ctx())
+    chk = next(c for c in r["checks"] if "inline source marks" in c["name"])
+    assert r["passed"]  # advisory — should not block the run
+    assert "lack '(lähde: ...)'" in chk["detail"]
+
+    sourced = {"sections": [{"id": "3", "blocks": [
+        {"type": "paragraph", "text": "Markkina kasvaa nopeasti (lähde: example.com, 2026-07-02)."}]}]}
+    r2 = validators.run_validator(_v("stage_grounding.py"), sourced, _grounding_ctx())
+    chk2 = next(c for c in r2["checks"] if "inline source marks" in c["name"])
+    assert chk2["detail"] == "ok"
+
+
+# --------------------------------------------------- revenue anomaly detection
+def _jump_drop_input():
+    return {
+        "meta": {"company_name": "Virnex Group Oy", "y_tunnus": "1234567-8"},
+        "actuals": {
+            "years": [2022, 2023, 2024],
+            "income_statement": {"net_sales": [600, 9000, 4200]},
+        },
+    }
+
+
+def test_revenue_anomaly_detector_flags_large_jump_and_drop():
+    brief = revenue_anomalies.detect(_jump_drop_input())
+    assert brief["has_anomaly"]
+    assert [a["direction"] for a in brief["anomalies"]] == ["increase", "decrease"]
+    assert brief["anomalies"][0]["change_pct"] == 1400.0
+    assert any("acquisition" in term for term in brief["anomalies"][0]["search_terms"])
+    assert any("divestment" in term for term in brief["anomalies"][1]["search_terms"])
+
+
+def test_stage0_contribution_exposes_revenue_anomaly_context():
+    ctx = {}
+    runner._contribute(ctx, {"order": 0, "name": "Vaihe 0 - FAKTAT"}, _jump_drop_input())
+    assert ctx["input_data"]["meta"]["company_name"] == "Virnex Group Oy"
+    assert ctx["revenue_anomalies"]["has_anomaly"]
+
+
 # ------------------------------------ stage-3 fabrication gate (BLOCKING)
 def _gate(r):
     return next(c for c in r["checks"] if "invented euro figure" in c["name"])
@@ -657,6 +699,15 @@ def test_source_url_cell_renders_clickable_domain_link():
     assert '<a class="src"' in cell
     assert 'href="https://www.ytj.fi/yritys/123"' in cell
     assert ">ytj.fi</a>" in cell  # www stripped from visible text, full URL in href
+
+
+def test_key_value_source_url_renders_clickable_domain_link():
+    h = render._block_key_value({"items": [
+        {"key": "Toimiala", "value": "Ohjelmistokehitys", "source": "https://www.ytj.fi/yritys/123"}
+    ]})
+    assert '<a class="src"' in h
+    assert 'href="https://www.ytj.fi/yritys/123"' in h
+    assert ">ytj.fi</a>" in h
 
 
 def test_table_coerces_dict_rows_and_never_dumps_raw_dict():

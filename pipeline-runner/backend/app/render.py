@@ -268,6 +268,17 @@ def _display_industry(meta):
 _URL_CELL_RE = re.compile(r"^\s*https?://(?:www\.)?([^/\s]+)(?:/\S*)?\s*$", re.I)
 
 
+def _source_inline(v):
+    if not v:
+        return ""
+    if isinstance(v, str):
+        m = _URL_CELL_RE.match(v)
+        if m:
+            href = html.escape(v.strip(), quote=True)
+            return f'<a class="src" href="{href}">{_esc(m.group(1))}</a>'
+    return _esc(v)
+
+
 def _num_cell(v):
     """Render a table value, colouring positive growth green / negative red."""
     # A bare URL in a source column reads as scraped data in a client PDF; show
@@ -741,7 +752,10 @@ def _block_key_value(b):
     rows = []
     for it in items:
         src = it.get("source")
-        src_html = f' <span class="muted" style="font-size:7pt">({_esc(src)})</span>' if src else ""
+        src_html = (
+            f' <span class="muted" style="font-size:7pt">({_source_inline(src)})</span>'
+            if src else ""
+        )
         rows.append(f'<div class="kv"><span class="k">{_esc(it.get("key"))}{src_html}</span>'
                     f'<span class="v">{_esc(it.get("value"))}</span></div>')
     head = f'<h4 class="blk">{_esc(title)}</h4>' if title else ""

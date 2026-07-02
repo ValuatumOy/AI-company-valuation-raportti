@@ -31,6 +31,8 @@ TEHTÄVÄ: Tee julkinen tiedonhaku yrityksestä ja sen kilpailijoista. Palauta s
 SYÖTE:
 `[input_data]` (yrityksen perustiedot, Y-tunnus):
 {{input_data}}
+`revenue_anomalies` (koodin tunnistamat suuret liikevaihdon nousut/laskut, voi olla tyhjä):
+{{revenue_anomalies}}
 
 VAIHE 1 — IDENTITEETIN VARMISTUS (pakollinen ennen muuta hakua):
 1. Varmista yrityksen identiteetti Y-tunnuksella yritystietopalvelusta (PRH/YTJ, Asiakastieto, Finder tai vastaava): virallinen nimi, toimiala, kotipaikka ja verkkosivu.
@@ -43,7 +45,12 @@ VAIHE 2 — PAKOLLISET HAUT:
 3. markkinasignaalit: "[nimi] yrityskauppa" / "[nimi] rahoituskierros" / "[nimi] ostotarjous"
 4. KILPAILIJAT JA MARKKINA: hae yhtiön keskeiset kilpailijat ja toimialan/markkinan koko ja kasvu. Tämä on uusi pakollinen haku, koska seuraavat vaiheet johtavat skenaariotodennäköisyydet kilpailuasemasta ja markkinasta.
 
-VAIHE 3 — EHDOLLISET LISÄHAUT (jos viitteitä kansainvälisestä toiminnasta, kasvurahoituksesta tai omistusjärjestelyistä): 1–3 lisähakua ("acquisition", "funding", "valuation", kilpailijoiden rahoitus/koko).
+VAIHE 2B — LIIKEVAIHDON POIKKEAMAN LISÄHAKU (pakollinen jos `revenue_anomalies.has_anomaly=true`):
+1. Käy jokainen `revenue_anomalies.anomalies[]` läpi ja tee kohdennetut haut sekä suomeksi että englanniksi käyttäen annettuja `search_terms`-hakusanoja.
+2. Etsi erityisesti selityksiä, joissa liikevaihdon suuri nousu/lasku ei ole normaalia orgaanista kasvua: yritysosto, liiketoiminnan myynti, jakautuminen, fuusio, konsernirakenteen muutos, liiketoimintakauppa, merkittävä uusi tai menetetty sopimus/asiakas, markkinalta poistuminen, tuotelinjan alasajo, toimialamuutos, tuloutus-/laskentaperiaatteen muutos (esim. IFRS 15), discontinued operations, carve-out tai muu raportointirakenteen muutos.
+3. Jos löydät julkisen selityksen, kirjaa se `revenue_anomaly_review.evidence[]`-listaan lähteellä. Jos et löydä varmennettua selitystä, kirjoita johtopäätökseksi, että poikkeama jää julkisista lähteistä varmentamatta eikä sitä saa tulkita sellaisenaan toistuvan orgaanisen kasvun näytöksi.
+
+VAIHE 3 — EHDOLLISET LISÄHAUT (jos viitteitä kansainvälisestä toiminnasta, kasvurahoituksesta, omistusjärjestelyistä tai liikevaihtopoikkeaman rakenteellisesta selityksestä): 1–3 lisähakua ("acquisition", "funding", "valuation", "divestment", "discontinued operations", kilpailijoiden rahoitus/koko).
 
 MITÄ SAA OTTAA: mitä yhtiö tekee, tuotteet/palvelut, asiakassegmentit, liiketoimintamalli, teknologia/platform, markkinat, perustamisvuosi, johto (rekisterifaktana), rahoituskierrokset, yrityskaupat, ostokiinnostus jos dokumentoitu, kumppanuudet, KILPAILIJAT (nimet, koko, rahoitus, markkina-asema), MARKKINAN KOKO JA KASVU lähteistettynä.
 
@@ -70,6 +77,14 @@ OUTPUT (palauta täsmälleen tämä JSON):
   "market_signals": [
     {"signal":"","source":"","source_type":"julkinen","amount_or_information":"","value_basis":"EV|equity|epäselvä","reliability":"Vahva|Kohtalainen|Heikko","interpretation":""}
   ],
+  "revenue_anomaly_review": {
+    "required": false,
+    "summary": "",
+    "evidence": [
+      {"from_year": null, "to_year": null, "direction": "increase|decrease", "possible_explanation": "", "source": "", "fetched": "YYYY-MM-DD", "confidence": "Vahva|Kohtalainen|Heikko"}
+    ],
+    "conclusion": "orgaaninen kasvu|rakenteellinen muutos|laskentaperiaate/raportointimuutos|ei varmennettua selitystä"
+  },
   "source_register": [{"source":"","info":"","fetched":"YYYY-MM-DD"}],
   "notes": ""
 }

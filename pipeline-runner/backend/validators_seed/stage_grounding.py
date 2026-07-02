@@ -20,6 +20,40 @@ import re
 _SEP = "[    ]"
 _NUM_RE = re.compile(r"[−-]?(?:\d{1,3}(?:" + _SEP + r"\d{3})+|\d+)(?:,\d+)?\s*%?")
 _WS = re.compile(r"[\s   ]")
+_SOURCE_MARK_RE = re.compile(r"\(lähde:\s*[^)]+\)", re.I)
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+_PUBLIC_CLAIM_CUES = (
+    "julkis",
+    "lähte",
+    "verkkosiv",
+    "markkina",
+    "kilpailija",
+    "toimiala",
+    "yrityskauppa",
+    "rahoituskierros",
+    "ostotarjous",
+    "omistus",
+    "johtomuutos",
+    "sopimus",
+    "asiakas",
+    "liikevaihtopoikkeama",
+    "rakenteellinen",
+    "discontinued",
+    "divest",
+    "acquisition",
+    "ifrs 15",
+)
+_INPUT_ONLY_CUES = (
+    "tilinpäätös",
+    "input_data",
+    "valuaatiomoottori",
+    "dcf",
+    "eva",
+    "wacc",
+    "tase",
+    "kassavirta",
+)
 
 
 def _parse(tok):
@@ -95,6 +129,42 @@ def _match(val, is_pct, allowed):
     return any(abs(val - a) <= tol or abs(av - abs(a)) <= tol for a in allowed)
 
 
+def _needs_source_mark(sentence):
+    low = sentence.lower()
+    if _SOURCE_MARK_RE.search(sentence):
+        return False
+    if "asiakkaan ilmoittama" in low or "käyttäjän" in low:
+        return False
+    if any(cue in low for cue in _PUBLIC_CLAIM_CUES):
+        # A pure model/financial-data sentence need not cite a web source.
+        if any(cue in low for cue in _INPUT_ONLY_CUES) and not any(
+            cue in low
+            for cue in ("julkis", "lähte", "markkina", "kilpailija", "verkkosiv")
+        ):
+            return False
+        return True
+    return False
+
+
+def _source_mark_issues(output):
+    issues = []
+    for sec in (output.get("sections") or []):
+        if not isinstance(sec, dict):
+            continue
+        sid = str(sec.get("id"))
+        for bi, b in enumerate(sec.get("blocks") or []):
+            if not isinstance(b, dict) or b.get("type") not in ("paragraph", "callout"):
+                continue
+            v = b.get("text")
+            if not isinstance(v, str) or len(v) < 20:
+                continue
+            for sentence in _SENTENCE_RE.split(v):
+                s = sentence.strip()
+                if len(s) >= 20 and _needs_source_mark(s):
+                    issues.append(f"section {sid} block {bi}: {s[:160]}")
+    return issues
+
+
 def validate(output: dict, context: dict) -> dict:
     checks = []
 
@@ -132,5 +202,11 @@ def validate(output: dict, context: dict) -> dict:
         (f"{len(orphans)} figure(s) did not auto-trace — review for fabrication "
          f"(invented market size / funding amount / competitor figure): "
          + "; ".join(orphans[:25])) if orphans else "all prose figures reconcile")
+
+    source_issues = _source_mark_issues(output)
+    chk("public-source claims have inline source marks (advisory, non-blocking)",
+        True,
+        (f"{len(source_issues)} sentence(s) look source-backed but lack '(lähde: ...)': "
+         + "; ".join(source_issues[:20])) if source_issues else "ok")
 
     return {"passed": all(c["passed"] for c in checks), "checks": checks}

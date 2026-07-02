@@ -46,7 +46,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-02-valuation-report-fixes"
+BUILD = "2026-07-02-source-revenue-anomaly"
 
 
 @app.middleware("http")
