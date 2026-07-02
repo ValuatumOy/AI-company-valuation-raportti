@@ -349,27 +349,16 @@ function Stage0Fetcher({
     }
   }
 
-  // Instant reuse: load the company's last fetched data straight from the DB —
-  // no Valuatum round-trip — so the user can just press Run again.
+  // Clicking a saved company always pulls fresh numbers from Valuatum — the
+  // backend/data-source changes often, so a stale DB snapshot can silently
+  // miss fixes (e.g. a corrected field mapping). Remembered here is only
+  // name/FID/actuals/estimates, never the last fetch result.
   async function useCompany(c: SavedCompany) {
     setName(c.company_name);
     setFid(String(c.fid));
     setActuals(c.actuals);
     setEstimates(c.estimates);
-    if (!c.has_data) return refetchCompany(c);
-    setPhase("running");
-    setStatus("Loading saved data…");
-    setError(null);
-    setWarnings([]);
-    try {
-      const full = await api.company(c.fid);
-      onSetInputData(full.input_data);
-      setStatus("Done");
-      setPhase("done");
-    } catch (err: any) {
-      setError(String(err));
-      setPhase("error");
-    }
+    refetchCompany(c);
   }
 
   // Pull fresh numbers from Valuatum for a remembered company.
@@ -413,7 +402,7 @@ function Stage0Fetcher({
       {saved.length > 0 && (
         <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 space-y-2">
           <div className="text-xs text-neutral-500 uppercase tracking-wide mb-1">
-            Saved companies — click to load (no refetch needed)
+            Saved companies — click to refetch fresh numbers from Valuatum
           </div>
           <div className="space-y-1.5">
             {saved.map((c) => (
@@ -424,20 +413,11 @@ function Stage0Fetcher({
                 <button
                   onClick={() => useCompany(c)}
                   disabled={phase === "running"}
-                  title={c.has_data ? "Load saved data instantly — ready to run" : "No saved data — will refetch"}
+                  title="Refetch fresh numbers from Valuatum"
                   className="flex-1 text-left min-w-0 disabled:opacity-50"
                 >
                   <span className="text-sm text-neutral-200 truncate">{c.company_name}</span>
                   <span className="ml-2 text-xs font-mono text-neutral-500">FID {c.fid}</span>
-                  {!c.has_data && <span className="ml-2 text-[10px] text-amber-400">refetch</span>}
-                </button>
-                <button
-                  onClick={() => refetchCompany(c)}
-                  disabled={phase === "running"}
-                  title="Refetch fresh numbers from Valuatum"
-                  className="text-xs px-1.5 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 disabled:opacity-50"
-                >
-                  ↻
                 </button>
                 <button
                   onClick={() => removeCompany(c)}
