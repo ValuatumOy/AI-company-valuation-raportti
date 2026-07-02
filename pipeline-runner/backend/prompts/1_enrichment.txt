@@ -41,9 +41,11 @@ VAIHE 1 — IDENTITEETIN VARMISTUS (pakollinen ennen muuta hakua):
 
 VAIHE 2 — PAKOLLISET HAUT:
 1. yrityksen perustiedot (nimi + Y-tunnus tai yritystietopalvelu)
-2. yrityksen omat verkkosivut — tuotteet, palvelut, liiketoimintamalli, asiakassegmentit
+2. yrityksen omat verkkosivut — tuotteet, palvelut, liiketoimintamalli, asiakassegmentit. Käytä sivuston TUOREINTA versiota (etusivu, hinnoittelu-/tuotesivut, uutiset/lehdistöhuone) — älä pitäydy pelkässä yleiskuvauksessa, jos sivustolla on tuoreempia, yksityiskohtaisempia sivuja.
 3. markkinasignaalit: "[nimi] yrityskauppa" / "[nimi] rahoituskierros" / "[nimi] ostotarjous"
 4. KILPAILIJAT JA MARKKINA: hae yhtiön keskeiset kilpailijat ja toimialan/markkinan koko ja kasvu. Tämä on uusi pakollinen haku, koska seuraavat vaiheet johtavat skenaariotodennäköisyydet kilpailuasemasta ja markkinasta.
+5. NYKYISET ASIAKKAAT JA REFERENSSIT: hae "[nimi] asiakkaat" / "[nimi] referenssi" / "[nimi] case" / "[nimi] customers". Tarkoitus on löytää yhtiön TODELLINEN nykyinen asiakaskunta (esim. nimetyt asiakasyritykset, toimialat, asiakassegmentin koko), ei vain markkinointitekstin kuvausta tuotteesta.
+6. TUOREET UUTISET JA TUOTELANSEERAUKSET: hae "[nimi] uutiset", "[nimi] lanseeraa", "[nimi] julkaisi", "[nimi] news" viimeisen 12–24 kk ajalta. Tarkoitus on löytää äskettäin julkaistut tai tulossa olevat tuotteet/palvelut, ei pelkkää vanhaa tuotekuvausta.
 
 VAIHE 2B — LIIKEVAIHDON POIKKEAMAN LISÄHAKU (pakollinen jos `revenue_anomalies.has_anomaly=true`):
 1. Käy jokainen `revenue_anomalies.anomalies[]` läpi ja tee kohdennetut haut sekä suomeksi että englanniksi käyttäen annettuja `search_terms`-hakusanoja.
@@ -52,11 +54,13 @@ VAIHE 2B — LIIKEVAIHDON POIKKEAMAN LISÄHAKU (pakollinen jos `revenue_anomalie
 
 VAIHE 3 — EHDOLLISET LISÄHAUT (jos viitteitä kansainvälisestä toiminnasta, kasvurahoituksesta, omistusjärjestelyistä tai liikevaihtopoikkeaman rakenteellisesta selityksestä): 1–3 lisähakua ("acquisition", "funding", "valuation", "divestment", "discontinued operations", kilpailijoiden rahoitus/koko).
 
-MITÄ SAA OTTAA: mitä yhtiö tekee, tuotteet/palvelut, asiakassegmentit, liiketoimintamalli, teknologia/platform, markkinat, perustamisvuosi, johto (rekisterifaktana), rahoituskierrokset, yrityskaupat, ostokiinnostus jos dokumentoitu, kumppanuudet, KILPAILIJAT (nimet, koko, rahoitus, markkina-asema), MARKKINAN KOKO JA KASVU lähteistettynä.
+MITÄ SAA OTTAA: mitä yhtiö tekee, tuotteet/palvelut, asiakassegmentit, NIMETYT ASIAKKAAT TAI ASIAKASTYYPIT jos dokumentoitu (esim. "pankkeja asiakkaina"), UUDET/TULOSSA OLEVAT TUOTTEET tai palvelulanseeraukset, liiketoimintamalli, teknologia/platform, markkinat, perustamisvuosi, johto (rekisterifaktana), rahoituskierrokset, yrityskaupat, ostokiinnostus jos dokumentoitu, kumppanuudet, KILPAILIJAT (nimet, koko, rahoitus, markkina-asema), MARKKINAN KOKO JA KASVU lähteistettynä.
 
 MITÄ EI SAA OTTAA TAI KEKSIÄ: yhtiön tilinpäätöslukuja (elleivät input-datassa), DCF-oletuksia, WACCia, yhtiön arvostuskertoimia, ennusteita, yhtiön arvoa ilman lähdettä. Kilpailijoiden ja markkinan luvut saa ottaa vain merkityistä lähteistä.
 
 LUOTETTAVUUSLUOKITUS markkinasignaaleille: Vahva (toteutunut kauppa, virallinen tiedote, julkistettu kierros arvostuksella) / Kohtalainen (raportoitu tarjous/kierros, ehdot epäselvät) / Heikko (yksittäinen maininta, varmentamaton).
+
+TUOREUS: jos eri lähteet ovat ristiriidassa keskenään (esim. vanha markkinointiteksti kuvaa ilmaisen työkalun, mutta tuoreempi lähde kertoo yritysasiakkaista tai uusista tuotteista), käytä tuoreinta varmennettua tietoa äläkä esitä vanhentunutta kuvausta yhtiön nykyisenä liiketoimintana. Jos yhtiöllä on sekä ilmainen/itsepalvelutuote että maksullinen yritysasiakastuote, kerro molemmat äläkä kuvaa yhtiötä pelkän ilmaistyökalun kautta.
 
 Merkitse jokainen väite lähdeviitteellä [lähde, haettu pvm]. Jos epävarma: "Julkisista lähteistä ei löytynyt riittävän varmennettua tietoa."
 
@@ -66,7 +70,9 @@ OUTPUT (palauta täsmälleen tämä JSON):
   "degraded": false,
   "business_profile": {
     "what_company_does": "", "products_services": [], "customer_segments": [],
-    "business_model": "", "technology_platform": "", "markets": [], "founded": null, "management": []
+    "business_model": "", "technology_platform": "", "markets": [], "founded": null, "management": [],
+    "notable_customers": [{"name_or_segment": "", "source": ""}],
+    "recent_developments": [{"description": "", "date": "", "source": ""}]
   },
   "market": {
     "market_size": "", "market_size_source": "", "market_growth": "", "market_growth_source": "", "notes": ""
