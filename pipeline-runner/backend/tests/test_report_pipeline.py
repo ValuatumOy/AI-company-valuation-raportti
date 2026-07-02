@@ -597,10 +597,11 @@ def _bridge_ctx():
 def _bridge_output(**bridge_over):
     # Internally consistent AND matches _bridge_ctx()'s engine ground truth:
     # pv_forecast (185) + pv_terminal (1815) = EV (2000) = cumulative[0];
-    # EV (2000) - debt (-31) + cash (419) = equity (2450) = engine's own figure.
+    # EV (2000) + debt (-31, engine's ib_debt_nega_prev_year is pre-negated) +
+    # cash (481) = equity (2450) = engine's own figure.
     dcf_bridge = {"pv_forecast_period_teur": 185.0, "pv_terminal_value_teur": 1815.0,
                   "enterprise_value_teur": 2000.0, "interest_bearing_debt_teur": -31.0,
-                  "cash_teur": 419.0, "equity_value_before_floor_teur": 2450.0}
+                  "cash_teur": 481.0, "equity_value_before_floor_teur": 2450.0}
     dcf_bridge.update(bridge_over)
     return {"scoring": {
         "method_scoring": [
@@ -619,20 +620,20 @@ def _bridge_chk(r, needle):
 def test_stage3_dcf_bridge_reconciles():
     r = validators.run_validator(_v("stage3_numbers.py"), _bridge_output(), _bridge_ctx())
     assert _bridge_chk(r, "PV(ennustejakso) + PV(terminaali) = EV")["passed"]
-    assert _bridge_chk(r, "EV - korolliset velat + kassa")["passed"]
+    assert _bridge_chk(r, "EV + korolliset velat")["passed"]
     assert _bridge_chk(r, "stated equity_value_before_floor matches valuation_engine.dcf")["passed"]
 
 
 def test_stage3_dcf_bridge_catches_internal_arithmetic_error():
-    # The reported production bug: EV - debt + cash != the report's own stated
+    # The reported production bug: EV + debt + cash != the report's own stated
     # equity value (a 200+ tEUR unexplained gap).
     bad = _bridge_output(equity_value_before_floor_teur=2662.0)
     r = validators.run_validator(_v("stage3_numbers.py"), bad, _bridge_ctx())
-    assert not _bridge_chk(r, "EV - korolliset velat + kassa")["passed"]
+    assert not _bridge_chk(r, "EV + korolliset velat")["passed"]
 
 
 def test_stage3_dcf_bridge_catches_drift_from_engine_ground_truth():
-    # Internally self-consistent (185+1315=1500=EV; 1500+31+419=1950=equity)
+    # Internally self-consistent (185+1315=1500=EV; 1500-31+481=1950=equity)
     # but both numbers have drifted away from what the engine actually gave
     # (EV 2000, equity 2450) — a "report contradicts its own inputs" bug,
     # distinct from an internal-arithmetic error.

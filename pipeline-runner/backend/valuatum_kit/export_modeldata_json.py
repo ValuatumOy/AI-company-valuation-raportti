@@ -21,6 +21,7 @@ from typing import Any
 
 
 EXTRA_VARS = [
+    "cr_employees",
     "employees",
     "headcount",
     "number_of_employees",
@@ -271,7 +272,7 @@ def build_flags(data_map: dict[str, dict[str, Any]], years: list[int]) -> list[d
             }
         )
 
-    headcount = arr(data_map, years, ["employees", "headcount", "number_of_employees", "no_of_employees"])
+    headcount = arr(data_map, years, ["cr_employees", "employees", "headcount", "number_of_employees", "no_of_employees"])
     if all(value is None for value in headcount):
         flags.append(
             {
@@ -330,7 +331,7 @@ def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[
             "values": arr(
                 data_map,
                 actual_years,
-                ["employees", "headcount", "number_of_employees", "no_of_employees", "avg_number_of_employees"],
+                ["cr_employees", "employees", "headcount", "number_of_employees", "no_of_employees", "avg_number_of_employees"],
             ),
         },
         "actuals": {

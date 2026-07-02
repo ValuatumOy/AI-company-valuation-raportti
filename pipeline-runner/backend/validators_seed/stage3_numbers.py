@@ -301,12 +301,15 @@ def validate(output: dict, context: dict) -> dict:
 
     if _is_num(ev) and _is_num(debt) and _is_num(cash_b) and _is_num(equity):
         tol = max(2.0, 0.01 * abs(equity))
-        computed = ev - debt + cash_b
-        chk("DCF bridge: EV - korolliset velat + kassa = oman pääoman arvo (±1% / ±2 tEUR)",
+        # interest_bearing_debt_teur is copied from bridge.interest_bearing_debt,
+        # which the engine already stores negated (ib_debt_nega_prev_year) — add
+        # it, don't subtract it, or debt gets double-counted.
+        computed = ev + debt + cash_b
+        chk("DCF bridge: EV + korolliset velat (jo negatiivinen) + kassa = oman pääoman arvo (±1% / ±2 tEUR)",
             abs(computed - equity) <= tol,
             f"computed {round(computed, 2)} vs stated {equity}")
     else:
-        chk("DCF bridge: EV - korolliset velat + kassa = oman pääoman arvo", True,
+        chk("DCF bridge: EV + korolliset velat (jo negatiivinen) + kassa = oman pääoman arvo", True,
             "skipped: dcf_bridge fields missing")
 
     # Cross-check the model's restated bridge against the engine ground truth
