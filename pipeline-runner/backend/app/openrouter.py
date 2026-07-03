@@ -97,11 +97,16 @@ async def chat(
     # 429 rate limit, 5xx, network/timeout, AND a 200 carrying a malformed or
     # truncated body (z-ai/glm-5.2 occasionally returns one — that crashed stage 3
     # with "Expecting value: line N column 1").
+    # A heavy single-writer stage (large max_tokens, usually with web search
+    # injecting a lot of context via the native agentic engine) can legitimately
+    # run well past 10 min. Give such stages headroom — the run is a server-side
+    # background task, so a long request is fine. Ordinary stages keep 600s.
+    client_timeout = 1500 if (max_tokens or 0) >= 40000 else 600
     body = None
     for attempt in range(4):
         last = attempt == 3
         try:
-            async with httpx.AsyncClient(timeout=600) as client:
+            async with httpx.AsyncClient(timeout=client_timeout) as client:
                 r = await client.post(
                     f"{BASE}/chat/completions", headers=_headers(), json=payload
                 )

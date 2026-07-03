@@ -46,7 +46,11 @@ def get_pipeline(pid):
 
 
 def list_pipelines():
-    return [get_pipeline(p["id"]) for p in db.query("SELECT id FROM pipelines")]
+    # Oldest first, so the original default pipeline stays [0] after a second
+    # (single-writer) pipeline is added. Consumers that want a specific pipeline
+    # select by name; this only fixes the "primary is first" assumption.
+    return [get_pipeline(p["id"])
+            for p in db.query("SELECT id FROM pipelines ORDER BY created_at, id")]
 
 
 def create_pipeline(name):
