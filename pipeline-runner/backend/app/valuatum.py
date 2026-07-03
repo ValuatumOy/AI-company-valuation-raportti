@@ -74,7 +74,7 @@ def _analyze(data: dict) -> list[str]:
 async def export_stream(
     company_name: str,
     fid: int,
-    actuals: int = 5,
+    actuals: int = 15,
     estimates: int = 10,
     company_code_override: str | None = None,
 ):

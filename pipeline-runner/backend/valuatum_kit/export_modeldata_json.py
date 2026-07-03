@@ -489,7 +489,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fetch-script", required=True, type=Path)
     parser.add_argument("--fid", required=True, type=int)
-    parser.add_argument("--actuals", default=5, type=int)
+    parser.add_argument("--actuals", default=15, type=int)
     parser.add_argument("--estimates", default=10, type=int)
     parser.add_argument("--token", default=None)
     parser.add_argument("--output", required=True, type=Path)

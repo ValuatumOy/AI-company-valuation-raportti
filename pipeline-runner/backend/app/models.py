@@ -81,6 +81,6 @@ class CompareIn(BaseModel):
 class ValuatumExportIn(BaseModel):
     company_name: str
     fid: int
-    actuals: int = 5
+    actuals: int = 15  # default to a long history; export clamps to what exists
     estimates: int = 10
     company_code_override: Optional[str] = None

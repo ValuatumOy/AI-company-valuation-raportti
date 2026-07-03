@@ -25,7 +25,7 @@ export function ValuatumExport({
   const [fid, setFid] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [codeOverride, setCodeOverride] = useState("");
-  const [actuals, setActuals] = useState(5);
+  const [actuals, setActuals] = useState(15);
   const [estimates, setEstimates] = useState(10);
 
   const [phase, setPhase] = useState<Phase>("idle");

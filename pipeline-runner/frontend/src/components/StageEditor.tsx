@@ -260,7 +260,7 @@ function Stage0Fetcher({
   const [fid, setFid] = useState("");
   const [codeOverride, setCodeOverride] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [actuals, setActuals] = useState(5);
+  const [actuals, setActuals] = useState(15);
   const [estimates, setEstimates] = useState(10);
 
   const [phase, setPhase] = useState<FetchPhase>("idle");

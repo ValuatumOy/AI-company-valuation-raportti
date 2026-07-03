@@ -257,9 +257,15 @@ def build_var_poses(actuals, estimates):
 
     Actuals:   Y-1 (newest actual) .. Y-<actuals>
     Estimates: Y+0 (first estimate) .. Y+<estimates-1>
+
+    The modeldata API only accepts SINGLE-DIGIT relative positions
+    (pattern Y[+-][0-9]); Y-10+/Y+10+ return HTTP 400. So cap the requested
+    positions at 9 here. Deeper history (10-15+ years) is not fetched from
+    modeldata — it comes from the separate Profinder backfill, which is driven
+    by the full `actuals` value via its own --limit.
     """
-    rel_poses = [f"Y-{i}" for i in range(1, actuals + 1)]
-    rel_poses += [f"Y+{i}" for i in range(0, estimates)]
+    rel_poses = [f"Y-{i}" for i in range(1, min(actuals, 9) + 1)]
+    rel_poses += [f"Y+{i}" for i in range(0, min(estimates, 10))]
     return [
         {"varName": name, "relPos": rel}
         for name in distinct_vars()
@@ -371,8 +377,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fid", type=int, required=True, help="Followed model id")
-    ap.add_argument("--actuals", type=int, default=5,
-                    help="Number of actualized years (Y-1..Y-N). Default 5.")
+    ap.add_argument("--actuals", type=int, default=15,
+                    help="Number of actualized years (Y-1..Y-N). Default 15.")
     ap.add_argument("--estimates", type=int, default=3,
                     help="Number of estimate years (Y+0..Y+M-1). Default 3.")
     ap.add_argument("--token", default=None,
