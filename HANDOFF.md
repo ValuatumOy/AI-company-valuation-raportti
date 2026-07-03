@@ -5,6 +5,44 @@ branches, no running dev servers, nothing mid-flight. Read this before
 touching the pipeline validators, the enrichment prompt, or the client site's
 purchase flow.
 
+## 2026-07-03 (cont.) — Foundation rebuild after CEO review (LIVE + verified)
+
+CEO review: reports didn't understand what companies do (described Valuatum
+as "just a valuation calculator", guessed numbers) and flip-flopped on
+omavaraisuusaste. Both fixed at the root, deployed, reseeded, and verified
+end-to-end on Valuatum ($0.67 run, all 6 stages ok, validators pass).
+
+- **Foundation model swap** — stage 1 enrichment: `gemini-2.5-flash` →
+  `google/gemini-3.1-pro-preview`. It's the step every later stage builds on;
+  it was the cheapest model, which is why the business understanding was thin
+  and swung run to run. **Models live now: 1 gemini-3.1-pro-preview (web),
+  2/3/4 deepseek-v4-pro, 5/6 claude-sonnet-5.**
+- **Enrichment rewritten** (`1_enrichment.txt`) into a forward-looking,
+  LOCKED `business_thesis` (what it does / how it evolved / where it's heading
+  / why history may mislead) + `business_lines[]` with per-line pess/neu/opt
+  forward-revenue views. Market/share estimates now allowed but must be marked
+  `(lähde: …)` or `"arvio, käyttäjän muokattava"`. Schema is ADDITIVE — old
+  `business_profile`/`competitors` kept, so stage 2 / render / validators are
+  untouched.
+- **Locked-premise preamble** ("PERUSLÄHTÖKOHTA (LUKITTU)") in stages 2/4/5/6:
+  build on `business_thesis`, don't re-derive or reduce it to the calculator;
+  scenarios (stage 4) build from `business_lines` forward views.
+- **Omavaraisuus lock** — rule 4 in all 7 prompt files now FORBIDS recomputing
+  omavaraisuusaste and mandates the canonical
+  `input_data.key_ratios.equity_ratio_pct` verbatim; stage 3 surfaces it as a
+  §5 table row. Root cause of the flip-flop: rule 4 used to invite recompute,
+  and with two equity figures (incl/excl capital loans) the model chose
+  differently each paragraph.
+
+Commits: `98ef551` (foundation), `5340abf` (omavaraisuus lock), + build bumps.
+Verify a fresh run with `scratchpad/run_valuatum.py` / `poll_valuatum.py`
+(drive a run via API + inspect thesis, §3, omavaraisuus consistency).
+
+**NEXT:** Ogoship end-to-end (CEO's 2nd named test company); then optionally
+tie the optimistic scenario more explicitly to named business-line market
+shares (his "luottoriskit.fi takes a few %" ask). Deferred still: stage-5
+grounding advisory→blocking, spend-cap env vars.
+
 ## Repos involved
 
 - **This repo** (`AI-company-valuation-raportti`) — the report-generation
