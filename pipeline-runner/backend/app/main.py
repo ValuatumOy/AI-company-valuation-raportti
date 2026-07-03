@@ -46,7 +46,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-03-locked-business-thesis"
+BUILD = "2026-07-03-omavaraisuus-lock"
 
 
 @app.middleware("http")
