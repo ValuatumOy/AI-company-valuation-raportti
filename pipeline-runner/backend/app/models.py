@@ -57,6 +57,14 @@ class AccessKeyIn(BaseModel):
     expires_at: Optional[str] = None
 
 
+class ExpertGenerateIn(BaseModel):
+    fid: int
+    company_name: str = Field(min_length=1, max_length=300)
+    company_code: Optional[str] = None
+    pipeline_id: Optional[str] = None
+    user_input: str = Field(default="", max_length=4000)
+
+
 class ClarificationAnswer(BaseModel):
     id: str = ""
     question: str = ""

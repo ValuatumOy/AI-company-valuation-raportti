@@ -1217,20 +1217,24 @@ def test_expert_key_is_capped_and_scoped(monkeypatch):
 
     seed.ensure_seeded()
     monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+    # Don't actually run the Valuatum export / pipeline in a unit test.
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
     c = TestClient(main.app)
     pid = store.list_pipelines()[0]["id"]
     key = store.create_access_key("E", generations_limit=1)["key"]
     exp = {"Authorization": f"Bearer {key}"}
-    body = {"pipeline_id": pid, "input_data": {"meta": {}}, "stop_on_failure": False}
+    gen = {"fid": 12345, "company_name": "Testi Oy", "pipeline_id": pid}
 
-    # One generation allowed, consuming quota.
-    r = c.post("/api/runs", json=body, headers=exp)
+    # One generation allowed via the self-serve endpoint, consuming quota.
+    r = c.post("/api/expert/generate", json=gen, headers=exp)
     assert r.status_code == 200
     rid = r.json()["run_id"]
     assert c.get(f"/api/runs/{rid}", headers=exp).status_code == 200   # owns it
     # Quota now exhausted → second generation blocked.
-    assert c.post("/api/runs", json=body, headers=exp).status_code == 403
-    # Deny-by-default: admin surfaces are off-limits to expert keys.
+    assert c.post("/api/expert/generate", json=gen, headers=exp).status_code == 403
+    # Deny-by-default: raw run creation + admin surfaces are off-limits.
+    assert c.post("/api/runs", json={"pipeline_id": pid, "stop_on_failure": False},
+                  headers=exp).status_code == 403
     assert c.post("/api/reseed", headers=exp).status_code == 403
     assert c.get("/api/access-keys", headers=exp).status_code == 403
     assert c.get("/api/runs", headers=exp).status_code == 403          # list-all

@@ -36,11 +36,15 @@ self-serve flow (chosen surface = Option B) + UI quick-wins are the next chunk.
 - **Tests:** 91 pass (+2): quota atomicity + capped/scoped access (expert blocked
   from admin surfaces + others' runs).
 
-**NEXT (client-site self-serve, Option B — NOT built yet):**
-1. Backend `POST /api/expert/generate` (or reuse): company identifier → run the
-   Valuatum kit (`app/valuatum.export_stream`) to get stage-0 input_data →
-   create+start a run with the expert key → return run_id. Self-serve needs this
-   because the client site has no stage-0 data today.
+**NEXT (client-site self-serve, Option B):**
+1. DONE (`build 2026-07-04-expert-generate`): `fetchers/company_data.py` now runs
+   the Valuatum kit (`app.valuatum.export_stream`) for a FID → stage-0
+   input_data (was a NotImplementedError stub). `POST /api/expert/generate`
+   {fid, company_name, company_code?, pipeline_id?, user_input?} consumes one
+   generation, creates a run with `identifier=fid` (stage 0 auto-fetches) +
+   `access_key`, starts it, returns run_id. Expert allowlist tightened: experts
+   POST only `/api/expert/generate` + `round2` (raw `/api/runs` + `start`
+   removed); GET adds `/api/companies` (pick a pre-fetched company). 91 tests.
 2. Client site (`Company_valuation_nettisivut`): expert-key gate (clone the
    `editor/lib/auth.ts` cookie pattern), search → generate → poll → render report
    (iframe the backend `report.html`) → port the ClarifyPanel for round-2.

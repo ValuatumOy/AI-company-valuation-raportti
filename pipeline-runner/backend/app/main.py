@@ -16,8 +16,8 @@ load_dotenv()
 
 from . import openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
 from .models import (  # noqa: E402
-    AccessKeyIn, CompareIn, FetchIn, OrderIn, OrderStatusIn, PipelineIn,
-    ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
+    AccessKeyIn, CompareIn, ExpertGenerateIn, FetchIn, OrderIn, OrderStatusIn,
+    PipelineIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
 
@@ -47,7 +47,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-04-expert-keys"
+BUILD = "2026-07-04-expert-generate"
 
 
 # Paths a capped expert key (`exp_`) may reach. DENY-BY-DEFAULT: everything not
@@ -56,11 +56,12 @@ BUILD = "2026-07-04-expert-keys"
 # endpoint via _require_run_access — the allowlist only opens the route.
 _EXPERT_GET = re.compile(
     r"^/api/(pipelines(/[^/]+)?"
+    r"|companies"
     r"|runs/[^/]+(/readiness|/report\.(html|pdf)|/stream)?"
     r"|expert/me)$"
 )
 _EXPERT_POST = re.compile(
-    r"^/api/(runs|runs/[^/]+/(start|round2)|valuatum/company-json)$"
+    r"^/api/(expert/generate|runs/[^/]+/round2)$"
 )
 
 
@@ -566,6 +567,30 @@ def expert_me(request: Request):
         "generations_limit": row["generations_limit"],
         "remaining": max(0, row["generations_limit"] - row["generations_used"]),
     }
+
+
+@app.post("/api/expert/generate")
+async def expert_generate(body: ExpertGenerateIn, request: Request):
+    """Self-serve generation: create a run that fetches the company's Valuatum
+    data in stage 0 (by FID) and runs the pipeline. Consumes one generation for
+    expert keys; admin (access_key None) is unlimited. Round-2 refinement of the
+    resulting report is free (see round2_run)."""
+    pid = body.pipeline_id or (store.list_pipelines() or [{}])[0].get("id")
+    if not pid or not store.get_pipeline(pid):
+        raise HTTPException(404, "pipeline not found")
+    key = getattr(request.state, "access_key", None)
+    if key and not store.consume_generation(key):
+        raise HTTPException(403, "Generointikiintiö on käytetty loppuun.")
+    params = {"company_name": body.company_name}
+    if body.company_code:
+        params["company_code"] = body.company_code
+    if body.user_input.strip():
+        params["user_input"] = body.user_input.strip()
+    rid = store.create_run(
+        pid, None, True, identifier=str(body.fid), params=params, access_key=key,
+    )
+    _start_bg(rid)
+    return {"run_id": rid}
 
 
 @app.delete("/api/runs/{rid}")
