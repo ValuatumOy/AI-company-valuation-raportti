@@ -5,6 +5,99 @@ branches, no running dev servers, nothing mid-flight. Read this before
 touching the pipeline validators, the enrichment prompt, or the client site's
 purchase flow.
 
+---
+
+# ⭐ CURRENT STATE + ARCHITECTURE (read this first) — updated 2026-07-04
+
+## The three surfaces
+1. **Backend** (this repo, `pipeline-runner/backend`, FastAPI on Railway
+   `valu-pipeline-production-88f2.up.railway.app`). Runs the AI valuation
+   pipeline. Single admin `APP_TOKEN` = unlimited. Reseed after ANY
+   prompt/model/validator/stage change (`POST /api/reseed` with Bearer
+   APP_TOKEN); runtime code changes go live on deploy without reseed. Build
+   marker in `app/main.py:BUILD`, surfaced at `/api/health`. Deploy = push to
+   `main` (Railway auto-builds ~45s). Two pipelines seeded: default 6-stage +
+   single-writer "koeajo" (3-stage).
+2. **Admin runner** (React/Vite, `pipeline-runner/frontend`, on Vercel). The
+   operator tool: fetch a company's Valuatum data, run the pipeline, view the
+   report. Full APP_TOKEN access.
+3. **Client site** (`../Company_valuation_nettisivut`, Next.js on Vercel — its
+   OWN repo `github.com/Valuatum/Company_valuation_nettisivut`). Public
+   marketing + Stripe purchase site, PLUS the new `/asiantuntija` expert
+   self-serve page. See that repo's HANDOFF.md.
+
+## Expert self-serve (LIVE) — capped, invite-only, no accounts
+- **Access keys** (`access_keys` table): mint `exp_…` keys with a per-key
+  generation quota. A "generation" = one round-1 report; **round-2 refinements
+  are free**; admin token unlimited. `store.consume_generation` is an atomic
+  conditional UPDATE (race-safe). Mint: `POST /api/access-keys` (admin) →
+  returns the key. `GET /api/expert/me` = an expert reads its own remaining
+  quota. Quota == "credits" (the UI calls it "krediittiä").
+- **Security (deny-by-default)**: the `app/main.py` auth middleware recognizes
+  `Bearer exp_…` but allows it ONLY on `_EXPERT_GET`/`_EXPERT_POST` (their own
+  run lifecycle + report + `/api/companies` + `/api/expert/*`). Everything else
+  (reseed, edits, orders, minting, list-all-runs) is admin-only.
+  `_require_run_access` enforces per-key run OWNERSHIP (`runs.access_key`
+  column). Do NOT loosen this without care — it's access control.
+- **Generation**: `POST /api/expert/generate {fid, company_name, company_code?,
+  pipeline_id?, user_input?}` → consume 1 credit → `create_run` with
+  `identifier=fid` (NO input_data) → stage 0 auto-fetches the Valuatum data →
+  pipeline runs. `fetchers/company_data.py` wires stage 0 to
+  `app.valuatum.export_stream(fid)` (was a NotImplementedError stub).
+- **Client flow**: `/asiantuntija` on the client site — key gate → pick a
+  company → generate → poll `GET /api/runs/{rid}` → report shown by fetching
+  `report.html?force=1` WITH the bearer and injecting as `<iframe srcdoc>`
+  (an iframe can't send an Authorization header) → round-2 ClarifyPanel.
+
+## ⚠️ THE FID BLOCKER (the one thing gating "any company")
+`/rest/modeldata` (DCF/EVA/forecasts) is keyed by Valuatum's internal **FID**
+(numeric). The client site only has **Y-tunnus** + name. There is NO
+Y-tunnus→FID resolver anywhere. Consequence:
+- **What works TODAY without a resolver:** the `/asiantuntija` picker lists the
+  operator's **pre-fetched** companies (`GET /api/companies` → `store.list_companies`,
+  currently 7: Valuatum Oy fid=184362, Virnex, Supercell, SearchCo, Jungle Juice
+  Bar, Athlos, OGOship). Each already has a stored FID (from when the operator
+  fetched it in the admin runner). The expert picks by NAME; the FID rides along
+  invisibly. So self-serve works for those companies right now.
+- **What's blocked:** self-serve for ARBITRARY companies (search anything).
+- **The unblock:** ONE fact from Valuatum's tech team — "is there an API that
+  maps a Y-tunnus (or name) to the FID used by /rest/modeldata, or does the
+  client's VALUATUM_DATA_API company search already return that FID?" Then add a
+  resolver in the backend (small) so `generate` accepts a Y-tunnus. User is
+  chasing this; until then, pre-fetch companies via the admin runner to make them
+  available to experts.
+
+## Paid customer flow (client site) — now paid-first (B), self-serve NOT built
+- Today: search company → BuyBox → **Stripe pay** → `POST /api/orders` → an
+  OPERATOR runs the pipeline in the admin runner and delivers the report. NOT
+  self-serve. Delivery SLA copy = "30–60 minuutissa" (pipeline is automated;
+  operator just triggers + delivers).
+- **DESIGNED, NOT BUILT — paid self-serve + account-less regeneration:** pay →
+  auto-generate a run → email a **signed per-run report link**
+  (`/raportti/{run_id}?t=<HMAC(run_id, server_secret)>`) → opening it unlocks
+  that report + a round-2 "add info & regenerate" flow. NO accounts, NO user
+  table — the signed link IS the identity (same ownership model as expert keys,
+  keyed by link instead of `exp_` key). This needs the FID resolver first (so
+  payment can trigger generation by Y-tunnus). Limit refinements per report
+  (e.g. 1–2) the same way as credits.
+
+## Build order to get the paid product fully live (once FID resolver exists)
+1. Backend Y-tunnus→FID resolver (per tech-team endpoint) → `generate` accepts
+   Y-tunnus.
+2. Backend: signed-report-link auth (HMAC per run_id) accepted by
+   `report.html`/`round2`/`get_run` as an alternative to a bearer, scoped to
+   that one run. A `/api/paid/generate` (Stripe-webhook-verified) mirrors
+   `/api/expert/generate` but is gated by payment instead of a credit key.
+3. Stripe: switch success flow (or webhook) to call `/api/paid/generate` and
+   email the signed link. (Stripe webhook is the durable fix — the current
+   success page posts the order client-side, guarded by an in-memory Set.)
+4. Client site: a `/raportti/[id]` page that reads `?t=`, shows the report
+   (srcdoc) + the round-2 refine panel. Reuse `/asiantuntija` components.
+5. Persist uploaded statements (`/api/import` currently logs + discards).
+
+---
+
+
 ## 2026-07-04 — Expert access keys (capped self-serve) — backend foundation (LIVE, no reseed)
 
 CEO wants to share the system to a couple of invited experts, capped at a few
