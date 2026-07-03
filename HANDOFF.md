@@ -5,6 +5,50 @@ branches, no running dev servers, nothing mid-flight. Read this before
 touching the pipeline validators, the enrichment prompt, or the client site's
 purchase flow.
 
+## 2026-07-03 (cont.) — 2-step interactive pipeline + analyst-grade reasoning (needs reseed)
+
+Two connected upgrades, `build = 2026-07-03-twostep-analyst`. Backend 89 tests
+pass, frontend builds. **Needs deploy + `/api/reseed`** for the prompt changes.
+
+**A. Analyst-reasoning upgrade (prompt-only, both pipelines).** Teaches the AI
+to value new products as a slice of an existing market instead of extrapolating
+flat history, and to hunt regime-changes the numbers hide.
+- `prompts/1_enrichment.txt`: VAIHE 2 kohta 9 (new-product category + named
+  comparables + TAM/SAM), kohta 10 (`structural_inflections` hunt: lifted
+  exclusivity/contract restriction, pivot, flat→hiring, exogenous/AI shift).
+  New output fields: `business_lines[].product_category/category_comparables/
+  tam_teur/sam_teur/market_basis` and `forward_revenue_view.optimistic_share_pct/
+  optimistic_market_teur`; top-level `structural_inflections[]` and
+  `clarification_requests[]`. Plus a `{{clarifications}}` round-2 ground-truth
+  input block.
+- `prompts/4_skenaariot.txt` + `prompts/singlewriter.txt` scenario section:
+  periaate 3b/3c — optimistic value is a VISIBLE chain (market size → share% →
+  revenue → EBIT% → value); millions allowed only with the chain shown, rejected
+  without. Base case stays anchored to realized history.
+
+**B. 2-step interactive feature.** Round 1 emits `clarification_requests`
+(the AI's own blind spots); the user answers; round 2 re-runs from enrichment
+(`from_order=1`) with the answers as ground truth, reusing the parent's stage-0.
+- Data model: `runs.parent_run_id` column + migration (both PG + SQLite),
+  `db.py`. `store.clone_run(parent_id, params)` copies input_data + the order-0
+  stage_result, merges params, links parent.
+- `runner._fmt_clarifications` + a `context["clarifications"]` line (mirrors the
+  `user_input` block) so `{{clarifications}}` substitutes.
+- `POST /api/runs/{rid}/round2` (`main.py`, `Round2In` model) → `clone_run` →
+  `_start_bg(from_order=1)`. No new pipeline preset, no new stage.
+- Frontend: `api.round2`, `Run.parent_run_id` + `ClarificationRequest` types,
+  `ClarifyPanel.tsx` (renders the questions + answer boxes below the progress
+  banner when a run settles), `startRound2` in `App.tsx`.
+
+**Decisions taken (user):** build everything in one pass; round-2 = re-run from
+enrichment (not writer-only); cap at 2 rounds (re-emitting clarification_requests
+makes round-3 free later — not built); pricing = agnostic/decide later.
+
+**Deferred:** round-3 loop UI; history child-under-parent grouping (parent_run_id
+stored, not rendered); a stage-4 "unexplained millions" validator (add when a run
+actually produces one). The Asiakastieto industry-quartile benchmark remains
+impossible (no sector medians in input_data).
+
 ## 2026-07-03 (cont.) — Report fixes: FCFF build-up, competitors, EVA/DCF page (NOT yet reseeded)
 
 CEO/user review of a Fable single-writer report flagged: (1) DCF page missing

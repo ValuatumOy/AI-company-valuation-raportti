@@ -133,14 +133,38 @@ def reorder(pid, stage_ids):
 
 # ---- runs / results ---------------------------------------------------------
 
-def create_run(pid, input_data, stop_on_failure, identifier=None, params=None):
+def create_run(pid, input_data, stop_on_failure, identifier=None, params=None,
+               parent_run_id=None):
     rid = _uuid()
     db.execute(
         "INSERT INTO runs(id,pipeline_id,input_data,status,stop_on_failure,"
-        "total_cost_usd,created_at,identifier,params) VALUES(?,?,?,?,?,?,?,?,?)",
+        "total_cost_usd,created_at,identifier,params,parent_run_id) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
         (rid, pid, db.jdump(input_data), "running", int(stop_on_failure), 0.0,
-         _now(), identifier, db.jdump(params or {})),
+         _now(), identifier, db.jdump(params or {}), parent_run_id),
     )
+    return rid
+
+
+def clone_run(parent_id, params=None):
+    """Round-2 run: reuse the parent's pipeline + stage-0 FAKTAT data (which is
+    deterministic and expensive-free to keep), link back via parent_run_id, and
+    carry the user's clarifications in params. Copies the parent's order-0 stage
+    result so a scoped `from_order=1` re-run finds stage 0 pre-loaded."""
+    parent = get_run(parent_id)
+    if not parent:
+        raise ValueError("parent run not found")
+    merged_params = dict(parent.get("params") or {})
+    merged_params.update(params or {})
+    rid = create_run(
+        parent["pipeline_id"], parent.get("input_data"),
+        parent.get("stop_on_failure", True), parent.get("identifier"),
+        merged_params, parent_run_id=parent_id,
+    )
+    for res in parent.get("results") or []:
+        if res.get("order") == 0:
+            upsert_result(rid, {**res, "run_id": rid})
+            break
     return rid
 
 

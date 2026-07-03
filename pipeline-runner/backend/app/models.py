@@ -51,6 +51,17 @@ class RunIn(BaseModel):
     stop_on_failure: bool = True
 
 
+class ClarificationAnswer(BaseModel):
+    id: str = ""
+    question: str = ""
+    answer: str = Field(default="", max_length=4000)
+
+
+class Round2In(BaseModel):
+    clarifications: list[ClarificationAnswer] = Field(default_factory=list)
+    clarifications_free_text: str = Field(default="", max_length=8000)
+
+
 class FetchIn(BaseModel):
     identifier: str
     params: dict[str, Any] = Field(default_factory=dict)

@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS runs (
     total_cost_usd REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     identifier TEXT,
-    params TEXT
+    params TEXT,
+    parent_run_id TEXT
 );
 CREATE TABLE IF NOT EXISTS companies (
     fid INTEGER PRIMARY KEY,
@@ -129,6 +130,7 @@ if IS_PG:
                 "web_search INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS identifier TEXT",
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS params TEXT",
+                "ALTER TABLE runs ADD COLUMN IF NOT EXISTS parent_run_id TEXT",
             ):
                 try:
                     conn.execute(mig)
@@ -170,6 +172,7 @@ else:
             "ALTER TABLE stages ADD COLUMN web_search INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE runs ADD COLUMN identifier TEXT",
             "ALTER TABLE runs ADD COLUMN params TEXT",
+            "ALTER TABLE runs ADD COLUMN parent_run_id TEXT",
         ):
             try:
                 c.execute(mig)

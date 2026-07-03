@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, getToken, setToken } from "./api";
-import type { ModelInfo, Pipeline, Run, Stage, StageResult } from "./types";
+import type {
+  ClarificationRequest, ModelInfo, Pipeline, Run, Stage, StageResult,
+} from "./types";
 import { wasAutoCorrected } from "./status";
 import { StageList } from "./components/StageList";
 import { StageEditor } from "./components/StageEditor";
 import { ResultPanel } from "./components/ResultPanel";
 import { CostOverlay } from "./components/CostOverlay";
 import { OrdersOverlay } from "./components/OrdersOverlay";
+import { ClarifyPanel } from "./components/ClarifyPanel";
 
 const WELL_KNOWN: Record<number, string> = {
   0: "input_data",
@@ -268,6 +271,29 @@ export default function App() {
     }
   }
 
+  async function startRound2(
+    answers: { id: string; question: string; answer: string }[],
+    freeText: string
+  ) {
+    if (!runId) return;
+    setBusy(true);
+    setRunStartAt(Date.now());
+    setNowTick(Date.now());
+    setResults({});
+    setTotalCost(0);
+    try {
+      const { run_id } = await api.round2(runId, {
+        clarifications: answers,
+        clarifications_free_text: freeText,
+      });
+      setRunId(run_id); // the endpoint already started it server-side
+      refreshRun(run_id);
+    } catch (e: any) {
+      setBusy(false);
+      alert("Round 2 failed to start:\n" + (e?.message || e));
+    }
+  }
+
   async function rerun(order: number, from = false) {
     if (!runId) return runAll();
     setBusy(true);
@@ -442,6 +468,14 @@ export default function App() {
   const autoCorrected = hasRun
     ? runStages.filter((s) => wasAutoCorrected(results[s.order]))
     : [];
+
+  // Round-1 → round-2: the enrichment stage (order 1) emits the AI's own
+  // clarification questions. Offer the refine panel once the run has settled.
+  const clarifyReqs: ClarificationRequest[] =
+    (!busy &&
+      Array.isArray(results[1]?.parsed_json?.clarification_requests) &&
+      results[1]!.parsed_json.clarification_requests) ||
+    [];
 
   return (
     <div className="h-full flex flex-col">
@@ -640,6 +674,15 @@ export default function App() {
             />
           </div>
         </div>
+      )}
+
+      {/* ── round-2 refine panel (AI's own clarification questions) ── */}
+      {clarifyReqs.length > 0 && (
+        <ClarifyPanel
+          requests={clarifyReqs}
+          busy={busy}
+          onSubmit={startRound2}
+        />
       )}
 
       {/* ── body ── */}

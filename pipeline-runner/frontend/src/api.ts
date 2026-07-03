@@ -109,6 +109,21 @@ export const api = {
     }).then((r) => j<{ ok: boolean; started: boolean }>(r));
   },
 
+  // Round 2: reuse the parent run's FAKTAT, re-run from enrichment with the
+  // user's answers to the round-1 clarification questions.
+  round2: (
+    rid: string,
+    body: {
+      clarifications: { id: string; question: string; answer: string }[];
+      clarifications_free_text: string;
+    }
+  ) =>
+    req(`/api/runs/${rid}/round2`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(body),
+    }).then((r) => j<{ run_id: string; parent_run_id: string }>(r)),
+
   runs: () => req("/api/runs").then((r) => j<any[]>(r)),
   orders: () => req("/api/orders").then((r) => j<any[]>(r)),
   setOrderStatus: (oid: string, status: string) =>

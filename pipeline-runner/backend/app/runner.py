@@ -319,6 +319,30 @@ def _ev(kind, **kw):
     return {"event": kind, **kw}
 
 
+def _fmt_clarifications(items, free_text):
+    """Render round-2 user answers into a prompt block. Each item pairs the
+    round-1 question id with the user's answer; free_text is anything extra."""
+    lines = []
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        ans = str(it.get("answer") or "").strip()
+        if not ans:
+            continue
+        q = str(it.get("question") or it.get("id") or "").strip()
+        lines.append(f"- {q}: {ans}" if q else f"- {ans}")
+    if isinstance(free_text, str) and free_text.strip():
+        lines.append(f"- Muuta: {free_text.strip()}")
+    if not lines:
+        return "(Ei käyttäjän täydennyksiä — tämä on ensimmäinen kierros.)"
+    return (
+        "Käyttäjä on vahvistanut alla olevat tiedot vastauksena ensimmäisen "
+        "kierroksen kysymyksiin. Käsittele ne VARMENNETTUNA TIETONA (asiakkaan "
+        "vahvistama), joka kumoaa aiemman arvion vastaavasta kohdasta:\n"
+        + "\n".join(lines)
+    )
+
+
 async def run_stages(run, stages, only=None, from_order=None):
     """Async generator yielding SSE event dicts. Persists each StageResult."""
     rid = run["id"]
@@ -342,6 +366,12 @@ async def run_stages(run, stages, only=None, from_order=None):
     context["user_input"] = (
         _ui.strip() if isinstance(_ui, str) and _ui.strip()
         else "(Käyttäjä ei antanut lisätietoja tai oletuksia.)"
+    )
+    # Round-2 clarifications: the user's answers to the AI's round-1 questions,
+    # treated as ground truth. Always present so {{clarifications}} never errors.
+    context["clarifications"] = _fmt_clarifications(
+        (params or {}).get("clarifications"),
+        (params or {}).get("clarifications_free_text"),
     )
 
     def in_scope(order):

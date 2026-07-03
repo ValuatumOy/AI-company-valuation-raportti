@@ -15,8 +15,8 @@ load_dotenv()
 
 from . import openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
 from .models import (  # noqa: E402
-    CompareIn, FetchIn, OrderIn, OrderStatusIn, PipelineIn, ReorderIn, RunIn,
-    StageIn, ValidateIn, ValuatumExportIn,
+    CompareIn, FetchIn, OrderIn, OrderStatusIn, PipelineIn, ReorderIn, Round2In,
+    RunIn, StageIn, ValidateIn, ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
 
@@ -46,7 +46,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-03-verottaja-crosscheck"
+BUILD = "2026-07-03-twostep-analyst"
 
 
 @app.middleware("http")
@@ -365,6 +365,21 @@ async def start_run(rid: str, from_order: int | None = None, only: int | None = 
     if not store.get_run(rid):
         raise HTTPException(404, "run not found")
     return {"ok": True, "started": _start_bg(rid, only=only, from_order=from_order)}
+
+
+@app.post("/api/runs/{rid}/round2")
+async def round2_run(rid: str, body: Round2In):
+    """Round 2: clone the parent run (reuse its stage-0 FAKTAT), fold the user's
+    clarifications into params, and re-run from enrichment so the corrected facts
+    reshape the locked business thesis and the scenarios."""
+    if not store.get_run(rid):
+        raise HTTPException(404, "run not found")
+    new_rid = store.clone_run(rid, params={
+        "clarifications": [c.model_dump() for c in body.clarifications],
+        "clarifications_free_text": body.clarifications_free_text,
+    })
+    _start_bg(new_rid, from_order=1)
+    return {"run_id": new_rid, "parent_run_id": rid}
 
 
 @app.post("/api/runs/{rid}/stages/{order}/rerun")

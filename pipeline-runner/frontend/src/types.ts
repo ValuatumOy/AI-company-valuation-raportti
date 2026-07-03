@@ -66,6 +66,15 @@ export interface StageResult {
   finished_at: string | null;
 }
 
+export interface ClarificationRequest {
+  id: string;
+  question: string;
+  why_it_matters?: string;
+  valuation_impact?: string;
+  category?: string;
+  current_assumption?: string;
+}
+
 export interface Run {
   id: string;
   pipeline_id: string;
@@ -74,6 +83,7 @@ export interface Run {
   stop_on_failure: boolean;
   total_cost_usd: number;
   created_at: string;
+  parent_run_id?: string | null;
   results: StageResult[];
 }
 

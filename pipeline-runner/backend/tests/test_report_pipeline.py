@@ -1178,6 +1178,39 @@ def test_self_heal_retries_failed_stage(monkeypatch):
     assert any("Automaattinen korjaus" in n for n in names)
 
 
+def test_clone_run_reuses_stage0_and_links_parent():
+    from app import seed, store
+
+    seed.ensure_seeded()
+    pid = store.list_pipelines()[0]["id"]
+    rid = store.create_run(pid, {"meta": {"company_name": "Parent"}}, True,
+                           params={"user_input": "alkuperäinen"})
+    store.upsert_result(rid, {"order": 0, "name": "Vaihe 0", "status": "ok",
+                              "parsed_json": {"meta": {"company_name": "Parent"}}})
+    child_id = store.clone_run(rid, params={
+        "clarifications": [{"id": "tam", "answer": "15 M€"}]})
+    child = store.get_run(child_id)
+    assert child["parent_run_id"] == rid
+    assert child["input_data"] == {"meta": {"company_name": "Parent"}}
+    assert child["params"]["user_input"] == "alkuperäinen"  # parent params merged
+    assert child["params"]["clarifications"][0]["answer"] == "15 M€"
+    s0 = [r for r in child["results"] if r["order"] == 0]
+    assert s0 and s0[0]["parsed_json"]["meta"]["company_name"] == "Parent"
+
+
+def test_fmt_clarifications_renders_answers_and_empty_sentinel():
+    from app import runner
+
+    assert "ensimmäinen kierros" in runner._fmt_clarifications(None, None)
+    txt = runner._fmt_clarifications(
+        [{"id": "tam", "question": "Markkinan koko?", "answer": "15 M€"},
+         {"id": "x", "answer": ""}],  # blank answer skipped
+        "lisätieto")
+    assert "Markkinan koko?: 15 M€" in txt
+    assert "lisätieto" in txt
+    assert "vahvistama" in txt.lower()
+
+
 def test_gemini_chat_routes_to_google_not_openrouter(monkeypatch):
     import asyncio
     from app import openrouter
