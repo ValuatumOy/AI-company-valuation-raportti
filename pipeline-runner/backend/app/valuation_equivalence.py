@@ -42,6 +42,67 @@ def _has_eva(input_data):
     return isinstance(ve.get("eva"), dict) and bool(ve.get("eva"))
 
 
+# Verohallinto's unlisted-company earnings-capitalization rate (yritysvarallisuuden
+# arvostaminen perintö- ja lahjaverotuksessa). A rough public cross-check, not the
+# report's primary method.
+_VEROTTAJA_RATE = 0.15
+
+
+def _last_num(xs):
+    for x in reversed(xs or []):
+        if _is_num(x):
+            return x
+    return None
+
+
+def _avg_last(xs, k=3):
+    vals = [x for x in (xs or []) if _is_num(x)][-k:]
+    return (sum(vals) / len(vals)) if vals else None
+
+
+def _verottaja_blocks(input_data, value):
+    """DCF/EVA vs. the Finnish tax authority's substance+income valuation, as a
+    reader-facing cross-check (mirrors Asiakastieto's substanssiarvo/tuottoarvo)."""
+    actuals = (input_data or {}).get("actuals") or {}
+    inc = actuals.get("income_statement") or {}
+    bs = actuals.get("balance_sheet") or {}
+    avg_ni = _avg_last(inc.get("net_income"), 3)
+    equity = _last_num(bs.get("equity"))
+    if avg_ni is None or equity is None:
+        return []
+    tuottoarvo = max(0.0, avg_ni) / _VEROTTAJA_RATE
+    substanssiarvo = equity
+    kaypa = (tuottoarvo + substanssiarvo) / 2 if tuottoarvo > substanssiarvo else substanssiarvo
+    return [
+        {
+            "type": "table",
+            "table_id": "deterministic_valuation_crosscheck",
+            "title": "Arvon ristiintarkistus: DCF/EVA vs. verottajan malli",
+            "unit": "tEUR",
+            "columns": ["Menetelmä", "Arvo"],
+            "rows": [
+                ["Raportin arvo (DCF/EVA)", _fmt_num(value)],
+                ["Tuottoarvo (3 v:n keskitulos / 15 %)", _fmt_num(tuottoarvo)],
+                ["Substanssiarvo (oma pääoma)", _fmt_num(substanssiarvo)],
+                ["Verottajan käypä arvo", _fmt_num(kaypa)],
+            ],
+        },
+        {
+            "type": "paragraph",
+            "text": (
+                "Verottajan mallissa (Verohallinnon arvostusohje) tuottoarvo on "
+                "kolmen viime vuoden keskimääräinen nettotulos pääomitettuna 15 %:n "
+                "tuottovaatimuksella ja substanssiarvo on yhtiön oma pääoma. Käypä "
+                "arvo on näiden keskiarvo, kun tuottoarvo ylittää substanssiarvon, "
+                "muutoin substanssiarvo. Malli on karkea julkinen vertailukohta "
+                "(perintö- ja lahjaverotus), ei tämän raportin ensisijainen "
+                "menetelmä: DCF/EVA on tarkempi, koska se käyttää yhtiön omia "
+                "ennusteita ja WACCia yksittäisen keskituloksen sijaan."
+            ),
+        },
+    ]
+
+
 def _accepted(row):
     status = str(row.get("status") or "").lower()
     return status.startswith("hyv") or ((_num(row.get("weight_pct")) or 0) > 0)
@@ -136,7 +197,7 @@ def _is_old_method_paragraph(block):
     return mentions_methods and mentions_weighting
 
 
-def _normalize_section8(sections, value):
+def _normalize_section8(sections, input_data, value):
     if not _is_num(value):
         return
     new_blocks = [
@@ -179,7 +240,7 @@ def _normalize_section8(sections, value):
                 "tehtävä on osoittaa saman ennusteen sisäinen johdonmukaisuus."
             ),
         },
-    ]
+    ] + _verottaja_blocks(input_data, value)
     for sec in sections:
         if not (isinstance(sec, dict) and str(sec.get("id")) == "8"):
             continue
@@ -255,6 +316,6 @@ def normalize_report(report, input_data):
     if isinstance(scoring, dict):
         _normalize_scoring(scoring, value)
     sections = report.get("sections") or []
-    _normalize_section8(sections, value)
+    _normalize_section8(sections, input_data, value)
     _normalize_section10(sections, input_data, value)
     return report

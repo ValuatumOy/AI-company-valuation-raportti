@@ -62,11 +62,19 @@ prompt + validator changes only land in the live DB on reseed).
   loosened the section-8 equivalence assertion to presence; added a
   competitor-section presence guard to the single-writer seed test.
 
-- **Deferred (user chose "3 bug-fixes only" scope):** Asiakastieto-benchmark
-  additions — an industry-quartile benchmark block and a 3-method
-  (DCF/EVA/verottajan malli) reconciliation panel — are researched and ready to
-  build but NOT done. Do NOT fabricate an Asiakastieto AAA–C rating or PD%
-  (proprietary Enento scores).
+- **Asiakastieto additions (2026-07-03, LIVE on deploy — runtime code, no reseed):**
+  - **Verottaja cross-check DONE.** `valuation_equivalence._verottaja_blocks`
+    appends a "DCF/EVA vs. verottajan malli" table + explanation into section 8:
+    tuottoarvo = 3 v:n keskitulos (`actuals.income_statement.net_income`) / 0.15,
+    substanssiarvo = `actuals.balance_sheet.equity`, käypä arvo = keskiarvo kun
+    tuottoarvo > substanssiarvo, muuten substanssiarvo. Skips gracefully if
+    net_income/equity missing. `build = 2026-07-03-verottaja-crosscheck`.
+  - **Industry-quartile benchmark NOT built — data does not exist.** The exporter
+    emits `peers: []`, `industry_bankruptcy_risk_pct: [None…]`, and `key_ratios`
+    holds only the company's own ratios. There are NO sector medians/quartiles in
+    `input_data`, so a deterministic peer-benchmark block is impossible without a
+    new data source (web/registry enrichment). Do NOT fabricate sector figures.
+  - Do NOT fabricate an Asiakastieto AAA–C rating or PD% (proprietary Enento).
 
 ## 2026-07-03 (cont.) — Foundation rebuild after CEO review (LIVE + verified)
 

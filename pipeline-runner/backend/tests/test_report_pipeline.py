@@ -481,6 +481,35 @@ def test_assemble_normalizes_dcf_eva_equivalence_in_sections_and_scoring():
     assert ["Oman pääoman arvo ennen lattiaa", "450"] in sec10["blocks"][1]["rows"]
 
 
+def test_verottaja_crosscheck_income_and_substance_branches():
+    from app import valuation_equivalence as veq
+
+    # Income-dominant: avg(100,200,300)=200 -> tuottoarvo 200/0.15=1333; equity 500;
+    # tuottoarvo>substanssi -> kaypa=(1333+500)/2=917.
+    inc_data = {"actuals": {
+        "income_statement": {"net_income": [50, 100, 200, 300]},  # last 3 = 100,200,300
+        "balance_sheet": {"equity": [400, 500]},
+    }}
+    blocks = veq._verottaja_blocks(inc_data, 450)
+    rows = {r[0]: r[1] for r in blocks[0]["rows"]}
+    assert blocks[0]["table_id"] == "deterministic_valuation_crosscheck"
+    assert rows["Tuottoarvo (3 v:n keskitulos / 15 %)"] == "1 333"
+    assert rows["Substanssiarvo (oma pääoma)"] == "500"
+    assert rows["Verottajan käypä arvo"] == "917"
+
+    # Substance-dominant: tiny earnings, big equity -> kaypa = substanssiarvo.
+    sub_data = {"actuals": {
+        "income_statement": {"net_income": [10, 10, 10]},
+        "balance_sheet": {"equity": [1000]},
+    }}
+    rows2 = {r[0]: r[1] for r in veq._verottaja_blocks(sub_data, 450)[0]["rows"]}
+    assert rows2["Verottajan käypä arvo"] == "1 000"
+
+    # Missing data -> no block (graceful skip).
+    assert veq._verottaja_blocks({}, 450) == []
+    assert veq._verottaja_blocks({"actuals": {"income_statement": {"net_income": [10]}}}, 450) == []
+
+
 # --------------------------------------------------------------- validators
 def _s4(**over):
     base = {"scenarios": [
