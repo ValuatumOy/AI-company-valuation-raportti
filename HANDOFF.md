@@ -43,6 +43,30 @@ tie the optimistic scenario more explicitly to named business-line market
 shares (his "luottoriskit.fi takes a few %" ask). Deferred still: stage-5
 grounding advisory→blocking, spend-cap env vars.
 
+## 2026-07-03 (cont.) — 15y history + single-writer mode (LIVE)
+
+- **History default 5 → 15** (commit baafd53). Valuatum now gets 9 actual years
+  (2016–2024); 9 is the hard cap from the Valuatum modeldata API (single-digit
+  Y-offsets only — `build_var_poses` clamps to Y-9; deeper history would need
+  extending the year-set from the Profinder backfill).
+- **Single-writer mode** (commits 4c417ae, bc5bfff) — a 2nd pipeline preset
+  "Yhden kirjoittajan raportti (koeajo)": stage 0 FAKTAT + one model
+  (Fable 5, web search) writes the whole report in one pass. Selectable via a
+  new dropdown in the operator UI top bar. Reuses `assemble()` (deterministic
+  DCF/sensitivity/headcount blocks still inject from stage 0). Prompt =
+  `prompts/singlewriter.txt`. Why: a single writer fixes the 6-stage pipeline's
+  repetition + materiality failures structurally (they were architectural, not
+  a model fault — proven with a no-steer test).
+- **Known trade-off:** single-writer is slow (~12–15 min) + expensive
+  ($2–4/report) because the OpenRouter web plugin uses Anthropic's native
+  agentic engine (injects 100–276k tokens). `openrouter.chat` now gives heavy
+  stages a 1500s timeout so they complete. Future tuning: exa engine (cheaper,
+  shallower) or split research from writing.
+- Also fixed: `<cite>` web-plugin markup leaking into prose (render `_clean`);
+  `list_pipelines()` ordering (default stays `[0]`).
+- Scratchpad test scripts: `run_singlewriter.py`, `render_json.py`,
+  `run_swmode_prod.py` (end-to-end via prod API).
+
 ## Repos involved
 
 - **This repo** (`AI-company-valuation-raportti`) — the report-generation
