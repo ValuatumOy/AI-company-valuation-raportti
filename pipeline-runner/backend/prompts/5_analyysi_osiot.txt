@@ -43,6 +43,8 @@ SYÖTE:
 `user_input` (käyttäjän antamat lisätiedot ja oletukset — voi olla tyhjä):
 {{user_input}}
 
+PERUSLÄHTÖKOHTA (LUKITTU — ÄLÄ KUMOA): `enrichment.business_thesis` ja `enrichment.business_lines` ovat vaiheessa 1 tuotettu, lukittu liiketoimintaymmärrys. Sido arvon ajurit (osio 12), riskit (osio 13) ja toimenpiteet (osio 14) yhtiön todellisiin liiketoimintalinjoihin ja suuntaan, älä geneerisiin. Älä kuvaa yhtiön liiketoimintaa uudelleen lukitun teesin kanssa ristiriitaisesti äläkä pelkistä sitä näkyvimpään/ilmaiseen tuotteeseen. `one_line_thesis` on premissi, jota et saa kumota.
+
 KÄYTTÄJÄN LISÄTIEDOT: Jos `user_input` sisältää käyttäjän antamia lisätietoja tai markkinasignaaleja (asiakkuudet, sopimukset, rahoitusaikeet, ostotarjoukset, tuotelanseeraukset), sisällytä ne osioon 4 signaalitaulukkoon lähteellä "asiakkaan ilmoittama, ei varmennettu julkisista lähteistä" ja enintään Kohtalainen-luotettavuudella, ja ota ne huomioon arvon ajureissa (osio 12) ja riskeissä (osio 13). Ne rikastavat analyysiä mutta EIVÄT muuta tilinpäätöslukuja ([input_data]) eivätkä vaiheessa 4 lukittuja skenaarioarvoja.
 
 OSIO 4 — MARKKINASIGNAALIT JA STRATEGINEN ARVO (sisällytä aina):

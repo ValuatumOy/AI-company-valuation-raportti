@@ -41,7 +41,11 @@ def _stages():
         {
             "order": 1,
             "name": "Vaihe 1 - Enrichment (web haku)",
-            "model": "google/gemini-2.5-flash",
+            # The foundation stage: the whole valuation is built on its business
+            # understanding, so it runs the strongest grounded search+synthesis
+            # model, not the cheapest. A thin foundation here poisons every later
+            # stage (the "thinks it's just a calculator" failure). 1M context.
+            "model": "google/gemini-3.1-pro-preview",
             "prompt_template": _load_prompt("1_enrichment.txt"),
             "expects_json": True,
             "web_search": True,  # enrichment does live web research

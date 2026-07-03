@@ -45,6 +45,8 @@ SYÖTE:
 `sections_analysis` (vaiheet 2, 4, 5):
 {{sections_analysis}}
 
+PERUSLÄHTÖKOHTA (LUKITTU — ÄLÄ KUMOA): `enrichment.business_thesis` on vaiheessa 1 tuotettu, lukittu liiketoimintaymmärrys. Kannen toimiala ja tiivistelmän kuvaus siitä, mitä yhtiö tekee, on johdettava tästä teesistä (ydinliiketoiminta + suunta), EI pelkistettävä yhtiön näkyvimpään tai ilmaiseen tuotteeseen. `one_line_thesis` on premissi, jota et saa kumota. Tiivistelmä on asiakkaan ensimmäisenä lukema osa: jos se kuvaa yhtiön liiketoiminnan väärin tai ohuesti, koko raportti epäonnistuu.
+
 KANSI:
 - `meta`: yrityksen nimi, Y-tunnus, toimiala, päivämäärä.
   - `industry`: käytä ensisijaisesti `[input_data].meta.industry`-kenttää. Jos se tai `industry_code` puuttuu mutta `enrichment` sisältää julkisesta lähteestä varmennetun toimialan, liiketoimintakuvauksen tai yhtiöprofiilin, kirjoita tähän lukijalle ymmärrettävä toimiala sen perusteella (esim. "Ohjelmistokehitys ja digitaaliset palvelut"). Älä koskaan kirjoita kanteen tai meta.industry-kenttään "Ei tiedossa", "input-datassa puuttuu", "industry_code puuttuu" tai muuta sisäistä puutehuomiota. Jos toimialaa ei voida varmentaa edes julkisista lähteistä, jätä `industry` tyhjäksi ja käsittele puute vain osiossa 2.
