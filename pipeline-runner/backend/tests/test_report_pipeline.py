@@ -1135,6 +1135,156 @@ def test_self_heal_retries_failed_stage(monkeypatch):
     assert any("Automaattinen korjaus" in n for n in names)
 
 
+def test_gemini_chat_routes_to_google_not_openrouter(monkeypatch):
+    import asyncio
+    from app import openrouter
+
+    calls = {}
+
+    async def fake_google(**kwargs):
+        calls["google"] = kwargs
+        return {"text": "{}", "finish_reason": "stop", "tokens_prompt": 1,
+                "tokens_completion": 1, "request_payload": {}}
+
+    async def fake_openrouter(**kwargs):
+        raise AssertionError("Gemini should not be sent to OpenRouter")
+
+    monkeypatch.setattr(openrouter, "_google_chat", fake_google)
+    monkeypatch.setattr(openrouter, "_openrouter_chat", fake_openrouter)
+
+    res = asyncio.run(openrouter.chat(
+        model="google/gemini-3.1-pro-preview",
+        prompt="{}",
+        expects_json=True,
+        web_search=True,
+    ))
+
+    assert res["finish_reason"] == "stop"
+    assert calls["google"]["model"] == "google/gemini-3.1-pro-preview"
+    assert calls["google"]["web_search"] is True
+
+
+def test_google_gemini_payload_uses_generate_content_and_search_tool(monkeypatch):
+    import asyncio
+    from app import openrouter
+
+    calls = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {
+                "candidates": [{
+                    "content": {"parts": [{"text": "{\"ok\": true}"}]},
+                    "finishReason": "STOP",
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 11,
+                    "candidatesTokenCount": 7,
+                    "thoughtsTokenCount": 3,
+                },
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            calls["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, endpoint, headers, json):
+            calls["endpoint"] = endpoint
+            calls["headers"] = headers
+            calls["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(openrouter, "_google_headers", lambda: {
+        "x-goog-api-key": "test-key",
+        "Content-Type": "application/json",
+    })
+    monkeypatch.setattr(openrouter.httpx, "AsyncClient", FakeAsyncClient)
+
+    res = asyncio.run(openrouter._google_chat(
+        model="google/gemini-3.1-pro-preview",
+        prompt="{\"task\":\"enrich\"}",
+        max_tokens=1234,
+        expects_json=True,
+        web_search=True,
+    ))
+
+    assert "generativelanguage.googleapis.com" in calls["endpoint"]
+    assert calls["endpoint"].endswith(
+        "/models/gemini-3.1-pro-preview:generateContent"
+    )
+    assert calls["payload"]["generationConfig"]["responseMimeType"] == "application/json"
+    assert calls["payload"]["generationConfig"]["maxOutputTokens"] == 1234
+    assert calls["payload"]["tools"] == [{"google_search": {}}]
+    assert calls["payload"]["contents"][0]["parts"][0]["text"] == "{\"task\":\"enrich\"}"
+    assert res["text"] == "{\"ok\": true}"
+    assert res["tokens_prompt"] == 11
+    assert res["tokens_completion"] == 10
+    assert res["request_payload"]["provider"] == "google"
+
+
+def test_single_writer_seed_is_research_writer_split():
+    from app import seed
+
+    stages = seed._single_writer_stages()
+    assert [s["order"] for s in stages] == [0, 1, 2]
+    assert stages[1]["model"] == "google/gemini-3.1-pro-preview"
+    assert stages[1]["web_search"] is True
+    assert stages[1]["prompt_template"] == seed._load_prompt("1_enrichment.txt")
+    assert stages[2]["model"] == "anthropic/claude-fable-5"
+    assert stages[2]["web_search"] is False
+    assert stages[2]["input_mapping"]["enrichment"] == "Vaihe 1 enrichment"
+    assert "{{enrichment}}" in stages[2]["prompt_template"]
+
+
+def test_legacy_single_writer_web_stage_migrates_to_research_writer_split():
+    from app import seed, store
+
+    seed.reseed_defaults(force=True)
+    sw = next(
+        p for p in store.list_pipelines()
+        if p["name"] == seed.SINGLE_WRITER_PIPELINE_NAME
+    )
+    by_order = {s["order"]: s for s in sw["stages"]}
+
+    # Simulate the old 2-stage experimental preset: FAKTAT + one web-search
+    # writer at order 1. Normal boot should migrate this without requiring the
+    # operator to force-reseed first.
+    if 2 in by_order:
+        store.delete_stage(by_order[2]["id"])
+    legacy = {
+        **by_order[1],
+        "order": 1,
+        "name": "Vaihe 1 - Koko raportti (yksi malli)",
+        "model": "anthropic/claude-fable-5",
+        "prompt_template": seed._load_prompt("singlewriter.txt"),
+        "web_search": True,
+        "max_tokens": 64000,
+        "validator_code": seed._load_validator("stage6_final.py"),
+        "input_mapping": {"input_data": "Vaihe 0 FAKTAT"},
+    }
+    store.update_stage(by_order[1]["id"], legacy)
+
+    migrated = seed._ensure_single_writer_pipeline()
+    migrated_by_order = {s["order"]: s for s in migrated["stages"]}
+
+    assert sorted(migrated_by_order) == [0, 1, 2]
+    assert migrated_by_order[1]["model"] == "google/gemini-3.1-pro-preview"
+    assert migrated_by_order[1]["web_search"] is True
+    assert "business_thesis" in migrated_by_order[1]["prompt_template"]
+    assert migrated_by_order[2]["model"] == "anthropic/claude-fable-5"
+    assert migrated_by_order[2]["web_search"] is False
+    assert "{{enrichment}}" in migrated_by_order[2]["prompt_template"]
+
+
 def test_deliver_gate_blocks_unhealthy_run_unless_forced():
     from starlette.testclient import TestClient
     from app import main, seed, store

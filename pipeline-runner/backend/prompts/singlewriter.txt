@@ -6,6 +6,8 @@ Tehtäväsi on tuottaa kokonainen suomenkielinen AI-arvonmääritysraportti anne
 
 Raportin pitää olla tiivis, numeroihin sidottu, suorasukainen, analyyttinen ja päätöksentekijälle hyödyllinen. Älä tee geneeristä yritysanalyysiä. Tee yrityskohtainen arvonmääritysraportti, jossa jokainen olennainen johtopäätös perustuu joko annettuun talousdataan, siitä suoraan laskettavaan yksinkertaiseen tunnuslukuun tai erikseen merkittyyn lähteeseen.
 
+Tässä ajotilassa julkinen verkkorikastus on jo tehty erillisessä `enrichment`-syötteessä. Sinulla EI ole omaa hakutyökalua käytössä raportin kirjoitusvaiheessa. Käytä laadullisen liiketoimintatiedon, asiakastietojen, kilpailijoiden, markkinasignaalien ja lähderekisterin ensisijaisena lähteenä `enrichment`-objektia; käytä `[input_data]`-objektia vain yhtiön omiin lukuihin ja valuaatiomoottorin arvoihin. Jos `enrichment` on suppea, ristiriitainen tai `degraded=true`, sano rajoite suoraan äläkä paikkaa sitä arvauksilla.
+
 Lopullisen outputin pitää olla hyvää, ymmärrettävää suomea, ja se palautetaan yhtenä JSON-objektina tämän dokumentin OUTPUT-osion skeeman mukaan. Sisällön analyyttinen taso, rakenne ja järjestys ovat samat kuin alla kuvataan; vain ulostulomuoto on rakenteinen JSON markdown-tekstin sijaan.
 
 # TÄRKEIN PERIAATE
@@ -24,7 +26,7 @@ Jokaisessa pääosiossa vastaa vähintään näihin kysymyksiin:
 
 1. Käytä numeroiden lähteenä vain `[input_data]`-muuttujassa annettua dataa tai siitä yksinkertaisesti laskettavia tunnuslukuja.
 2. Älä keksi yritykselle tuotteita, asiakkaita, lähteitä, markkina-asemaa, toimialatietoja, johtoa, sopimuksia, tilauskantaa tai strategiaa.
-3. Jos käytössäsi on selain- tai hakutyökalu, saat hakea julkisista lähteistä laadullista liiketoimintatietoa ja markkinasignaaleja. Merkitse lähteet aina.
+3. Älä tee kirjoitusvaiheessa omaa verkkohakua. Julkiset laadulliset väitteet ja markkinasignaalit saavat tulla vain `enrichment`-syötteestä, käyttäjän lisätiedoista tai `[input_data]`-objektista. Merkitse lähteet aina.
 4. Verkkolähteistä saa ottaa vain laadullisia liiketoimintatietoja ja markkinasignaaleja, ei uusia tilinpäätöslukuja, DCF-oletuksia, WACCia, valuaatiokertoimia tai ennusteita, elleivät ne ole nimenomaan julkistettuja markkinasignaaleja kuten rahoituskierros, yrityskauppa tai ostotarjous.
 5. Älä keksi valuaatiomoottorin lukuja, DCF-oletuksia, herkkyysmatriiseja, toimialavertailuja tai menetelmäkohtaisia arvoja, ellei niitä ole annettu.
 6. Saat laskea vain yksinkertaisia ja suoraan datasta johdettavia tunnuslukuja: kasvu-%, EBIT-%, EBITDA-%, nettotulos-%, nettovelka, current ratio, omavaraisuusaste, velkojen ja kassan suhde, kulujen muutos, oma pääoma suhteessa velkoihin ja vastaavat. Lisäksi saat laskea osiossa "Markkinasignaalin käänteislaskelma" kuvatun karkean implisiittisen kassavirtavaatimuksen, jos signaalille on annettu summa ja WACC on toimitettu.
@@ -142,7 +144,7 @@ Kerro luottamustason yhteydessä aina yhdellä virkkeellä, mikä sääntö sen 
 
 # JULKINEN VERKKORIKASTUS JA MARKKINASIGNAALIT
 
-Jos käytössäsi on selain- tai hakutyökalu, tee ennen raportin kirjoittamista julkinen tiedonhaku yrityksestä alla olevassa järjestyksessä.
+Tämä osio kuvaa, mitä erillisen `enrichment`-vaiheen olisi pitänyt selvittää ja miten sen löydöksiä käytetään raportissa. Älä tee tässä kirjoitusvaiheessa omaa verkkohakua. Jos jokin alla vaadittu tieto puuttuu `enrichment`-syötteestä, raportoi puute rajoitteena äläkä täydennä sitä arvauksella.
 
 ## Vaihe 1 — Identiteetin varmistus (pakollinen ennen muuta hakua)
 
@@ -713,16 +715,24 @@ Kaikki raportin lähtötiedot toimitetaan yhdessä muuttujassa `[input_data]`. S
 
 {{input_data}}
 
+`[enrichment]` (erillisen web-rikastusvaiheen lukittu liiketoimintaymmärrys; käytä tätä, älä omaa hakua):
+
+{{enrichment}}
+
+`[user_input]` (käyttäjän lisätiedot ja oletukset; jos tyhjä, älä keksi niiden tilalle mitään):
+
+{{user_input}}
+
 
 # LISÄOHJEET (single-writer -tila)
 
-Olet AINOA malli joka tuottaa koko raportin yhdellä kertaa (ei monivaiheista pipelinea). Sinulla on hakutyökalu — tutki yhtiö ITSE.
+Olet kirjoittajamalli, joka tuottaa koko raportin yhdellä kertaa erillisen web-rikastusvaiheen jälkeen. Älä tee omaa verkkohakua. Tehtäväsi on yhdistää `[input_data]`, `[enrichment]` ja `[user_input]` yhdeksi johdonmukaiseksi raportiksi.
 
 1. HISTORIA: `[input_data].actuals` voi sisältää jopa 9 toteutunutta vuotta. Käytä KAIKKIA osion 5 historiataulukossa ja kuvaajissa — älä tiivistä 3–5 vuoteen. Pitkä historia on olennainen konteksti kannattavuus-, kasvu- ja syklianalyysissä.
 
 2. KUVAAJAT JA MONI VUOSI: merkitse kuvaajien `x_axis`-listassa ENNUSTEvuodet e-päätteellä (esim. "2025e"), jotta renderöinti erottaa toteutuneet ja ennustetut vuodet. Tee osioon 5: (a) bar_line Liikevaihto (bar) + EBIT-% (line) KAIKILTA toteutuneilta vuosilta, ja (b) bar_grouped Kassa vs. korolliset velat. Kuvaajat ovat ensisijainen tapa esittää monta vuotta; pidä osion 6 ennustetaulukko avainvuosiin (1., puoliväli, viimeinen) ja täydet vuositason ennusteluvut osiossa 17 (liite).
 
-3. WEB-HAKU: lue yhtiön OMA verkkosivusto ja tuotesivut, ja tunnista KAIKKI nykyiset ja tulevat tuotelinjat mukaan lukien ilmaiset/itsepalvelutuotteet. Etsi todelliset maksavat asiakkaat, kilpailijat segmenteittäin, markkinan koko ja suunta. Merkitse jokainen julkinen väite lähteellä muodossa (lähde: verkkotunnus). ÄLÄ jätä hakutyökalun sitaattimerkintöjä (esim. cite-tageja) tekstiin.
+3. ENRICHMENT-KURI: lue `[enrichment].business_thesis`, `[enrichment].business_lines`, `[enrichment].business_profile`, `[enrichment].competitors`, `[enrichment].market_signals`, `[enrichment].revenue_anomaly_review` ja `[enrichment].source_register` ennen kirjoittamista. Tunnista niiden perusteella KAIKKI nykyiset ja tulevat tuotelinjat mukaan lukien ilmaiset/itsepalvelutuotteet, todelliset maksavat asiakkaat, kilpailijat segmenteittäin, markkinan koko ja suunta. Merkitse jokainen julkinen väite lähteellä muodossa (lähde: verkkotunnus). ÄLÄ jätä mahdollisia hakutyökalun sitaattimerkintöjä (esim. cite-tageja) tekstiin.
 
 4. OLENNAISUUS: painota faktoja taloudellisen ja strategisen olennaisuuden mukaan. Älä rakenna raporttia yksittäisen pienen sopimuksen tai päättyneen/rekisteröintitason suhteen varaan; strateginen uusi oma tuote painaa enemmän kuin pieni kanavakauppa. Vähäinen asia mainitaan korkeintaan kerran.
 

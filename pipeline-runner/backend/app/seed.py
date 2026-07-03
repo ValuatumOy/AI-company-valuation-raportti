@@ -11,10 +11,11 @@ from .models import DATA_FETCHER_MODEL
 _SEED_DIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
 _PROMPT_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts")
 DEFAULT_PIPELINE_NAME = "Valuaatio-pipeline (oletus)"
-# Second mode: one strong model writes the whole report in a single pass (with
-# its own web research) instead of the 6-stage pipeline. Stage 0 (FAKTAT) is
-# shared, so assemble() still injects the deterministic DCF/sensitivity/headcount
-# blocks from the data. The operator picks the mode in the UI.
+# Second mode: a cheap/reliable research+writer split. Stage 0 (FAKTAT) is
+# shared, stage 1 runs grounded web enrichment, and stage 2 is one strong writer
+# with web search off. assemble() still injects the deterministic
+# DCF/sensitivity/headcount blocks from the data. The operator picks the mode in
+# the UI.
 SINGLE_WRITER_PIPELINE_NAME = "Yhden kirjoittajan raportti (koeajo)"
 
 PLACEHOLDER_PREFIX = "[[ LIITÄ VAIHEEN "
@@ -135,8 +136,14 @@ def _stages():
 
 
 def _single_writer_stages():
-    """Two stages: FAKTAT fetch (shared with the default pipeline) + one model
-    that writes the entire report JSON in a single pass with live web search."""
+    """FAKTAT fetch + grounded enrichment + one writer that consumes the brief.
+
+    The earlier experiment let Fable do native web search inside the writer
+    stage. That produced better one-pass prose but made each report slow,
+    expensive, and unreliable because the Anthropic web agent injected huge
+    token volumes. Keep search in Gemini enrichment, then write without the web
+    plugin.
+    """
     return [
         {
             "order": 0,
@@ -149,19 +156,45 @@ def _single_writer_stages():
         },
         {
             "order": 1,
-            "name": "Vaihe 1 - Koko raportti (yksi malli)",
-            # Fable 5 gave the strongest self-driven web research in testing
-            # (found the strategic self-service products the 6-stage enrichment
-            # missed). Switchable in the UI; Opus 4.8 is the cheaper alternative.
+            "name": "Vaihe 1 - Enrichment (web haku)",
+            "model": "google/gemini-3.1-pro-preview",
+            "prompt_template": _load_prompt("1_enrichment.txt"),
+            "expects_json": True,
+            "web_search": True,
+            "validator_code": None,
+            "input_mapping": {"input_data": "Vaihe 0 FAKTAT"},
+        },
+        {
+            "order": 2,
+            "name": "Vaihe 2 - Koko raportti (yksi kirjoittaja)",
+            # Fable 5 gave the strongest whole-report prose in testing. It now
+            # receives the researched enrichment brief instead of running the
+            # costly native web-search agent itself.
             "model": "anthropic/claude-fable-5",
             "prompt_template": _load_prompt("singlewriter.txt"),
             "expects_json": True,
-            "web_search": True,  # the writer does its own research
+            "web_search": False,
             "max_tokens": 64000,  # whole report (all sections + tables + charts) in one call
             "validator_code": _load_validator("stage6_final.py"),
-            "input_mapping": {"input_data": "Vaihe 0 FAKTAT"},
+            "input_mapping": {
+                "input_data": "Vaihe 0 FAKTAT",
+                "enrichment": "Vaihe 1 enrichment",
+            },
         },
     ]
+
+
+def _legacy_single_writer_stage(stage):
+    """Detect the old 2-stage preset so boot/reseed can migrate it safely."""
+    if not stage or stage.get("order") != 1:
+        return False
+    prompt = stage.get("prompt_template") or ""
+    name = stage.get("name") or ""
+    return (
+        "Koko raportti" in name
+        and "single-writer -tila" in prompt
+        and stage.get("web_search") is True
+    )
 
 
 def _ensure_single_writer_pipeline(force=False):
@@ -175,6 +208,8 @@ def _ensure_single_writer_pipeline(force=False):
     if pipeline is None:
         pipeline = store.create_pipeline(SINGLE_WRITER_PIPELINE_NAME)
     by_order = {s["order"]: s for s in pipeline.get("stages", [])}
+    if not force and _legacy_single_writer_stage(by_order.get(1)):
+        force = True
     for desired in _single_writer_stages():
         cur = by_order.get(desired["order"])
         if cur is None:

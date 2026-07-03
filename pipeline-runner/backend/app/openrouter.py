@@ -11,8 +11,19 @@ import re
 import httpx
 
 BASE = "https://openrouter.ai/api/v1"
+GOOGLE_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _models_cache: list[dict] = []
 _price_index: dict[str, dict] = {}
+
+_DIRECT_GOOGLE_MODELS = [
+    {
+        "id": "google/gemini-3.1-pro-preview",
+        "name": "Google Gemini 3.1 Pro Preview (direct)",
+        "context_length": None,
+        "prompt_price": 0.0,
+        "completion_price": 0.0,
+    },
+]
 
 
 def _headers() -> dict:
@@ -27,6 +38,49 @@ def _headers() -> dict:
     return h
 
 
+def _google_api_key() -> str:
+    return (
+        os.getenv("GEMINI_API_KEY", "")
+        or os.getenv("GOOGLE_API_KEY", "")
+        or os.getenv("GOOGLE_GENERATIVE_AI_API_KEY", "")
+    )
+
+
+def _google_headers() -> dict:
+    key = _google_api_key()
+    if not key:
+        raise RuntimeError(
+            "Google Gemini API key puuttuu. Aseta GEMINI_API_KEY tai GOOGLE_API_KEY."
+        )
+    return {"x-goog-api-key": key, "Content-Type": "application/json"}
+
+
+def _is_google_gemini(model: str) -> bool:
+    m = (model or "").lower()
+    return m.startswith("google/gemini") or m.startswith("gemini-")
+
+
+def _google_model_id(model: str) -> str:
+    return model.split("/", 1)[1] if model.startswith("google/") else model
+
+
+def _finish_reason_google(raw: str | None) -> str:
+    r = (raw or "STOP").lower()
+    return {
+        "stop": "stop",
+        "max_tokens": "length",
+        "safety": "safety",
+        "recitation": "recitation",
+    }.get(r, r)
+
+
+def _add_direct_google_models(out: list[dict], idx: dict[str, dict]):
+    for model in _DIRECT_GOOGLE_MODELS:
+        if model["id"] not in idx:
+            out.append(model)
+            idx[model["id"]] = model
+
+
 async def refresh_models() -> list[dict]:
     """Fetch + cache the live model list. Tolerates being offline / no key."""
     global _models_cache, _price_index
@@ -36,7 +90,12 @@ async def refresh_models() -> list[dict]:
             r.raise_for_status()
             data = r.json().get("data", [])
     except Exception:
-        return _models_cache  # keep whatever we had; frontend allows manual id
+        if _models_cache:
+            return _models_cache  # keep whatever we had; frontend allows manual id
+        out, idx = [], {}
+        _add_direct_google_models(out, idx)
+        _models_cache, _price_index = out, idx
+        return out
     out = []
     idx = {}
     for m in data:
@@ -50,6 +109,7 @@ async def refresh_models() -> list[dict]:
         }
         out.append(item)
         idx[item["id"]] = item
+    _add_direct_google_models(out, idx)
     out.sort(key=lambda x: (x["name"] or "").lower())
     _models_cache, _price_index = out, idx
     return out
@@ -76,6 +136,35 @@ async def chat(
     web_search: bool = False,
 ) -> dict:
     """One-shot completion. Returns dict with text, usage, finish_reason, payload."""
+    if _is_google_gemini(model):
+        return await _google_chat(
+            model=model,
+            prompt=prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            expects_json=expects_json,
+            web_search=web_search,
+        )
+    return await _openrouter_chat(
+        model=model,
+        prompt=prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
+        expects_json=expects_json,
+        web_search=web_search,
+    )
+
+
+async def _openrouter_chat(
+    model: str,
+    prompt: str,
+    temperature: float = 0.2,
+    max_tokens: int = 16000,
+    reasoning_effort: str | None = None,
+    expects_json: bool = True,
+    web_search: bool = False,
+) -> dict:
     messages = [{"role": "user", "content": prompt}]
     payload: dict = {
         "model": model,
@@ -145,6 +234,93 @@ async def chat(
         "tokens_prompt": int(usage.get("prompt_tokens", 0) or 0),
         "tokens_completion": int(usage.get("completion_tokens", 0) or 0),
         "request_payload": payload,
+    }
+
+
+async def _google_chat(
+    model: str,
+    prompt: str,
+    temperature: float = 0.2,
+    max_tokens: int = 16000,
+    expects_json: bool = True,
+    web_search: bool = False,
+) -> dict:
+    """Gemini Developer API generateContent call, bypassing OpenRouter."""
+    model_id = _google_model_id(model)
+    payload: dict = {
+        "contents": [
+            {"role": "user", "parts": [{"text": prompt}]}
+        ],
+        "generationConfig": {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        },
+    }
+    if expects_json:
+        payload["generationConfig"]["responseMimeType"] = "application/json"
+    if web_search:
+        payload["tools"] = [{"google_search": {}}]
+
+    client_timeout = 1500 if (max_tokens or 0) >= 40000 else 600
+    body = None
+    endpoint = f"{GOOGLE_BASE}/models/{model_id}:generateContent"
+    for attempt in range(4):
+        last = attempt == 3
+        try:
+            async with httpx.AsyncClient(timeout=client_timeout) as client:
+                r = await client.post(endpoint, headers=_google_headers(), json=payload)
+            if r.status_code in (429, 500, 502, 503, 504):
+                if last:
+                    raise RuntimeError(f"Google Gemini {r.status_code}: {r.text[:800]}")
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if r.status_code >= 400:
+                raise RuntimeError(f"Google Gemini {r.status_code}: {r.text[:800]}")
+            try:
+                body = r.json()
+            except Exception:
+                if last:
+                    raise RuntimeError(
+                        "Google Gemini palautti virheellisen/katkenneen vastauksen "
+                        f"(ei kelvollista JSONia): {(r.text or '')[:500]}"
+                    )
+                await asyncio.sleep(2 ** attempt)
+                continue
+            break
+        except (httpx.TimeoutException, httpx.TransportError):
+            if last:
+                raise
+            await asyncio.sleep(2 ** attempt)
+            continue
+
+    candidates = body.get("candidates") or []
+    if not candidates:
+        feedback = body.get("promptFeedback") or body.get("prompt_feedback") or {}
+        raise RuntimeError(
+            "Google Gemini ei palauttanut vastausta. "
+            + (json.dumps(feedback, ensure_ascii=False)[:800] if feedback else "")
+        )
+    choice = candidates[0]
+    content = choice.get("content", {}) or {}
+    parts = content.get("parts") or []
+    text = "".join(
+        p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+    )
+    usage = body.get("usageMetadata", {}) or {}
+    prompt_tokens = int(usage.get("promptTokenCount", 0) or 0)
+    completion_tokens = int(usage.get("candidatesTokenCount", 0) or 0) + int(
+        usage.get("thoughtsTokenCount", 0) or 0
+    )
+    return {
+        "text": text,
+        "finish_reason": _finish_reason_google(choice.get("finishReason")),
+        "tokens_prompt": prompt_tokens,
+        "tokens_completion": completion_tokens,
+        "request_payload": {
+            "provider": "google",
+            "model": model_id,
+            **payload,
+        },
     }
 
 
