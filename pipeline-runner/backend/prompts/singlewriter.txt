@@ -443,6 +443,8 @@ Jos lähteitä/identiteettiä ei voitu varmentaa, käytä identiteettivaiheen de
 ### Mitä yhtiö tekee — `heading` + `paragraph`. Vain varmistettujen lähteiden perusteella. Päätelmät merkitään päätelmiksi `*(päätelmä, ei varmennettu tieto)*`.
 ### Miten tämä selittää tilinpäätöksen rakenteen — `heading` + 3–5 `paragraph`-lohkoa.
 ### Vaikutus arvonmääritykseen — `heading` + 2–3 `paragraph`-lohkoa (sovita logiikka profiiliin).
+### Markkina ja sen koko — `heading` + 1–2 `paragraph`: `enrichment.market`-tiedot lähteistettynä (koko, kasvu, suunta). Jos markkinan kokoa ei löytynyt `enrichment`-syötteestä, sano se suoraan äläkä keksi lukua.
+### Kilpailijat ja kilpailuasema — `heading` + `table` (Kilpailija / Koko tai liikevaihto / Rahoitus tai asema / Segmentti / Lähde) suoraan `enrichment.competitors`-listasta. Jos `enrichment.competitors` on tyhjä, korvaa taulukko yhdellä `paragraph`-lohkolla: "Julkisista lähteistä ei löytynyt nimettyjä kilpailijoita." Taulukon (tai korvaavan lauseen) jälkeen 2–3 `paragraph`: missä yhtiö on vahva/heikko suhteessa kilpailijoihin, onko sillä suojattua kilpailuetua (teknologia, verkostovaikutus, asiakaspysyvyys), ja voiko pieni toimija skaalautua vai jakavatko isot toimijat markkinan. Käytä vain `enrichment`-syötteen tietoja, älä tee omaa verkkohakua.
 ### Lähderekisteri — `table` (Lähde / Tieto / Haettu) jos lähteitä on; muuten `paragraph` selityksellä.
 
 ## 4. MARKKINASIGNAALIT JA STRATEGINEN ARVO

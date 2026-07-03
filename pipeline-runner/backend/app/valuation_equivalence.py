@@ -141,6 +141,18 @@ def _normalize_section8(sections, value):
         return
     new_blocks = [
         {
+            "type": "paragraph",
+            "text": (
+                "DCF ja EVA ovat sama arvo kahdella eri tavalla laskettuna. DCF "
+                "diskonttaa yhtiön tuottaman vapaan kassavirran pääoman "
+                "tuottovaatimuksella (WACC). EVA mittaa saman asian toisin: "
+                "paljonko voittoa jää sen jälkeen, kun sitoutuneelle pääomalle on "
+                "veloitettu sama tuottovaatimus. Koska molemmat nojaavat samaan "
+                "ennusteeseen, samaan WACCiin ja samaan pääomapohjaan, ne antavat "
+                "aina saman lopputuloksen — alla ne antavat saman oman pääoman arvon."
+            ),
+        },
+        {
             "type": "table",
             "table_id": "deterministic_dcf_eva_equivalence",
             "title": "Arvonmäärityksen päämenetelmä ja täsmäytys",
@@ -199,8 +211,13 @@ def _normalize_section10(sections, input_data, value):
         {
             "type": "paragraph",
             "text": (
-                "EVA esitetään täsmäytyksenä samaan arvoon kuin DCF, koska "
-                "molemmat nojaavat samaan ennusteeseen ja pääomakustannukseen."
+                "EVA-menetelmä päätyy samaan oman pääoman arvoon kuin DCF, mutta "
+                "rakentaa sen eri suunnasta: yhtiöön jo sitoutunut pääoma "
+                "(investoitu pääoma) plus tulevien EVA-erien nykyarvo muodostaa "
+                "yritysarvon, josta vähennetään nettovelka. Toisin sanoen "
+                "Investoitu pääoma + PV(EVA) = Yritysarvo = vapaiden kassavirtojen "
+                "nykyarvo (DCF). Alla oleva täsmäytys osoittaa, että summa päätyy "
+                "samaan arvoon."
             ),
         },
         {
@@ -210,6 +227,18 @@ def _normalize_section10(sections, input_data, value):
             "unit": "tEUR",
             "columns": ["Erä", "Arvo"],
             "rows": rows,
+        },
+        {
+            "type": "callout",
+            "variant": "info",
+            "title": "Mitä EVA kertoo lisää",
+            "text": (
+                "EVA näyttää, tuottaako yhtiö sitoutuneelle pääomalleen enemmän "
+                "kuin sen tuottovaatimus (ROIC vs WACC). Positiivinen EVA "
+                "tarkoittaa, että yhtiö luo arvoa vuoden aikana, negatiivinen että "
+                "se tuhoaa sitä. Tämä arvonluontinäkymä ei näy pelkästä "
+                "kassavirtaluvusta, vaikka lopputulos on sama."
+            ),
         },
     ]
     for sec in sections:

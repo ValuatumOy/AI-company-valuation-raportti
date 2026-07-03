@@ -109,6 +109,27 @@ def build_dcf_detail_blocks(input_data):
     fcff = _get_list(dcf, "fcff")
     discounted = _get_list(dcf, "discounted_fcff")
     if not years or not fcff or not discounted:
+        # A wholly empty dcf block is a legitimate no-DCF case (e.g. a company
+        # without forecasts) — stay silent and let the section's own "DCF puuttuu"
+        # text stand. But a partly-populated dcf that carries driver rows yet is
+        # missing the core FCFF/discounted series is a data defect worth surfacing
+        # instead of silently falling back to a thinner table.
+        partial = any(
+            _get_list(dcf, k)
+            for k in ("ebit", "depreciation_total", "operating_cash_flow", "gross_capex")
+        )
+        if dcf and partial:
+            return [{
+                "type": "callout",
+                "variant": "warning",
+                "title": "DCF-erittelyä ei voitu koota",
+                "text": (
+                    "Valuaatiomoottorin dcf-lohkosta puuttuu vuosi-, FCFF- tai "
+                    "diskontattu FCFF -sarja, joten vuosittaista FCFF-erittelyä ei "
+                    "voitu rakentaa. Tarkista vaiheen 0 datan "
+                    "valuation_engine.dcf-kentät."
+                ),
+            }]
         return []
 
     n = min(len(years), len(fcff), len(discounted))

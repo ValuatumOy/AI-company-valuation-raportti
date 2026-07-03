@@ -5,6 +5,69 @@ branches, no running dev servers, nothing mid-flight. Read this before
 touching the pipeline validators, the enrichment prompt, or the client site's
 purchase flow.
 
+## 2026-07-03 (cont.) — Report fixes: FCFF build-up, competitors, EVA/DCF page (NOT yet reseeded)
+
+CEO/user review of a Fable single-writer report flagged: (1) DCF page missing
+the full FCFF build-up, (2) zero competitors, (3) confusing EVA-vs-DCF page.
+A 5-agent investigation established the deterministic machinery was already
+right; the gaps were narrower than they looked. Fixes committed on `main`,
+`build = 2026-07-03-report-fixes`. **Needs deploy + `/api/reseed`** (the
+prompt + validator changes only land in the live DB on reseed).
+
+- **HOW STAGE 0 (FAKTAT) DATA IS PRODUCED — read this first.** There is NO
+  auto Y-tunnus fetch: `fetchers/company_data.py:fetch_company_data` is a
+  `NotImplementedError` stub. In production the operator runs the Valuatum kit
+  via `POST /api/valuatum/company-json` → `app/valuatum.py:export_stream` runs
+  `valuatum_kit/export_modeldata_json.py`, which emits the FULL
+  `valuation_engine.dcf` / `eva` / `wacc` blocks and streams them straight into
+  the run as `input_data` (the "manual paste" path, auto-filled). So on a fresh
+  run the dcf sub-block IS present. If a report ever lacks the FCFF build-up,
+  the run's stage-0 `valuation_engine.dcf` was thin/legacy, not a code bug.
+
+- **FCFF build-up was never a code bug.** `app/dcf_detail.build_dcf_detail_blocks`
+  already builds the full image-2 driver table (EBIT → +Poistot → −verot →
+  −käyttöpääoma → −investoinnit → FCFF → disk. FCFF) + EV→equity bridge, and
+  `assemble._inject_dcf_detail_blocks` injects it into DCF section id `9` (which
+  the singlewriter prompt emits; the "section 8" display number is a render
+  artifact — `SECTION_ORDER` drops id `7`). The screenshotted report predated
+  the injection / ran on thin data. **Change made:** `dcf_detail.py` now emits a
+  visible `warning` callout when the dcf block is *partly* populated (drivers
+  present, FCFF/discounted missing) instead of silently returning `[]`. A wholly
+  empty dcf (legit no-forecast company) still stays silent.
+
+- **EVA == DCF was never a math bug.** `export_modeldata_json.py` pins
+  `eva.equity_value_before_floor` = DCF equity, and
+  `app/valuation_equivalence.normalize_report` deterministically rebuilds
+  section 8 (DCF=EVA equivalence table) and section 10 (EVA reconciliation:
+  Investoitu pääoma + PV(EVA) = yritysarvo = PV(FCFF)). Literature confirms the
+  CEO: EVA is DCF rearranged → identical value on identical inputs (Damodaran,
+  McKinsey/Koller, ACCA). **Change made:** enriched the deterministic text in
+  `valuation_equivalence.py` — section 8 leads with a plain-language "DCF ja EVA
+  ovat sama arvo kahdella tavalla" framing paragraph; section 10 explains the
+  reconciliation and adds a "Mitä EVA kertoo lisää" callout (ROIC vs WACC). This
+  lives in code, NOT the prompt, because `_normalize_section10` fully replaces
+  the model's section-10 blocks.
+
+- **Competitors were a real prompt gap.** Enrichment produces
+  `enrichment.competitors`, the writer was told to *read* them but had no section
+  to *write*. **Change made:** `prompts/singlewriter.txt` Section 3 now mandates
+  `### Markkina ja sen koko` + `### Kilpailijat ja kilpailuasema` (table from
+  `enrichment.competitors` + 2–3 paragraphs), mirroring the working 6-stage
+  `2_profiili_kilpailijat.txt`. Falls back to a "ei löytynyt kilpailijoita" line
+  when the list is empty. NOTE: if a run still shows no competitors, check the
+  stage-1 Gemini `enrichment.competitors` actually populated — that's a
+  web-search data issue, separate from this prompt fix.
+
+- **Tests:** 86 passed (was 85). New `test_dcf_detail_surfaces_partial_dcf_...`;
+  loosened the section-8 equivalence assertion to presence; added a
+  competitor-section presence guard to the single-writer seed test.
+
+- **Deferred (user chose "3 bug-fixes only" scope):** Asiakastieto-benchmark
+  additions — an industry-quartile benchmark block and a 3-method
+  (DCF/EVA/verottajan malli) reconciliation panel — are researched and ready to
+  build but NOT done. Do NOT fabricate an Asiakastieto AAA–C rating or PD%
+  (proprietary Enento scores).
+
 ## 2026-07-03 (cont.) — Foundation rebuild after CEO review (LIVE + verified)
 
 CEO review: reports didn't understand what companies do (described Valuatum

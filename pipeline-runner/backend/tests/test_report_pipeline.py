@@ -304,6 +304,19 @@ def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
     assert "nykyarvorivi" in callout["text"]
 
 
+def test_dcf_detail_surfaces_partial_dcf_but_stays_silent_when_absent():
+    # Partly-populated dcf (drivers present, core FCFF series missing) -> warning.
+    partial = {"valuation_engine": {"dcf": {
+        "years": [2026, 2027], "ebit": [10, 12], "gross_capex": [-2, -3],
+    }}}
+    blocks = dcf_detail.build_dcf_detail_blocks(partial)
+    assert len(blocks) == 1 and blocks[0]["type"] == "callout"
+    assert blocks[0]["variant"] == "warning"
+    # Wholly empty dcf (legit no-forecast case) -> stay silent.
+    assert dcf_detail.build_dcf_detail_blocks({"valuation_engine": {"dcf": {}}}) == []
+    assert dcf_detail.build_dcf_detail_blocks({}) == []
+
+
 def _headcount_input_data():
     return {
         "headcount": {"years": [2023, 2024], "values": [5, 6]},
@@ -460,7 +473,8 @@ def test_assemble_normalizes_dcf_eva_equivalence_in_sections_and_scoring():
     assert methods["EVA"]["value_teur"] == 450.0
     assert rep["_scoring"]["weighted_base_case_teur"] == 450.0
     sec8 = next(s for s in rep["sections"] if s["id"] == "8")
-    assert sec8["blocks"][0]["table_id"] == "deterministic_dcf_eva_equivalence"
+    assert any(b.get("table_id") == "deterministic_dcf_eva_equivalence"
+               for b in sec8["blocks"] if isinstance(b, dict))
     assert not any(b.get("title") == "Menetelmien antamat arvot" for b in sec8["blocks"] if isinstance(b, dict))
     sec10 = next(s for s in rep["sections"] if s["id"] == "10")
     assert sec10["blocks"][1]["table_id"] == "deterministic_eva_reconciliation"
@@ -1243,6 +1257,10 @@ def test_single_writer_seed_is_research_writer_split():
     assert stages[2]["web_search"] is False
     assert stages[2]["input_mapping"]["enrichment"] == "Vaihe 1 enrichment"
     assert "{{enrichment}}" in stages[2]["prompt_template"]
+    # Writer must emit a competitor + market section, not just read the data.
+    writer_prompt = stages[2]["prompt_template"]
+    assert "Kilpailijat ja kilpailuasema" in writer_prompt
+    assert "enrichment.competitors" in writer_prompt
 
 
 def test_legacy_single_writer_web_stage_migrates_to_research_writer_split():
