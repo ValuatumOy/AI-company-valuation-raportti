@@ -22,6 +22,7 @@ const slug = (s: string) =>
 
 export default function App() {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [inputData, setInputData] = useState<any>(null);
@@ -52,8 +53,10 @@ export default function App() {
   function init() {
     api.pipelines()
       .then((ps) => {
-        setPipeline(ps[0]);
-        setSelectedId(ps[0]?.stages[0]?.id ?? null);
+        setPipelines(ps);
+        const def = ps.find((p) => p.name.startsWith("Valuaatio-pipeline")) ?? ps[0];
+        setPipeline(def);
+        setSelectedId(def?.stages[0]?.id ?? null);
       })
       .catch((e) => {
         if (String(e).includes("401") || String(e).includes("unauthorized"))
@@ -134,6 +137,20 @@ export default function App() {
     setInputData(null);
     // jump to stage 0
     setSelectedId(pipeline?.stages.find((s) => s.order === 0)?.id ?? null);
+  }
+
+  // Switch report mode (6-stage pipeline vs single-writer). Resets the run so
+  // stages/results from the other mode don't linger.
+  function switchPipeline(id: string) {
+    const p = pipelines.find((x) => x.id === id);
+    if (!p) return;
+    setPipeline(p);
+    setRunId(null);
+    setResults({});
+    setTotalCost(0);
+    setRunStartAt(null);
+    setInputData(null);
+    setSelectedId(p.stages.find((s) => s.order === 0)?.id ?? p.stages[0]?.id ?? null);
   }
 
   // Resolve a report URL, honouring the backend deliver-gate: on 409 the report
@@ -286,6 +303,7 @@ export default function App() {
     if (!pipeline) return;
     if (!confirm("Reset all stage prompts to repo defaults?")) return;
     const res = await api.reseedDefaults();
+    api.pipelines().then(setPipelines).catch(() => {});
     setPipeline(res.pipeline);
     setSelectedId((id) =>
       id && res.pipeline.stages.some((s) => s.id === id)
@@ -429,9 +447,23 @@ export default function App() {
     <div className="h-full flex flex-col">
       {/* ── top bar ── */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-800 bg-neutral-950 shrink-0">
-        <span className="font-semibold text-sm text-neutral-300 mr-1 hidden md:inline">
-          {pipeline.name}
-        </span>
+        {pipelines.length > 1 ? (
+          <select
+            value={pipeline.id}
+            onChange={(e) => switchPipeline(e.target.value)}
+            disabled={busy}
+            title="Valitse raportointitila"
+            className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs font-semibold text-neutral-200 mr-1 max-w-[260px] disabled:opacity-40"
+          >
+            {pipelines.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        ) : (
+          <span className="font-semibold text-sm text-neutral-300 mr-1 hidden md:inline">
+            {pipeline.name}
+          </span>
+        )}
 
         {/* primary workflow: new run + run all */}
         <button

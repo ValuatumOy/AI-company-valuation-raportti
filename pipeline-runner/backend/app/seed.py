@@ -11,6 +11,11 @@ from .models import DATA_FETCHER_MODEL
 _SEED_DIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
 _PROMPT_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts")
 DEFAULT_PIPELINE_NAME = "Valuaatio-pipeline (oletus)"
+# Second mode: one strong model writes the whole report in a single pass (with
+# its own web research) instead of the 6-stage pipeline. Stage 0 (FAKTAT) is
+# shared, so assemble() still injects the deterministic DCF/sensitivity/headcount
+# blocks from the data. The operator picks the mode in the UI.
+SINGLE_WRITER_PIPELINE_NAME = "Yhden kirjoittajan raportti (koeajo)"
 
 PLACEHOLDER_PREFIX = "[[ LIITÄ VAIHEEN "
 
@@ -129,6 +134,56 @@ def _stages():
     ]
 
 
+def _single_writer_stages():
+    """Two stages: FAKTAT fetch (shared with the default pipeline) + one model
+    that writes the entire report JSON in a single pass with live web search."""
+    return [
+        {
+            "order": 0,
+            "name": "Vaihe 0 - FAKTAT (data fetch)",
+            "model": DATA_FETCHER_MODEL,
+            "prompt_template": "",
+            "expects_json": True,
+            "validator_code": _load_validator("stage0_schema.py"),
+            "input_mapping": {},
+        },
+        {
+            "order": 1,
+            "name": "Vaihe 1 - Koko raportti (yksi malli)",
+            # Fable 5 gave the strongest self-driven web research in testing
+            # (found the strategic self-service products the 6-stage enrichment
+            # missed). Switchable in the UI; Opus 4.8 is the cheaper alternative.
+            "model": "anthropic/claude-fable-5",
+            "prompt_template": _load_prompt("singlewriter.txt"),
+            "expects_json": True,
+            "web_search": True,  # the writer does its own research
+            "max_tokens": 64000,  # whole report (all sections + tables + charts) in one call
+            "validator_code": _load_validator("stage6_final.py"),
+            "input_mapping": {"input_data": "Vaihe 0 FAKTAT"},
+        },
+    ]
+
+
+def _ensure_single_writer_pipeline(force=False):
+    """Create (and on force, refresh) the single-writer pipeline alongside the
+    default. Never touches the default pipeline."""
+    pipeline = next(
+        (p for p in store.list_pipelines()
+         if p.get("name") == SINGLE_WRITER_PIPELINE_NAME),
+        None,
+    )
+    if pipeline is None:
+        pipeline = store.create_pipeline(SINGLE_WRITER_PIPELINE_NAME)
+    by_order = {s["order"]: s for s in pipeline.get("stages", [])}
+    for desired in _single_writer_stages():
+        cur = by_order.get(desired["order"])
+        if cur is None:
+            store.add_stage(pipeline["id"], desired)
+        elif force or _placeholder_stage(cur):
+            store.update_stage(cur["id"], desired)
+    return store.get_pipeline(pipeline["id"])
+
+
 def _placeholder_stage(stage):
     prompt = stage.get("prompt_template") or ""
     return PLACEHOLDER_PREFIX in prompt and "PROMPTI TÄHÄN" in prompt
@@ -188,6 +243,7 @@ def reseed_defaults(force=False):
             store.update_stage(current["id"], desired)
             updated += 1
 
+    _ensure_single_writer_pipeline(force)
     return {
         "ok": True,
         "created": created,
@@ -222,6 +278,25 @@ def sync_code_and_limits():
             patch["max_tokens"] = dmax
         if patch:
             store.update_stage(cur["id"], {**cur, **patch})
+
+    # Same code/limits sync for the single-writer pipeline (validator + tokens).
+    sw = next((p for p in pipelines
+               if p.get("name") == SINGLE_WRITER_PIPELINE_NAME), None)
+    if sw:
+        sw_by_order = {s["order"]: s for s in sw.get("stages", [])}
+        for desired in _single_writer_stages():
+            cur = sw_by_order.get(desired["order"])
+            if not cur:
+                continue
+            patch = {}
+            dv = desired.get("validator_code")
+            if dv and (cur.get("validator_code") or "") != dv:
+                patch["validator_code"] = dv
+            dmax = desired.get("max_tokens")
+            if dmax and cur.get("max_tokens") != dmax:
+                patch["max_tokens"] = dmax
+            if patch:
+                store.update_stage(cur["id"], {**cur, **patch})
 
 
 def _patch_prompt_text(order, text):
@@ -357,6 +432,7 @@ def ensure_seeded():
             reseed_defaults(force=True)
         sync_code_and_limits()
         sync_prompt_patches()
+        _ensure_single_writer_pipeline()
         return
     reseed_defaults(force=True)
     sync_prompt_patches()

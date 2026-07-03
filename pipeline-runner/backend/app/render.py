@@ -111,12 +111,18 @@ def _flat_text(v):
     return str(v)   # int/float/bool -> exact prior scalar behavior (no reformatting)
 
 
+_CITE_TAG = re.compile(r"</?cite\b[^>]*>", re.I)
+
+
 def _clean(s):
     """Strip leaked pipeline tokens; the reader must never see [input_data]."""
     if s is None:
         return ""
     if not isinstance(s, str):
         s = _flat_text(s)   # lists/dicts/numbers -> readable string, never a dump
+    # Web-search plugin citation markup (<cite index="25-1">…</cite>) leaks into
+    # prose when a stage uses live web search; the reader must never see it.
+    s = _CITE_TAG.sub("", s)
     s = _VAR_RE.sub("", s)
     s = _PLACEHOLDER_RE.sub("", s)
     s = _INPUT_TOK.sub(lambda m: "tilinpäätösdata" + m.group(1), s)
