@@ -91,6 +91,15 @@ CREATE TABLE IF NOT EXISTS orders (
     status TEXT NOT NULL DEFAULT 'open',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS access_keys (
+    key TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    generations_limit INTEGER NOT NULL DEFAULT 3,
+    generations_used INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    expires_at TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 _STATEMENTS = [s.strip() for s in SCHEMA.split(";") if s.strip()]
@@ -131,6 +140,7 @@ if IS_PG:
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS identifier TEXT",
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS params TEXT",
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS parent_run_id TEXT",
+                "ALTER TABLE runs ADD COLUMN IF NOT EXISTS access_key TEXT",
             ):
                 try:
                     conn.execute(mig)
@@ -173,6 +183,7 @@ else:
             "ALTER TABLE runs ADD COLUMN identifier TEXT",
             "ALTER TABLE runs ADD COLUMN params TEXT",
             "ALTER TABLE runs ADD COLUMN parent_run_id TEXT",
+            "ALTER TABLE runs ADD COLUMN access_key TEXT",
         ):
             try:
                 c.execute(mig)

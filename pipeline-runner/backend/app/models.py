@@ -51,6 +51,12 @@ class RunIn(BaseModel):
     stop_on_failure: bool = True
 
 
+class AccessKeyIn(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    generations_limit: int = Field(default=3, ge=1, le=100)
+    expires_at: Optional[str] = None
+
+
 class ClarificationAnswer(BaseModel):
     id: str = ""
     question: str = ""

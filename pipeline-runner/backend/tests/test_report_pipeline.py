@@ -1198,6 +1198,50 @@ def test_clone_run_reuses_stage0_and_links_parent():
     assert s0 and s0[0]["parsed_json"]["meta"]["company_name"] == "Parent"
 
 
+def test_access_key_quota_is_atomic_and_bounded():
+    from app import store
+
+    k = store.create_access_key("Matti", generations_limit=2)
+    key = k["key"]
+    assert key.startswith("exp_")
+    assert store.consume_generation(key) is True
+    assert store.consume_generation(key) is True
+    assert store.consume_generation(key) is False       # 3rd blocked at the cap
+    assert store.consume_generation("exp_does_not_exist") is False
+    assert store.get_access_key(key)["generations_used"] == 2
+
+
+def test_expert_key_is_capped_and_scoped(monkeypatch):
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+    c = TestClient(main.app)
+    pid = store.list_pipelines()[0]["id"]
+    key = store.create_access_key("E", generations_limit=1)["key"]
+    exp = {"Authorization": f"Bearer {key}"}
+    body = {"pipeline_id": pid, "input_data": {"meta": {}}, "stop_on_failure": False}
+
+    # One generation allowed, consuming quota.
+    r = c.post("/api/runs", json=body, headers=exp)
+    assert r.status_code == 200
+    rid = r.json()["run_id"]
+    assert c.get(f"/api/runs/{rid}", headers=exp).status_code == 200   # owns it
+    # Quota now exhausted → second generation blocked.
+    assert c.post("/api/runs", json=body, headers=exp).status_code == 403
+    # Deny-by-default: admin surfaces are off-limits to expert keys.
+    assert c.post("/api/reseed", headers=exp).status_code == 403
+    assert c.get("/api/access-keys", headers=exp).status_code == 403
+    assert c.get("/api/runs", headers=exp).status_code == 403          # list-all
+    # Cannot read a run owned by someone else (admin-created, no access_key).
+    other = store.create_run(pid, {"meta": {}}, False)
+    assert c.get(f"/api/runs/{other}", headers=exp).status_code == 403
+    # Self-check reflects usage.
+    me = c.get("/api/expert/me", headers=exp).json()
+    assert me["remaining"] == 0 and me["generations_limit"] == 1
+
+
 def test_fmt_clarifications_renders_answers_and_empty_sentinel():
     from app import runner
 

@@ -5,6 +5,50 @@ branches, no running dev servers, nothing mid-flight. Read this before
 touching the pipeline validators, the enrichment prompt, or the client site's
 purchase flow.
 
+## 2026-07-04 — Expert access keys (capped self-serve) — backend foundation (LIVE, no reseed)
+
+CEO wants to share the system to a couple of invited experts, capped at a few
+generations each. This is the SECURE BACKEND FOUNDATION; the client-site
+self-serve flow (chosen surface = Option B) + UI quick-wins are the next chunk.
+`build = 2026-07-04-expert-keys`. Runtime code → live on deploy, NO reseed.
+
+- **Data:** `access_keys` table (key `exp_…`, label, generations_limit,
+  generations_used, active, expires_at) in `db.py` SCHEMA; `runs.access_key`
+  column (migration) tags which expert key created a run.
+- **Quota:** `store.consume_generation(key)` — atomic conditional UPDATE
+  (check-and-increment in one statement, race-safe). A "generation" = one
+  round-1 `POST /api/runs`; round-2 (`clone_run`, has parent_run_id) and
+  `start` never consume — refinement is free.
+- **Auth (deny-by-default):** `main.py` middleware now recognizes `Bearer exp_…`
+  keys but allows them ONLY on an allowlist (`_EXPERT_GET`/`_EXPERT_POST`):
+  their own run lifecycle (create/start/round2/get/readiness/report.html+pdf/
+  stream), `pipelines` read, `valuatum/company-json`, `expert/me`. Everything
+  else (reseed, pipeline/stage edits, orders, key minting, list-all-runs,
+  deletes, scoped stage reruns) is admin-token-only. `_require_run_access`
+  enforces per-key run OWNERSHIP so one expert can't read another's/operator's
+  runs. Admin token = unlimited, sees everything (access_key None).
+- **Endpoints:** `POST /api/access-keys` (mint, admin-only) + `GET
+  /api/access-keys` (list usage, admin-only) + `GET /api/expert/me` (an expert
+  reads its own remaining quota — for the client gate).
+- **Mint a key:** `curl -XPOST .../api/access-keys -H "Authorization: Bearer
+  $APP_TOKEN" -d '{"label":"Matti","generations_limit":3}'` → returns the
+  `exp_…` key to hand the expert.
+- **Tests:** 91 pass (+2): quota atomicity + capped/scoped access (expert blocked
+  from admin surfaces + others' runs).
+
+**NEXT (client-site self-serve, Option B — NOT built yet):**
+1. Backend `POST /api/expert/generate` (or reuse): company identifier → run the
+   Valuatum kit (`app/valuatum.export_stream`) to get stage-0 input_data →
+   create+start a run with the expert key → return run_id. Self-serve needs this
+   because the client site has no stage-0 data today.
+2. Client site (`Company_valuation_nettisivut`): expert-key gate (clone the
+   `editor/lib/auth.ts` cookie pattern), search → generate → poll → render report
+   (iframe the backend `report.html`) → port the ClarifyPanel for round-2.
+3. Client-site UI quick-wins (separate track, user approved): reconcile the free
+   hero form vs paid BuyBox (revenue leak), hero uses real CompanySearch, fix the
+   "email (optional)" label, fix/hide the 2 dead sample-report links, unify the
+   delivery-SLA copy.
+
 ## 2026-07-03 (cont.) — 2-step interactive pipeline + analyst-grade reasoning (needs reseed)
 
 Two connected upgrades, `build = 2026-07-03-twostep-analyst`. Backend 89 tests

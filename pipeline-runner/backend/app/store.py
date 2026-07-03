@@ -134,14 +134,14 @@ def reorder(pid, stage_ids):
 # ---- runs / results ---------------------------------------------------------
 
 def create_run(pid, input_data, stop_on_failure, identifier=None, params=None,
-               parent_run_id=None):
+               parent_run_id=None, access_key=None):
     rid = _uuid()
     db.execute(
         "INSERT INTO runs(id,pipeline_id,input_data,status,stop_on_failure,"
-        "total_cost_usd,created_at,identifier,params,parent_run_id) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "total_cost_usd,created_at,identifier,params,parent_run_id,access_key) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         (rid, pid, db.jdump(input_data), "running", int(stop_on_failure), 0.0,
-         _now(), identifier, db.jdump(params or {}), parent_run_id),
+         _now(), identifier, db.jdump(params or {}), parent_run_id, access_key),
     )
     return rid
 
@@ -160,6 +160,7 @@ def clone_run(parent_id, params=None):
         parent["pipeline_id"], parent.get("input_data"),
         parent.get("stop_on_failure", True), parent.get("identifier"),
         merged_params, parent_run_id=parent_id,
+        access_key=parent.get("access_key"),  # refinement stays owned by the expert
     )
     for res in parent.get("results") or []:
         if res.get("order") == 0:
@@ -467,3 +468,41 @@ def list_orders(limit=200):
 def set_order_status(oid, status):
     db.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
     return db.query_one("SELECT * FROM orders WHERE id=?", (oid,))
+
+
+# ---- expert access keys -----------------------------------------------------
+# Capped, invite-only keys (prefix `exp_`) that let a trusted expert self-serve a
+# few report generations. Round-1 runs consume quota; round-2 refinements don't.
+
+def get_access_key(key):
+    if not key:
+        return None
+    return db.query_one("SELECT * FROM access_keys WHERE key=?", (key,))
+
+
+def create_access_key(label, generations_limit=3, expires_at=None):
+    key = "exp_" + _uuid()
+    db.execute(
+        "INSERT INTO access_keys(key,label,generations_limit,generations_used,"
+        "active,expires_at,created_at) VALUES(?,?,?,0,1,?,?)",
+        (key, label, int(generations_limit), expires_at, _now()),
+    )
+    return get_access_key(key)
+
+
+def list_access_keys():
+    return db.query("SELECT * FROM access_keys ORDER BY created_at DESC")
+
+
+def consume_generation(key):
+    """Atomically claim one generation. Returns True if claimed, False if the key
+    is missing/inactive/expired/exhausted. The conditional UPDATE does the
+    check-and-increment in one statement, so two concurrent requests can't both
+    slip past the last unit (works on psycopg3 + sqlite3 rowcount)."""
+    cur = db.execute(
+        "UPDATE access_keys SET generations_used = generations_used + 1 "
+        "WHERE key=? AND active=1 AND generations_used < generations_limit "
+        "AND (expires_at IS NULL OR expires_at > ?)",
+        (key, _now()),
+    )
+    return getattr(cur, "rowcount", 0) > 0

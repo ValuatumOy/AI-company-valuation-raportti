@@ -3,6 +3,7 @@ import asyncio
 import hmac
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -15,8 +16,8 @@ load_dotenv()
 
 from . import openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
 from .models import (  # noqa: E402
-    CompareIn, FetchIn, OrderIn, OrderStatusIn, PipelineIn, ReorderIn, Round2In,
-    RunIn, StageIn, ValidateIn, ValuatumExportIn,
+    AccessKeyIn, CompareIn, FetchIn, OrderIn, OrderStatusIn, PipelineIn,
+    ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
 
@@ -46,11 +47,34 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-03-twostep-analyst"
+BUILD = "2026-07-04-expert-keys"
+
+
+# Paths a capped expert key (`exp_`) may reach. DENY-BY-DEFAULT: everything not
+# matched here (reseed, pipeline/stage edits, orders, key minting, deletes, cost
+# admin) is admin-token-only. Ownership of a specific run is checked in the
+# endpoint via _require_run_access — the allowlist only opens the route.
+_EXPERT_GET = re.compile(
+    r"^/api/(pipelines(/[^/]+)?"
+    r"|runs/[^/]+(/readiness|/report\.(html|pdf)|/stream)?"
+    r"|expert/me)$"
+)
+_EXPERT_POST = re.compile(
+    r"^/api/(runs|runs/[^/]+/(start|round2)|valuatum/company-json)$"
+)
+
+
+def _expert_path_allowed(method: str, path: str) -> bool:
+    if method == "GET":
+        return bool(_EXPERT_GET.match(path))
+    if method == "POST":
+        return bool(_EXPERT_POST.match(path))
+    return False
 
 
 @app.middleware("http")
 async def auth_gate(request, call_next):
+    request.state.access_key = None  # None = admin/unlimited
     if _APP_TOKEN and request.method != "OPTIONS":
         path = request.url.path
         # POST /api/orders is the public website order intake — no bearer.
@@ -58,12 +82,34 @@ async def auth_gate(request, call_next):
         if path == "/api/orders" and request.method == "POST":
             return await call_next(request)
         if path.startswith("/api/") and path != "/api/health":
-            sent = request.headers.get("authorization", "")
-            if not hmac.compare_digest(sent, f"Bearer {_APP_TOKEN}"):
-                from fastapi.responses import JSONResponse
+            from fastapi.responses import JSONResponse
 
+            sent = request.headers.get("authorization", "")
+            if hmac.compare_digest(sent, f"Bearer {_APP_TOKEN}"):
+                pass  # full admin access
+            elif sent.startswith("Bearer exp_"):
+                key = sent[len("Bearer "):]
+                row = store.get_access_key(key)
+                if not row or not row.get("active"):
+                    return JSONResponse({"detail": "unauthorized"}, status_code=401)
+                if not _expert_path_allowed(request.method, path):
+                    return JSONResponse({"detail": "forbidden"}, status_code=403)
+                request.state.access_key = key
+            else:
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
     return await call_next(request)
+
+
+def _require_run_access(rid: str, request: Request):
+    """A run served to an expert key must have been created by that same key.
+    Admin (access_key None) sees everything. Returns the run or raises."""
+    run = store.get_run(rid)
+    if not run:
+        raise HTTPException(404, "run not found")
+    key = getattr(request.state, "access_key", None)
+    if key and run.get("access_key") != key:
+        raise HTTPException(403, "forbidden")
+    return run
 
 
 @app.get("/api/health")
@@ -288,13 +334,18 @@ def post_validate(body: ValidateIn):
 # ---- runs -------------------------------------------------------------------
 
 @app.post("/api/runs")
-def post_run(body: RunIn):
+def post_run(body: RunIn, request: Request):
     p = store.get_pipeline(body.pipeline_id)
     if not p:
         raise HTTPException(404, "pipeline not found")
+    # A new round-1 report is where an expert's quota is spent. Claim it before
+    # creating the run (a bad pipeline_id 404s above, before any unit is spent).
+    key = getattr(request.state, "access_key", None)
+    if key and not store.consume_generation(key):
+        raise HTTPException(403, "Generointikiintiö on käytetty loppuun.")
     rid = store.create_run(
         body.pipeline_id, body.input_data, body.stop_on_failure,
-        identifier=body.identifier, params=body.params,
+        identifier=body.identifier, params=body.params, access_key=key,
     )
     return {"run_id": rid}
 
@@ -318,7 +369,8 @@ async def _stream(rid, only=None, from_order=None):
 
 
 @app.get("/api/runs/{rid}/stream")
-async def stream_run(rid: str):
+async def stream_run(rid: str, request: Request):
+    _require_run_access(rid, request)
     return EventSourceResponse(_stream(rid))
 
 
@@ -361,19 +413,24 @@ def _start_bg(rid: str, only=None, from_order=None) -> bool:
 
 
 @app.post("/api/runs/{rid}/start")
-async def start_run(rid: str, from_order: int | None = None, only: int | None = None):
-    if not store.get_run(rid):
-        raise HTTPException(404, "run not found")
+async def start_run(rid: str, request: Request,
+                    from_order: int | None = None, only: int | None = None):
+    _require_run_access(rid, request)
+    # Experts may only (re)start their own run as a whole; scoped stage reruns
+    # are an admin operation.
+    if getattr(request.state, "access_key", None) and (
+        from_order not in (None, 1) or only is not None
+    ):
+        raise HTTPException(403, "forbidden")
     return {"ok": True, "started": _start_bg(rid, only=only, from_order=from_order)}
 
 
 @app.post("/api/runs/{rid}/round2")
-async def round2_run(rid: str, body: Round2In):
+async def round2_run(rid: str, body: Round2In, request: Request):
     """Round 2: clone the parent run (reuse its stage-0 FAKTAT), fold the user's
     clarifications into params, and re-run from enrichment so the corrected facts
     reshape the locked business thesis and the scenarios."""
-    if not store.get_run(rid):
-        raise HTTPException(404, "run not found")
+    _require_run_access(rid, request)
     new_rid = store.clone_run(rid, params={
         "clarifications": [c.model_dump() for c in body.clarifications],
         "clarifications_free_text": body.clarifications_free_text,
@@ -416,9 +473,8 @@ def _require_ready(rid: str, force: int):
 
 
 @app.get("/api/runs/{rid}/readiness")
-def run_readiness(rid: str):
-    if not store.get_run(rid):
-        raise HTTPException(404, "run not found")
+def run_readiness(rid: str, request: Request):
+    _require_run_access(rid, request)
     return store.report_readiness(rid)
 
 
@@ -442,7 +498,8 @@ def preview_report(body: dict):
 
 
 @app.get("/api/runs/{rid}/report.html")
-def report_html(rid: str, force: int = 0):
+def report_html(rid: str, request: Request, force: int = 0):
+    _require_run_access(rid, request)
     j = store.final_report_json(rid)
     if j is None:
         raise HTTPException(400, "ei valmista loppuvaiheen JSONia tälle ajolle")
@@ -455,7 +512,8 @@ def report_html(rid: str, force: int = 0):
 
 
 @app.get("/api/runs/{rid}/report.pdf")
-def report_pdf(rid: str, force: int = 0):
+def report_pdf(rid: str, request: Request, force: int = 0):
+    _require_run_access(rid, request)
     j = store.final_report_json(rid)
     if j is None:
         raise HTTPException(400, "ei valmista loppuvaiheen JSONia tälle ajolle")
@@ -474,11 +532,40 @@ def get_runs():
 
 
 @app.get("/api/runs/{rid}")
-def get_run(rid: str):
-    r = store.get_run(rid)
-    if not r:
-        raise HTTPException(404, "run not found")
-    return r
+def get_run(rid: str, request: Request):
+    return _require_run_access(rid, request)
+
+
+# ---- expert access keys -----------------------------------------------------
+# Mint/list are admin-only (the auth middleware never lets an `exp_` key reach
+# /api/access-keys — it's off the expert allowlist). /api/expert/me lets an
+# expert read their own remaining quota for the client-site gate.
+
+@app.post("/api/access-keys")
+def post_access_key(body: AccessKeyIn):
+    return store.create_access_key(
+        body.label, body.generations_limit, body.expires_at)
+
+
+@app.get("/api/access-keys")
+def list_access_keys():
+    return store.list_access_keys()
+
+
+@app.get("/api/expert/me")
+def expert_me(request: Request):
+    key = getattr(request.state, "access_key", None)
+    if not key:  # admin token, not an expert context
+        raise HTTPException(400, "not an expert key")
+    row = store.get_access_key(key)
+    if not row:
+        raise HTTPException(401, "unauthorized")
+    return {
+        "label": row["label"],
+        "generations_used": row["generations_used"],
+        "generations_limit": row["generations_limit"],
+        "remaining": max(0, row["generations_limit"] - row["generations_used"]),
+    }
 
 
 @app.delete("/api/runs/{rid}")
