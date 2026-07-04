@@ -380,6 +380,20 @@ async def run_stages(run, stages, only=None, from_order=None):
     context["previous_report"] = (params or {}).get("previous_report") \
         or "(Ensimmäinen kierros — ei edellistä raporttia.)"
 
+    # Round-2 only: swap the writer model (the highest-order LLM stage that
+    # produces the report). Round 1 writes fresh with Fable; round 2's careful
+    # maximal-preserve refinement can use Opus. Override rides in params.
+    _writer_ovr = (params or {}).get("round2_writer_model")
+    _writer_order = max(
+        (s["order"] for s in stages if s.get("model") != DATA_FETCHER_MODEL),
+        default=None,
+    )
+
+    def _eff(stage):
+        if _writer_ovr and stage["order"] == _writer_order:
+            return {**stage, "model": _writer_ovr}
+        return stage
+
     def in_scope(order):
         if only is not None:
             return order == only
@@ -422,7 +436,7 @@ async def run_stages(run, stages, only=None, from_order=None):
                                   "started_at": _now()})
         yield _ev("stage", order=s["order"], status="running", name=s["name"])
 
-        res = await _execute_stage(s, context, input_data, identifier, params)
+        res = await _execute_stage(_eff(s), context, input_data, identifier, params)
         store.add_run_cost(rid, res.get("cost_usd", 0.0))
 
         # Self-heal: a transient model slip — a blank required field, a one-off
@@ -446,7 +460,7 @@ async def run_stages(run, stages, only=None, from_order=None):
                                       "started_at": _now()})
             yield _ev("stage", order=s["order"], status="running",
                       name=s["name"], retry=True)
-            retry = await _execute_stage(s, context, input_data, identifier,
+            retry = await _execute_stage(_eff(s), context, input_data, identifier,
                                          params, correction=correction)
             store.add_run_cost(rid, retry.get("cost_usd", 0.0))
             rank = {"ok": 2, "validation_failed": 1, "error": 0}

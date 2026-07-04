@@ -47,7 +47,11 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-04-maximal-preserve"
+BUILD = "2026-07-04-round2-opus"
+
+# Round-2 refinement writer: Opus follows the maximal-preserve instruction more
+# faithfully than the creative Fable writer used for the round-1 fresh report.
+ROUND2_WRITER_MODEL = "anthropic/claude-opus-4.8"
 
 
 # Paths a capped expert key (`exp_`) may reach. DENY-BY-DEFAULT: everything not
@@ -444,6 +448,9 @@ async def round2_run(rid: str, body: Round2In, request: Request):
         "clarifications_free_text": body.clarifications_free_text,
         "previous_enrichment": prev_enrichment,
         "previous_report": store.final_report_json(rid),
+        # Careful preserve-and-patch is an editing task, not creative writing —
+        # use Opus for the round-2 writer while round 1 stays Fable.
+        "round2_writer_model": ROUND2_WRITER_MODEL,
     })
     _start_bg(new_rid, from_order=1)
     return {"run_id": new_rid, "parent_run_id": rid}
