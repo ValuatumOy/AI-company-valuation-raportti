@@ -498,10 +498,12 @@ def consume_generation(key):
     """Atomically claim one generation. Returns True if claimed, False if the key
     is missing/inactive/expired/exhausted. The conditional UPDATE does the
     check-and-increment in one statement, so two concurrent requests can't both
-    slip past the last unit (works on psycopg3 + sqlite3 rowcount)."""
+    slip past the last unit (works on psycopg3 + sqlite3 rowcount).
+    generations_limit <= 0 means UNLIMITED — always claims (still counts usage)."""
     cur = db.execute(
         "UPDATE access_keys SET generations_used = generations_used + 1 "
-        "WHERE key=? AND active=1 AND generations_used < generations_limit "
+        "WHERE key=? AND active=1 "
+        "AND (generations_limit <= 0 OR generations_used < generations_limit) "
         "AND (expires_at IS NULL OR expires_at > ?)",
         (key, _now()),
     )

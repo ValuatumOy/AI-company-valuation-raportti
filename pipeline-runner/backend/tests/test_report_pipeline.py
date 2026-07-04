@@ -1209,6 +1209,9 @@ def test_access_key_quota_is_atomic_and_bounded():
     assert store.consume_generation(key) is False       # 3rd blocked at the cap
     assert store.consume_generation("exp_does_not_exist") is False
     assert store.get_access_key(key)["generations_used"] == 2
+    # generations_limit == 0 means unlimited (e.g. a CEO/internal key).
+    u = store.create_access_key("CEO", generations_limit=0)["key"]
+    assert all(store.consume_generation(u) for _ in range(5))
 
 
 def test_expert_key_is_capped_and_scoped(monkeypatch):

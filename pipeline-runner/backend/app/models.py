@@ -53,7 +53,8 @@ class RunIn(BaseModel):
 
 class AccessKeyIn(BaseModel):
     label: str = Field(min_length=1, max_length=200)
-    generations_limit: int = Field(default=3, ge=1, le=100)
+    # 0 = unlimited (e.g. an internal/CEO key); >0 = capped credits.
+    generations_limit: int = Field(default=3, ge=0, le=100000)
     expires_at: Optional[str] = None
 
 

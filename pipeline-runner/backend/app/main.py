@@ -47,7 +47,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-04-round2-opus"
+BUILD = "2026-07-04-unlimited-keys"
 
 # Round-2 refinement writer: Opus follows the maximal-preserve instruction more
 # faithfully than the creative Fable writer used for the round-1 fresh report.
@@ -577,11 +577,14 @@ def expert_me(request: Request):
     row = store.get_access_key(key)
     if not row:
         raise HTTPException(401, "unauthorized")
+    limit = row["generations_limit"]
+    unlimited = limit is None or limit <= 0
     return {
         "label": row["label"],
         "generations_used": row["generations_used"],
-        "generations_limit": row["generations_limit"],
-        "remaining": max(0, row["generations_limit"] - row["generations_used"]),
+        "generations_limit": limit,
+        "unlimited": unlimited,
+        "remaining": None if unlimited else max(0, limit - row["generations_used"]),
     }
 
 
