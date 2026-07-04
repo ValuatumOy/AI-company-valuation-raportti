@@ -26,8 +26,12 @@ SYÖTE:
 {{revenue_anomalies}}
 `clarifications` (KIERROS 2: käyttäjän vahvistamat vastaukset ensimmäisen kierroksen kysymyksiin; tyhjä ensimmäisellä kierroksella):
 {{clarifications}}
+`previous_enrichment` (KIERROS 2: EDELLISEN kierroksen valmis, hyväksi todettu rikastus; tyhjä ensimmäisellä kierroksella):
+{{previous_enrichment}}
 
-KIERROS 2 -KURI: jos `clarifications` sisältää käyttäjän vahvistamia tietoja, käsittele ne VARMENNETTUNA TIETONA (asiakkaan vahvistama), joka kumoaa aiemman arvion vastaavasta kohdasta. Johda `business_thesis`, `business_lines[].addressable_market`, `forward_revenue_view`, `optimistic_share_pct`/`optimistic_market_teur` ja `structural_inflections` uudelleen näiden tietojen mukaisesti — esim. vahvistettu poistunut myyntirajoite tai todellinen markkinan koko nostaa optimistista näkymää. Merkitse tällaisen väitteen lähteeksi "asiakkaan vahvistama". Emitoi `clarification_requests` uudelleen vain niistä kohdista, jotka jäivät yhä epävarmoiksi.
+KIERROS 2 -KURI (MAKSIMAALINEN SÄILYTYS): jos `previous_enrichment` sisältää edellisen kierroksen rikastuksen, se on LÄHTÖKOHTA. SÄILYTÄ sen jokainen oikea löydös sellaisenaan — business_thesis, business_lines, competitors, market, market_signals, structural_inflections, source_register. ÄLÄ tee tuoretta täyshakua etkä johda kaikkea uudelleen; älä pudota tai muuta asioita jotka olivat jo oikein. Tee VAIN kaksi asiaa: (1) sovita `clarifications`-kentän käyttäjän vahvistamat tiedot päälle (ne kumoavat vain sen kohdan, jota ne koskevat), (2) korjaa kohta, jonka käyttäjä nimenomaan osoitti vääräksi tai puuttuvaksi. Voit tehdä KOHDENNETUN haun vain vahvistaaksesi käyttäjän uuden tiedon — et koko yhtiön uudelleentutkimista. Palauta koko rikastus-JSON (kaikki kentät), jotta mikään aiemmin oikea sisältö ei katoa.
+
+KIERROS 2 -KURI: käsittele `clarifications` VARMENNETTUNA TIETONA (asiakkaan vahvistama), joka kumoaa aiemman arvion vastaavasta kohdasta. Johda vain kytkeytyvät kentät uudelleen (`business_thesis`, `business_lines[].addressable_market`, `forward_revenue_view`, `optimistic_share_pct`/`optimistic_market_teur`, `structural_inflections`) — esim. vahvistettu poistunut myyntirajoite tai todellinen markkinan koko nostaa optimistista näkymää. Merkitse lähteeksi "asiakkaan vahvistama". Emitoi `clarification_requests` uudelleen vain kohdista, jotka jäivät yhä epävarmoiksi.
 
 VAIHE 1 — IDENTITEETIN VARMISTUS (pakollinen ennen muuta hakua):
 1. Varmista yrityksen identiteetti Y-tunnuksella yritystietopalvelusta (PRH/YTJ, Asiakastieto, Finder tai vastaava): virallinen nimi, toimiala, kotipaikka ja verkkosivu.

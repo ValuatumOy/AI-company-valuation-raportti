@@ -373,6 +373,12 @@ async def run_stages(run, stages, only=None, from_order=None):
         (params or {}).get("clarifications"),
         (params or {}).get("clarifications_free_text"),
     )
+    # Round-2 maximal-preserve baseline: round-1's enrichment + report, so the
+    # refinement LAYERS the user's fix onto the good report instead of re-rolling.
+    context["previous_enrichment"] = (params or {}).get("previous_enrichment") \
+        or "(Ensimmäinen kierros — ei edellisen kierroksen rikastusta.)"
+    context["previous_report"] = (params or {}).get("previous_report") \
+        or "(Ensimmäinen kierros — ei edellistä raporttia.)"
 
     def in_scope(order):
         if only is not None:

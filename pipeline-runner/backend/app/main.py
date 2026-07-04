@@ -47,7 +47,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-04-expert-singlewriter"
+BUILD = "2026-07-04-maximal-preserve"
 
 
 # Paths a capped expert key (`exp_`) may reach. DENY-BY-DEFAULT: everything not
@@ -431,10 +431,19 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     """Round 2: clone the parent run (reuse its stage-0 FAKTAT), fold the user's
     clarifications into params, and re-run from enrichment so the corrected facts
     reshape the locked business thesis and the scenarios."""
-    _require_run_access(rid, request)
+    parent = _require_run_access(rid, request)
+    # Maximal-preserve: hand round 2 the round-1 enrichment + assembled report so
+    # it refines (keep the good, apply the fix) instead of regenerating blind.
+    prev_enrichment = next(
+        (r.get("parsed_json") for r in (parent.get("results") or [])
+         if r.get("order") == 1),
+        None,
+    )
     new_rid = store.clone_run(rid, params={
         "clarifications": [c.model_dump() for c in body.clarifications],
         "clarifications_free_text": body.clarifications_free_text,
+        "previous_enrichment": prev_enrichment,
+        "previous_report": store.final_report_json(rid),
     })
     _start_bg(new_rid, from_order=1)
     return {"run_id": new_rid, "parent_run_id": rid}

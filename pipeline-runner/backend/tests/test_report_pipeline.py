@@ -1246,6 +1246,27 @@ def test_expert_key_is_capped_and_scoped(monkeypatch):
     assert me["remaining"] == 0 and me["generations_limit"] == 1
 
 
+def test_round2_captures_round1_enrichment_for_maximal_preserve(monkeypatch):
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)  # don't run it
+    c = TestClient(main.app)  # APP_TOKEN unset → admin
+    pid = store.list_pipelines()[0]["id"]
+    parent = store.create_run(pid, {"meta": {"company_name": "X"}}, True)
+    store.upsert_result(parent, {"order": 1, "name": "enrichment", "status": "ok",
+                                 "parsed_json": {"business_thesis": {"one_line_thesis": "keep me"}}})
+    r = c.post(f"/api/runs/{parent}/round2",
+               json={"clarifications": [], "clarifications_free_text": "uusi tieto"})
+    assert r.status_code == 200
+    child = store.get_run(r.json()["run_id"])
+    # Round 1's enrichment is handed to round 2 so it refines instead of re-rolling.
+    assert child["params"]["previous_enrichment"]["business_thesis"]["one_line_thesis"] == "keep me"
+    assert child["params"]["clarifications_free_text"] == "uusi tieto"
+    assert child["parent_run_id"] == parent
+
+
 def test_fmt_clarifications_renders_answers_and_empty_sentinel():
     from app import runner
 
