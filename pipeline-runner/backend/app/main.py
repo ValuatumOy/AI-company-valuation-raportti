@@ -47,7 +47,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-04-expert-generate"
+BUILD = "2026-07-04-expert-singlewriter"
 
 
 # Paths a capped expert key (`exp_`) may reach. DENY-BY-DEFAULT: everything not
@@ -575,7 +575,15 @@ async def expert_generate(body: ExpertGenerateIn, request: Request):
     data in stage 0 (by FID) and runs the pipeline. Consumes one generation for
     expert keys; admin (access_key None) is unlimited. Round-2 refinement of the
     resulting report is free (see round2_run)."""
-    pid = body.pipeline_id or (store.list_pipelines() or [{}])[0].get("id")
+    # Default experts to the single-writer "koeajo" pipeline (FAKTAT + enrichment
+    # + one writer), not the 6-stage default. Operators can still pass an explicit
+    # pipeline_id.
+    if body.pipeline_id:
+        pid = body.pipeline_id
+    else:
+        pls = store.list_pipelines() or []
+        sw = next((p for p in pls if p.get("name") == seed.SINGLE_WRITER_PIPELINE_NAME), None)
+        pid = (sw or (pls[0] if pls else {})).get("id")
     if not pid or not store.get_pipeline(pid):
         raise HTTPException(404, "pipeline not found")
     key = getattr(request.state, "access_key", None)
