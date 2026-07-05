@@ -47,7 +47,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-04-unlimited-keys"
+BUILD = "2026-07-05-runs-paused-switch"
 
 # Round-2 refinement writer: Opus follows the maximal-preserve instruction more
 # faithfully than the creative Fable writer used for the round-1 fresh report.
@@ -103,6 +103,15 @@ async def auth_gate(request, call_next):
             else:
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
     return await call_next(request)
+
+
+def _check_not_paused():
+    """503 before any credit is consumed or run created. openrouter.chat has the
+    hard backstop for paths that slip past the endpoint guards (rerun, compare)."""
+    if openrouter.runs_paused():
+        raise HTTPException(
+            503, "Raporttien generointi on väliaikaisesti keskeytetty ylläpidon toimesta."
+        )
 
 
 def _require_run_access(rid: str, request: Request):
@@ -343,6 +352,7 @@ def post_run(body: RunIn, request: Request):
     p = store.get_pipeline(body.pipeline_id)
     if not p:
         raise HTTPException(404, "pipeline not found")
+    _check_not_paused()
     # A new round-1 report is where an expert's quota is spent. Claim it before
     # creating the run (a bad pipeline_id 404s above, before any unit is spent).
     key = getattr(request.state, "access_key", None)
@@ -420,6 +430,7 @@ def _start_bg(rid: str, only=None, from_order=None) -> bool:
 @app.post("/api/runs/{rid}/start")
 async def start_run(rid: str, request: Request,
                     from_order: int | None = None, only: int | None = None):
+    _check_not_paused()
     _require_run_access(rid, request)
     # Experts may only (re)start their own run as a whole; scoped stage reruns
     # are an admin operation.
@@ -435,6 +446,7 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     """Round 2: clone the parent run (reuse its stage-0 FAKTAT), fold the user's
     clarifications into params, and re-run from enrichment so the corrected facts
     reshape the locked business thesis and the scenarios."""
+    _check_not_paused()
     parent = _require_run_access(rid, request)
     # Maximal-preserve: hand round 2 the round-1 enrichment + assembled report so
     # it refines (keep the good, apply the fix) instead of regenerating blind.
@@ -605,6 +617,7 @@ async def expert_generate(body: ExpertGenerateIn, request: Request):
         pid = (sw or (pls[0] if pls else {})).get("id")
     if not pid or not store.get_pipeline(pid):
         raise HTTPException(404, "pipeline not found")
+    _check_not_paused()
     key = getattr(request.state, "access_key", None)
     if key and not store.consume_generation(key):
         raise HTTPException(403, "Generointikiintiö on käytetty loppuun.")

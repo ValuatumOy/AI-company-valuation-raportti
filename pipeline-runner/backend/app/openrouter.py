@@ -126,6 +126,18 @@ def cost_for(model: str, prompt_tokens: int, completion_tokens: int) -> float:
     return prompt_tokens * p["prompt_price"] + completion_tokens * p["completion_price"]
 
 
+def runs_paused() -> bool:
+    """Global kill switch: RUNS_PAUSED=1 blocks every LLM call (all providers).
+
+    EMERGENCY DEFAULT (2026-07-05): while RUNS_PAUSED is unset, production
+    (= APP_TOKEN set) is PAUSED. Set RUNS_PAUSED=0 in Railway to resume.
+    Local dev/tests (no APP_TOKEN) stay unpaused."""
+    flag = os.getenv("RUNS_PAUSED", "").strip().lower()
+    if flag:
+        return flag in ("1", "true", "yes")
+    return bool(os.getenv("APP_TOKEN"))
+
+
 async def chat(
     model: str,
     prompt: str,
@@ -136,6 +148,10 @@ async def chat(
     web_search: bool = False,
 ) -> dict:
     """One-shot completion. Returns dict with text, usage, finish_reason, payload."""
+    if runs_paused():
+        raise RuntimeError(
+            "Ajot on väliaikaisesti keskeytetty ylläpidon toimesta (RUNS_PAUSED)."
+        )
     if _is_google_gemini(model):
         return await _google_chat(
             model=model,
