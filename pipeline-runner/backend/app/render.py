@@ -469,10 +469,22 @@ def _svg_bars(labels, series, forecast_from=None):
                  f'text-anchor="middle" font-size="9.5" fill="{C["gray"]}">{_esc(lab)}</text>')
     g.append(f'<line x1="{pl}" y1="{y(0):.1f}" x2="{W - pr}" y2="{y(0):.1f}" '
              f'stroke="{C["lineStrong"]}" stroke-width="1.2"/>')
+    # Legend for multi-series charts — without it "kassa vs velat" bars are
+    # unreadable (which color is which?).
+    if len(series) > 1:
+        lx = pl
+        for si, s in enumerate(series):
+            nm = _esc(_flat_text(s.get("name")) or f"Sarja {si + 1}")
+            color = s.get("color") or palette[si % len(palette)]
+            g.append(f'<rect x="{lx:.1f}" y="3" width="8" height="8" fill="{color}"/>')
+            g.append(f'<text x="{lx + 11:.1f}" y="11" font-size="8.5" '
+                     f'fill="{C["gray"]}">{nm}</text>')
+            lx += 11 + 5.2 * len(nm) + 16
     return _svg(W, H, "".join(g))
 
 
-def _svg_combo(labels, bar_vals, line_vals, line_pct=True, forecast_from=None):
+def _svg_combo(labels, bar_vals, line_vals, line_pct=True, forecast_from=None,
+               bar_name=None, line_name=None):
     W, H = 600, 260
     pt, pr, pb, pl = 16, 44, 34, 42
     bv = [v for v in bar_vals if v is not None]
@@ -533,6 +545,16 @@ def _svg_combo(labels, bar_vals, line_vals, line_pct=True, forecast_from=None):
             if v is not None:
                 g.append(f'<circle cx="{xm(i):.1f}" cy="{yl(v):.1f}" r="3.2" '
                          f'fill="#fff" stroke="{C["green"]}" stroke-width="1.6"/>')
+    if bar_name or line_name:
+        lx = pl
+        for nm_raw, color in ((bar_name, C["lime"]), (line_name, C["green"])):
+            if not nm_raw:
+                continue
+            nm = _esc(_flat_text(nm_raw))
+            g.append(f'<rect x="{lx:.1f}" y="3" width="8" height="8" fill="{color}"/>')
+            g.append(f'<text x="{lx + 11:.1f}" y="11" font-size="8.5" '
+                     f'fill="{C["gray"]}">{nm}</text>')
+            lx += 11 + 5.2 * len(nm) + 16
     return _svg(W, H, "".join(g))
 
 
@@ -954,7 +976,9 @@ def _chart_svg(b):
             return _svg_combo(x, _nums(bar.get("values")) if bar else [],
                               _nums(line.get("values")) if line else [],
                               line_pct="%" in str(b.get("unit", "")) or True,
-                              forecast_from=forecast)
+                              forecast_from=forecast,
+                              bar_name=bar.get("name") if bar else None,
+                              line_name=line.get("name") if line else None)
         return _svg_bars(x, series, forecast_from=forecast)
     except Exception:
         return ""

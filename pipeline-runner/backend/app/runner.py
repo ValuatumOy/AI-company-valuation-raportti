@@ -30,6 +30,19 @@ def _spend_cap_exceeded(rid):
             return f"Päivän spend cap saavutettu (${dc:.4f} ≥ ${day_cap:.2f})."
     return None
 
+def _correction_model(stage):
+    """Self-heal retry on the whole-report writer would re-pay the full Fable
+    price (~$3) to fix a named validator failure — an editing task. Heavy
+    stages (max_tokens >= 40000) retry on a cheaper editor instead.
+    CORRECTION_WRITER_MODEL env overrides; empty/'0' = retry on same model."""
+    if (stage.get("max_tokens") or 0) < 40000:
+        return stage
+    m = os.getenv("CORRECTION_WRITER_MODEL", "anthropic/claude-sonnet-5")
+    if not m or m == "0":
+        return stage
+    return {**stage, "model": m}
+
+
 # Canonical report section order. Section 7 is intentionally absent.
 SECTION_ORDER = [
     "1", "2", "3", "4", "5", "6", "8", "9", "10", "11", "12", "13", "14",
@@ -461,7 +474,8 @@ async def run_stages(run, stages, only=None, from_order=None):
                                       "started_at": _now()})
             yield _ev("stage", order=s["order"], status="running",
                       name=s["name"], retry=True)
-            retry = await _execute_stage(_eff(s), context, input_data, identifier,
+            retry = await _execute_stage(_correction_model(_eff(s)), context,
+                                         input_data, identifier,
                                          params, correction=correction)
             store.add_run_cost(rid, retry.get("cost_usd", 0.0))
             rank = {"ok": 2, "validation_failed": 1, "error": 0}

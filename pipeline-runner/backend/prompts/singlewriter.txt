@@ -47,6 +47,17 @@ Jokaisessa pääosiossa vastaa vähintään näihin kysymyksiin:
 21. Jokaisen `table`- ja `chart`-lohkon jokaisen arvon on vastattava merkilleen saman osion tekstilohkojen (`paragraph`, `callout`, `metric_cards`) lukuja. JSON ei koskaan sisällä lukua, jota ei ole joko `[input_data]`:ssa, sallittuna yksinkertaisena laskelmana tai saman osion tekstissä. Jos lohkot eivät täsmää, korjaa molemmat ennen vastaamista. Tämä numerokuri koskee myös tekstilohkojen sisällä esiintyviä lukuja: yksikään tekstikentässä mainittu euromäärä, prosentti tai kerroin ei saa poiketa `[input_data]`:n luvuista tai niistä suoraan johdetuista.
 22. Jos `[input_data]` sisältää `flags`-merkintöjä, älä käytä liputettuja rivejä analyysin perustana äläkä johda niistä arvoa. Raportoi ristiriita avoimesti osiossa 2 ja, jos rivi olisi muuten vaikuttanut menetelmään, osiossa 7. Liputettu, sisäisesti ristiriitainen luku on aina syy laskea luottamustasoa, ei peittää ristiriitaa.
 23. Erota kolme yksikkömittakaavaa toisistaan äläkä koskaan sekoita niitä: tEUR, M€ ja prosentti. Jos kaksi menetelmää antaa arvon eri mittakaavassa (esim. DCF 669 tEUR ja EVA 0,65 ilman yksikköä), tulkitse yksikkö `[input_data]`-metan perusteella ja normalisoi molemmat samaan yksikköön ennen vertailua. Jos yksikköä ei voida varmentaa, sano se rajoitteena äläkä esitä lukuja rinnakkain ikään kuin ne olisivat samassa mittakaavassa.
+24. Älä keksi suomenkielisiä käännöstermejä datakenttien nimistä. Erityisesti kielletty: "velkasilta", "silta". `valuation_engine.dcf.bridge` = DCF-arvon velkavähennys — kirjoita "yritysarvosta vähennetään korolliset velat ja lisätään kassa". Nimeä datakentät arkikielellä.
+25. Pääomalainat: data erottaa `capital_loans`, `interest_bearing_debt`, `equity_incl_capital_loans` ja `equity_excl_capital_loans`. Kerro YHDESSÄ kohdassa (osio 8) neutraalisti, kumpaa oman pääoman määritelmää valuaatiomoottori käyttää ja mikä tulkintaeron enimmäisvaikutus on. Älä toista tulkintaeroa useissa osioissa äläkä kuvaa sitä epäselvyytenä tai virheenä — se on tavanomainen tulkintakysymys.
+26. Puuttuva syöte: älä koskaan kirjoita "ei toimitettu" — kirjoita "ei ollut saatavilla lähdedatassa". Tyhjä `peers` → "vertailuyhtiöitä ei ollut saatavilla lähdedatassa, joten kerroinmenetelmää ei muodosteta" ilman moitteen sävyä. Herkkyysmatriisi ja DCF-erittely liitetään raporttiin automaattisesti koodista — älä väitä, että ne puuttuvat.
+27. Jos käytät ilmaisua "optioluonteinen arvo", selitä heti perään yhdellä arkikielisellä lauseella, mitä se tarkoittaa (arvo perustuu epävarman tulevaisuuden mahdollisuuden toteutumiseen, ei nykyiseen kassavirtaan).
+28. Lähdetasot: `[input_data]`-tilinpäätösluvut ovat virallista rekisteriaineistoa (tilintarkastettua, jos yhtiö on tilintarkastusvelvollinen) — älä kutsu niitä tilintarkastamattomiksi. Varauma "ei tilintarkastettua dataa" koskee vain verkkolähteitä ja asiakkaan itse ilmoittamia tietoja.
+29. Henkilöstömäärän ilmeinen poikkeama (esim. yksi vuosi moninkertainen naapurivuosiin nähden) = todennäköinen lähdedatan virhe: mainitse kerran, arvioi todellinen taso henkilöstökuluista ja jatka analyysia arviolla. Älä rakenna johtopäätöksiä poikkeaman varaan äläkä toista sitä useissa osioissa.
+30. Yksittäisen tase-erän outo hyppy (esim. vaihto-omaisuus moninkertaistuu ja romahtaa): totea kerran neutraalisti "suositellaan tarkistettavaksi tilinpäätöksestä" ja jatka — ei toistuvaa spekulointia erän luonteesta.
+31. `meta.level` kertoo, ovatko luvut emoyhtiö- vai konsernitasoa. Sano tämä eksplisiittisesti osiossa 2 ja osiossa 15 (esim. "luvut ovat emoyhtiötason virallisesta tilinpäätösdatasta").
+32. ROI/ROE voi olla positiivinen, vaikka EBIT on negatiivinen (rahoitustuotot, tunnusluvun määritelmä). Jos data näyttää tällaista, selitä syy yhdellä lauseella — älä raportoi sitä datavirheenä tai epäjohdonmukaisuutena.
+33. Markkinasignaalien tulkinta: rahoituskierrosten puuttuminen EI ole negatiivinen signaali omarahoitteiselle yhtiölle — se voi kertoa, ettei ulkoista rahoitusta ole tarvittu. Julkiset asiakasvoitot, kilpailutukset, referenssit ja käyttöönotot ovat ensisijaisia positiivisia markkinasignaaleja. Signaalien puuttumisesta saa kirjoittaa korkeintaan yhden neutraalin maininnan — ei toistuvaa "heikentää luotettavuutta" -johtopäätöstä.
+34. EVA-osio: käytä `valuation_engine.eva`-sarjaa kaikilta ennustevuosilta (taulukko usealta vuodelta, ei koskaan vain yhdeltä) ja `key_ratios.eva`-historiaa jos saatavilla. Vertaa yhdessä kappaleessa kumulatiivista diskontattua EVAa oman pääoman kirja-arvoon ja DCF-arvoon: näin lukija näkee, onko ennusteperiodin lisäarvo uskottava suhteessa nykyiseen pääomaan. Jos EVA- ja DCF-menetelmien tulokset poikkeavat, kerro suurin yksittäinen syy — älä selitä eroa monimutkaisuudella.
 
 # OSAKEYHTIÖN OMISTAJA-ARVON LATTIA JA OPTIOARVO
 
@@ -393,7 +404,7 @@ Kaikki analyysiohjeet, säännöt, kynnysarvot ja pakolliset lauseet pätevät s
 
 ## KANSI (→ ylätason `cover`-objekti)
 
-`cover.headline_value` on skenaarioiden odotusarvo (ks. osio 11), joka esitetään aina yhdessä painotetun base case -arvon kanssa. Jos painotettu base case on negatiivinen, `headline_value` on odotusarvo ja `secondary_lines` sisältää "Base case ennen flooria: [arvo]" sekä "Omistaja-arvon lattia: 0 tEUR". Vain jos yhtäkään menetelmää eikä skenaariota voitu muodostaa, `headline_value` = "Ei määritettävissä luotettavasti annetulla datalla" ja `headline_label` jätetään tyhjäksi.
+`cover.base_case_value` on PAKOLLINEN: realistinen base case -arvo (täsmälleen sama luku kuin osion 11 realistinen skenaario ja `machine_readable`-skenaarioiden realistinen arvo; jos base case on negatiivinen, flooriin nostettu arvo), muodossa "260 tEUR". Renderöijä nostaa sen kannen pääluvuksi. `cover.headline_value` on skenaarioiden odotusarvo (ks. osio 11), joka esitetään base casen rinnalla. Jos painotettu base case on negatiivinen, `secondary_lines` sisältää "Base case ennen flooria: [arvo]" sekä "Omistaja-arvon lattia: 0 tEUR". Vain jos yhtäkään menetelmää eikä skenaariota voitu muodostaa, `base_case_value` ja `headline_value` = "Ei määritettävissä luotettavasti annetulla datalla" ja `headline_label` jätetään tyhjäksi.
 
 ## 1. TIIVISTELMÄ
 
@@ -574,6 +585,7 @@ Vastaus on yksi JSON-objekti. Ei tekstiä ennen tai jälkeen, ei koodiaitoja.
   "cover": {
     "headline_label": "Oman pääoman arvo (odotusarvo) | Skenaarioiden odotusarvo | (tyhjä jos ei määritettävissä)",
     "headline_value": "",
+    "base_case_value": "",
     "secondary_lines": []
   },
   "confidence": {
