@@ -57,7 +57,10 @@ export default function App() {
     api.pipelines()
       .then((ps) => {
         setPipelines(ps);
-        const def = ps.find((p) => p.name.startsWith("Valuaatio-pipeline")) ?? ps[0];
+        const def =
+          ps.find((p) => p.name.startsWith("Yhden kirjoittajan")) ??
+          ps.find((p) => p.name.startsWith("Valuaatio-pipeline")) ??
+          ps[0];
         setPipeline(def);
         setSelectedId(def?.stages[0]?.id ?? null);
       })
