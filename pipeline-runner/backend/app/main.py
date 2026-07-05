@@ -49,9 +49,12 @@ _APP_TOKEN = os.getenv("APP_TOKEN", "")
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
 BUILD = "2026-07-05-runs-paused-switch"
 
-# Round-2 refinement writer: Opus follows the maximal-preserve instruction more
-# faithfully than the creative Fable writer used for the round-1 fresh report.
-ROUND2_WRITER_MODEL = "anthropic/claude-opus-4.8"
+# Round-2 refinement writer. Preserve-and-patch is an editing task, not creative
+# writing — Sonnet 5 ($2/$10) does it at 1/2.5 of Opus 4.8's price; round-1
+# authorship stays Fable. Env-overridable for A/B.
+ROUND2_WRITER_MODEL = (
+    os.getenv("ROUND2_WRITER_MODEL") or "anthropic/claude-sonnet-5"
+)
 
 
 # Paths a capped expert key (`exp_`) may reach. DENY-BY-DEFAULT: everything not
@@ -472,6 +475,11 @@ async def round2_run(rid: str, body: Round2In, request: Request):
         # use Opus for the round-2 writer while round 1 stays Fable.
         "round2_writer_model": ROUND2_WRITER_MODEL,
     })
+    # NOTE: round 2 MUST re-run stage 1 (from_order=1): the enrichment stage is
+    # where clarifications get folded in (1_enrichment.txt KIERROS 2 -KURI) —
+    # the writer prompt has no {{clarifications}} of its own, it consumes the
+    # corrected enrichment. The round-2 stage 1 is maximal-preserve + targeted
+    # search, so it's cheap (~$0.15), not a full re-research.
     _start_bg(new_rid, from_order=1)
     return {"run_id": new_rid, "parent_run_id": rid}
 
