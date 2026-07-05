@@ -169,6 +169,13 @@ def clone_run(parent_id, params=None):
     return rid
 
 
+def count_children(parent_id):
+    row = db.query_one(
+        "SELECT COUNT(*) AS c FROM runs WHERE parent_run_id=?", (parent_id,)
+    )
+    return int((row or {}).get("c") or 0)
+
+
 def set_run_status(rid, status):
     db.execute("UPDATE runs SET status=? WHERE id=?", (status, rid))
 

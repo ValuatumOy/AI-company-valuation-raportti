@@ -448,6 +448,14 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     reshape the locked business thesis and the scenarios."""
     _check_not_paused()
     parent = _require_run_access(rid, request)
+    # Round-2 is credit-free, so cap refinements per report — otherwise one key
+    # can spam unlimited Opus-priced full-report rewrites ($6-runs incident).
+    max_r2 = int(os.getenv("ROUND2_MAX_PER_RUN") or 2)
+    if store.count_children(rid) >= max_r2:
+        raise HTTPException(
+            429, f"Tarkennuskierrosten enimmäismäärä ({max_r2}) on jo käytetty "
+                 "tälle raportille."
+        )
     # Maximal-preserve: hand round 2 the round-1 enrichment + assembled report so
     # it refines (keep the good, apply the fix) instead of regenerating blind.
     prev_enrichment = next(

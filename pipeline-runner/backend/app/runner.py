@@ -15,10 +15,11 @@ from fetchers.company_data import fetch_company_data
 
 
 def _spend_cap_exceeded(rid):
-    """Optional hard ceiling on OpenRouter spend (env VALU_RUN_USD_CAP /
-    VALU_DAILY_USD_CAP, both default off). Checked before each paid stage."""
-    run_cap = float(os.getenv("VALU_RUN_USD_CAP") or 0)
-    day_cap = float(os.getenv("VALU_DAILY_USD_CAP") or 0)
+    """Hard ceiling on OpenRouter spend (env VALU_RUN_USD_CAP /
+    VALU_DAILY_USD_CAP). Checked before each paid stage. DEFAULTS ON since
+    2026-07-05 ($6+ runs incident) — set env to 0 to explicitly disable."""
+    run_cap = float(os.getenv("VALU_RUN_USD_CAP") or 4.0)
+    day_cap = float(os.getenv("VALU_DAILY_USD_CAP") or 25.0)
     if run_cap:
         rc = (store.get_run(rid) or {}).get("total_cost_usd", 0.0) or 0.0
         if rc >= run_cap:
