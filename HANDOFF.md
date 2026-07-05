@@ -1,4 +1,38 @@
-# Handoff — 2026-07-03
+# Handoff — 2026-07-05
+
+## 🚨 PRODUCTION IS PAUSED (cost incident 2026-07-05)
+2-generation runs hit $6+. All report generation is now blocked in prod:
+`openrouter.runs_paused()` defaults to PAUSED whenever APP_TOKEN is set and
+RUNS_PAUSED is unset. **To resume: set `RUNS_PAUSED=0` in Railway** (service
+env vars). Local dev/tests unaffected (no APP_TOKEN).
+
+Why the runs were expensive:
+1. Round-1 single-writer = Fable 5 at **$10/$50 per MTok** (5× Sonnet 5);
+   a whole report ≈ 30k+ completion tokens → $2–3 clean, before reasoning
+   tokens (billed as completion).
+2. Self-heal retry (`runner.run_stages`) re-runs a failed stage with an even
+   larger correction prompt → doubles the stage cost when validators trip.
+3. Round-2 = Opus 4.8 full-report rewrite ($5/$25), prompt carries the whole
+   previous report — and was credit-free with NO count cap.
+4. Gemini 3.1 Pro enrichment goes direct to Google and is recorded as
+   **$0.00** in stage costs — real spend is higher than /api/costs shows.
+
+Limits now live (commit d3748c0):
+- `VALU_RUN_USD_CAP` default **$4/run**, `VALU_DAILY_USD_CAP` default
+  **$25/day** (env 0 = disable). Checked before each paid stage.
+- Round-2 capped at **2 per parent run** (`ROUND2_MAX_PER_RUN`), still
+  credit-free. 429 beyond that.
+
+Open decisions for cost (not made unilaterally):
+- Swap round-1 writer Fable→Sonnet 5 (~80% cheaper, quality tradeoff)?
+- Charge a credit for round-2 instead of/on top of the count cap?
+- Price Gemini enrichment properly (add real prices to `_DIRECT_GOOGLE_MODELS`).
+- Client frontends don't yet show friendly copy for 503 (paused) / 429
+  (round-2 cap) — they surface raw error text.
+
+---
+
+# Previous handoff — 2026-07-03
 
 Backend + client-site work, all pushed to `main` in both repos. No open
 branches, no running dev servers, nothing mid-flight. Read this before
