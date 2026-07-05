@@ -23,12 +23,42 @@ Limits now live (commit d3748c0):
 - Round-2 capped at **2 per parent run** (`ROUND2_MAX_PER_RUN`), still
   credit-free. 429 beyond that.
 
+**2026-07-05 LATER — TRUE root cause found (commit 89323cd):** the $6 runs
+were SINGLE round-1 runs, not round1+round2 pairs. singlewriter.txt's cover
+skeleton never asked for `cover.base_case_value`, which stage6_final HARD-
+requires → 3/3 prod Fable runs failed validation and paid a full ~$2.9
+self-heal retry (run totals exactly 2× stage sums). Fixed: KANSI rewritten
+to renderer contract + field added to skeleton. Also: self-heal retry on
+heavy stages (max_tokens ≥ 40000) now uses Sonnet 5 as editor
+(CORRECTION_WRITER_MODEL). Round-2 writer = Sonnet 5 (ROUND2_WRITER_MODEL,
+commit 402bdfc). Expected: Fable round-1 ≈ $3.1 first-try, round-2 ≈ $0.6.
+NOTE: round-2 MUST re-run stage 1 — that's where clarifications fold in
+(writer prompt has no {{clarifications}}); do not "optimize" it away.
+
+CEO feedback batch (same commit): hard rules 24–34 in singlewriter.txt
+(velkasilta ban, "ei saatavilla lähdedatassa", optioluonteinen explained,
+audited-data tiers, headcount-outlier handling, meta.level stated, ROI-vs-
+EBIT explanation, market-signal reinterpretation, EVA full-series table) +
+enrichment 4b/4c (tender wins as signals, market-size verification) +
+multi-series chart legends in render.py. CEO data-claims verified against
+FAKTAT (run b26b77be): headcount [7,60,60,6,5,6,6,6,5] and inventories
+548→94 are REAL in Profinder source (not our bug — CEO to check the
+statement); po-lainat 246 vs interest_bearing_debt 225 is a genuine source
+inconsistency (bridge uses 225) — question for Valuatum data team;
+meta.level="parent" (emoyhtiö) — consolidated availability = Valuatum
+question; EVA full 10y series EXISTS in engine data (one-year table was a
+writer failure, now rule 34); "velkasilta" came from the literal FAKTAT
+key `valuation_engine.dcf.bridge`.
+
 Open decisions for cost (not made unilaterally):
-- Swap round-1 writer Fable→Sonnet 5 (~80% cheaper, quality tradeoff)?
 - Charge a credit for round-2 instead of/on top of the count cap?
 - Price Gemini enrichment properly (add real prices to `_DIRECT_GOOGLE_MODELS`).
 - Client frontends don't yet show friendly copy for 503 (paused) / 429
   (round-2 cap) — they surface raw error text.
+- Opus 4.8 as single-writer was $1.48 and passed validators first try
+  (run 61305402) — after the base_case_value fix, re-compare Fable ($3.1)
+  vs Opus ($1.5) round-1 quality; CEO-reviewed reports were Fable.
+- Email delivery + notification (CEO's #1) = part of the paid-flow build.
 
 ---
 
