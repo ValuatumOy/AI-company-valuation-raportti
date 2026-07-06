@@ -1074,7 +1074,7 @@ def _cover(report, derived):
     # Lead with one valuation: the realistic base case. Scenario expected value
     # is a scenario-analysis output, not a competing cover valuation.
     hero_val = bcv if bcv not in (None, "") else hv
-    hero_label = ("Realistinen arvo (base case)" if bcv not in (None, "")
+    hero_label = ("Yrityksen arvo (realistinen perusskenaario)" if bcv not in (None, "")
                   else (cover.get("headline_label") or "Arvonmäärityksen tulos"))
     base_num = _to_num(_short(bcv)) if bcv not in (None, "") else None
     exp_num = _to_num(_short(hv)) if hv not in (None, "") else None
@@ -1082,19 +1082,21 @@ def _cover(report, derived):
     zero_floor = base_num is not None and base_num <= 0
     if zero_floor:
         second_block = ('<div class="cv-note" style="margin-top:2px">'
-                        'Realistinen base case ei tue positiivista omistaja-arvoa. '
-                        'Mahdollinen arvo on optio- tai strategista arvoa, joka on '
-                        'kuvattu skenaarioissa eikä esitetä raportin päälukuna.</div>')
+                        'Realistinen perusskenaario ei tue positiivista omistaja-arvoa. '
+                        'Mahdollinen arvo on optio- tai strategista arvoa — arvoa, joka '
+                        'perustuu epävarman tulevaisuuden mahdollisuuden toteutumiseen, '
+                        'ei nykyiseen kassavirtaan. Se kuvataan skenaarioissa eikä '
+                        'esitetä yrityksen arvona.</div>')
     else:
-        note = "Skenaarioiden odotusarvo ja todennäköisyyspainot käsitellään skenaario-osiossa; yllä oleva luku on raportin pääluku."
+        note = "Skenaarioiden odotusarvo ja todennäköisyyspainot käsitellään skenaario-osiossa; yllä oleva luku on yrityksen arvon perusarvio."
         if base_num is not None and exp_num is not None:
             gap = max(1.0, 0.02 * abs(base_num))
             if exp_num > base_num + gap:
                 note = ("Skenaarioanalyysissä optimistinen polku nostaa odotusarvoa; "
-                        "raportin päälukuna säilyy realistinen base case.")
+                        "yrityksen arvona esitetään realistinen perusskenaario.")
             elif exp_num < base_num - gap:
                 note = ("Skenaarioanalyysissä pessimistinen polku laskee odotusarvoa; "
-                        "raportin päälukuna säilyy realistinen base case.")
+                        "yrityksen arvona esitetään realistinen perusskenaario.")
         note_html = f'<div class="cv-note">{_esc(note)}</div>' if note else ""
         second_block = note_html
 
@@ -1148,7 +1150,7 @@ def _snapshot(report, derived):
     dq = (report.get("data_quality") or {}).get("class")
     rng = derived.get("range")
     cards = [("Oman pääoman arvo (estimaatti)", cover.get("headline_value")),
-             ("Realistinen base case", cover.get("base_case_value"))]
+             ("Realistinen perusskenaario", cover.get("base_case_value"))]
     if rng:
         cards.append(("Arvostusväli", f'{_fmt(rng["low"])}–{_fmt(rng["high"])} tEUR'))
     cards.append(("Arvion luottamustaso", conf.get("level") or "–"))
