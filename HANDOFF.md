@@ -50,6 +50,31 @@ question; EVA full 10y series EXISTS in engine data (one-year table was a
 writer failure, now rule 34); "velkasilta" came from the literal FAKTAT
 key `valuation_engine.dcf.bridge`.
 
+**2026-07-06 — colleague-list execution (commit 69c194e + client site 4021f36):**
+- Finnish sweep: cover hero label = "Yrityksen arvo (realistinen perusskenaario)",
+  "raportin pääluku" gone from renderer copy, prompt rule 35 enforces
+  perusskenaario terminology; rules 36 (financials = verified truth, no
+  uncertainty analysis on realized data) and 37 (distinct labels for
+  user_input vs clarifications tables); acquisition-direction rule (buyer =
+  strength, target = price anchor) in enrichment + rule 33.
+- Client site ExpertApp: expectation copy before + during generation
+  (10–20 min, round-2 questions coming, 2 rounds included). Old "few
+  minutes" copy corrected.
+- **PEERS BLOCKED (investigated):** no company-search endpoint exists in
+  /rest/modeldata or the 3 Profinder MCP tools; meta.industry is hardcoded
+  None in the exporter, so "same industry" is undeterminable; same root as
+  the FID blocker. Conditional path: manual peer y-tunnus list → financials
+  fetchable TODAY via Profinder MCP statement tools (~100 lines / 3 files,
+  sketch in workflow output). Zero-code first step: JSON-RPC tools/list
+  probe against VALU_MCP_PROFINDER_URL (secret on Railway only) to see if a
+  search tool already exists. Else → Valuatum tech team ask.
+- **Reverse valuation AUDITED, no overclaim:** prompt implements a real
+  crude calc (EV × WACC → required FCF vs achieved) but only when a signal
+  has a sum + WACC; CEO's run had no signals → report correctly wrote
+  "Käänteislaskelmaa ei voida tehdä…". Full Profinder reverse-valuation
+  REST (Joona, trunk) not integrated. Untested branch: signal-with-sum
+  arithmetic — exercise with a test run when one exists.
+
 Open decisions for cost (not made unilaterally):
 - Charge a credit for round-2 instead of/on top of the count cap?
 - Price Gemini enrichment properly (add real prices to `_DIRECT_GOOGLE_MODELS`).
