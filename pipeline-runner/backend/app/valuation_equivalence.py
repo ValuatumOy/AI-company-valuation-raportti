@@ -274,11 +274,11 @@ def _normalize_section10(sections, input_data, value):
             "text": (
                 "EVA-menetelmä päätyy samaan oman pääoman arvoon kuin DCF, mutta "
                 "rakentaa sen eri suunnasta: yhtiöön jo sitoutunut pääoma "
-                "(investoitu pääoma) plus tulevien EVA-erien nykyarvo muodostaa "
-                "yritysarvon, josta vähennetään nettovelka. Toisin sanoen "
-                "Investoitu pääoma + PV(EVA) = Yritysarvo = vapaiden kassavirtojen "
-                "nykyarvo (DCF). Alla oleva täsmäytys osoittaa, että summa päätyy "
-                "samaan arvoon."
+                "(investoitu pääoma) plus tulevien EVA-erien nykyarvo "
+                "(ennustejakso ja terminaali) antaa suoraan saman oman pääoman "
+                "arvon kuin DCF:n vapaiden kassavirtojen nykyarvo. Toisin sanoen "
+                "Investoitu pääoma + PV(EVA) = oman pääoman arvo. Alla oleva "
+                "täsmäytys osoittaa, että summa päätyy samaan arvoon."
             ),
         },
         {

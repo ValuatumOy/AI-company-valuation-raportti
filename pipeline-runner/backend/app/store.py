@@ -328,7 +328,11 @@ def report_readiness(rid):
     if missing:
         issues.append(f"missing report sections: {', '.join(missing)}")
     issues = list(dict.fromkeys(issues))
-    return {"ready": not issues, "issues": issues}
+    # Advisory QA over the assembled report (duplicate blocks, sensitivity
+    # calibration, prose-vs-table figures). Non-blocking: surfaced, never gates.
+    from . import report_qa
+    qa_warnings = report_qa.warnings(rep) if rep else []
+    return {"ready": not issues, "issues": issues, "warnings": qa_warnings}
 
 
 def list_runs(limit=100):

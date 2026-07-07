@@ -1063,7 +1063,7 @@ def _cover(report, derived):
     range_html = ""
     if rng:
         range_html = _range_bar(rng["low"], rng["high"], None,
-                                caption="Skenaariohaarukka", caption_right="osio 11",
+                                caption="Skenaariohaarukka", caption_right="ks. skenaariot",
                                 scale=scale)
     industry = _display_industry(meta)
     meta_bits = [f'Y-tunnus {_esc(meta.get("y_tunnus"))}' if meta.get("y_tunnus") else "",
@@ -1074,7 +1074,7 @@ def _cover(report, derived):
     # Lead with one valuation: the realistic base case. Scenario expected value
     # is a scenario-analysis output, not a competing cover valuation.
     hero_val = bcv if bcv not in (None, "") else hv
-    hero_label = ("Yrityksen arvo (realistinen perusskenaario)" if bcv not in (None, "")
+    hero_label = ("Oman pääoman arvo (realistinen perusskenaario)" if bcv not in (None, "")
                   else (cover.get("headline_label") or "Arvonmäärityksen tulos"))
     base_num = _to_num(_short(bcv)) if bcv not in (None, "") else None
     exp_num = _to_num(_short(hv)) if hv not in (None, "") else None
@@ -1412,6 +1412,41 @@ def _collect_source_urls(report):
     return domain_map
 
 
+# Matches a Finnish "osio"-stem cross-reference + a section number, capturing the
+# prefix/whitespace so only the number is rewritten and case is preserved:
+# "osiossa 9" / "osion 10" / "Osio 17".
+_SECTION_REF_RE = re.compile(r"\b(osio\w*)(\s+)(\d{1,2})\b", re.IGNORECASE)
+
+
+def _resolve_section_refs(sections):
+    """Rewrite hard "osio N" cross-references in prose from the prompt's internal
+    section-id space to the sequential display numbers the reader actually sees.
+    SECTION_ORDER skips id 7 and keeps 17, so every id >= 8 renders one lower —
+    the LLM (which numbers by internal id) otherwise cites "osio 9" for the DCF
+    section that prints as 8. One registry, resolved deterministically.
+
+    # ponytail: single-reference only; a compound "osio 4 ja 11" fixes just the
+    # first number. Under-fixing is safe (the stray number was already wrong);
+    # over-matching a bare trailing number would risk corrupting a real figure.
+    """
+    display_by_id = {str(s.get("id")): i for i, s in enumerate(sections, start=1)
+                     if isinstance(s, dict) and s.get("id") is not None}
+
+    def _repl(m):
+        disp = display_by_id.get(m.group(3))
+        if disp is None or str(disp) == m.group(3):
+            return m.group(0)
+        return f"{m.group(1)}{m.group(2)}{disp}"
+
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        for b in sec.get("blocks") or []:
+            if isinstance(b, dict) and isinstance(b.get("text"), str):
+                b["text"] = _SECTION_REF_RE.sub(_repl, b["text"])
+    return sections
+
+
 def render_html(report):
     if not isinstance(report, dict):
         raise ValueError("report ei ole objekti")
@@ -1421,7 +1456,8 @@ def render_html(report):
         _cover_guard(report, derived)
     except CoverGuardError:
         pass  # non-fatal: render with whatever the cover carries, never 500
-    sections = _ensure_disclaimer(_ordered_sections(report), _brand(report)[1])
+    sections = _resolve_section_refs(
+        _ensure_disclaimer(_ordered_sections(report), _brand(report)[1]))
     # Snapshot page intentionally omitted (design contract — section 1 TIIVISTELMÄ
     # carries the key figures; its derived visuals now live in section 8).
     # Insert one "Liitteet" divider right before the first appendix section
@@ -1567,6 +1603,10 @@ table.tbl.wide th:not(:first-child), table.tbl.wide td:not(:first-child){
 table.tbl thead th{ color:var(--green); font-weight:700; border-bottom:1.5px solid var(--green);
   font-family:var(--head); font-size:7.8pt; text-align:right; }
 table.tbl.wide thead th{ font-size:6.8pt; }
+/* Long column titles in a wide table (fixed layout) must wrap, not run past
+   their cell and collide with the next header ("Oma pääoma ilman pääomalainoja"
+   + "Korolliset velat" overlapped into garbage). Body number cells stay nowrap. */
+table.tbl.wide thead th:not(:first-child){ white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
 table.tbl thead th:first-child{ text-align:left; }
 table.tbl tbody tr:nth-child(even) td{ background:#FAFBFA; }
 a.src{ color:var(--gray); text-decoration:none; border-bottom:1px solid var(--line-strong); }

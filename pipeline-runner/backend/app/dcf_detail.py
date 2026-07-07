@@ -101,6 +101,79 @@ def _bridge_rows(dcf, pv_forecast):
     return rows
 
 
+def _last(xs):
+    for x in reversed(xs or []):
+        if x not in (None, ""):
+            return x
+    return None
+
+
+def _investment_grade(rating):
+    """S&P-style: BBB- and up = investment grade; BB+ and below = speculative."""
+    r = str(rating or "").strip().upper()
+    if not r:
+        return None
+    if r.startswith(("AAA", "AA", "BBB")) or (r.startswith("A") and not r.startswith("B")):
+        return True
+    if r.startswith(("BB", "B", "CCC", "CC", "C", "D")):
+        return False
+    return None
+
+
+def build_wacc_risk_caveat_blocks(input_data):
+    """Transparency caveat when the engine's discount rate does not reflect the
+    company's own credit risk (weak rating / high bankruptcy risk / negative
+    equity paired with a benign cost of debt). Numbers are NOT changed — the WACC
+    is an engine output; this only surfaces the tension the reader should weigh."""
+    ve = (input_data or {}).get("valuation_engine") or {}
+    wp = ve.get("wacc_parameters") or {}
+    cr = (input_data or {}).get("credit_risk") or {}
+    forecast = (input_data or {}).get("forecast") or {}
+    cost_of_debt = wp.get("cost_of_debt_pct")
+    liq = wp.get("liquidity_premium_pct")
+    tgt = wp.get("target_d_to_de_pct")
+    rating = _last(cr.get("rating"))
+    bankruptcy = _first_num(list(reversed(cr.get("company_bankruptcy_risk_pct") or [])))
+    equity_fc = [e for e in (forecast.get("equity_excl_capital_loans") or []) if _is_num(e)]
+    neg_equity = bool(equity_fc) and all(e < 0 for e in equity_fc)
+
+    weak = (_investment_grade(rating) is False) or (_is_num(bankruptcy) and bankruptcy >= 2.0) or neg_equity
+    benign = (_is_num(cost_of_debt) and cost_of_debt <= 6.0) or neg_equity
+    if not (weak and benign):
+        return []
+
+    risk_bits = []
+    if rating:
+        risk_bits.append(f"luottoluokitus {rating}")
+    if _is_num(bankruptcy):
+        risk_bits.append(f"konkurssiriski {_fmt_pct(bankruptcy)}")
+    if neg_equity:
+        risk_bits.append("oma pääoma on negatiivinen koko ennustejakson")
+    param_bits = []
+    if _is_num(cost_of_debt):
+        param_bits.append(f"vieraan pääoman kustannus {_fmt_pct(cost_of_debt)}")
+    if _is_num(liq):
+        param_bits.append(f"likviditeettipreemio {_fmt_pct(liq)}")
+
+    text = (
+        "Diskonttokorko (WACC) tulee valuaatiomoottorista, eikä sitä ole tässä "
+        "raportissa oikaistu yhtiön luottoriskillä. Huomioi jännite: "
+        + (", ".join(risk_bits) or "kohonnut luottoriski")
+        + ", mutta " + ("; ".join(param_bits) or "diskonttokoron komponentit")
+        + " ovat maltilliset tähän riskitasoon nähden"
+    )
+    if _is_num(tgt) and neg_equity:
+        text += (f". Lisäksi tavoitepääomarakenne D/(D+E) {_fmt_pct(tgt)} on "
+                 "ristiriidassa negatiivisen oman pääoman kanssa (kiertokulkuoletus)")
+    text += (". Todellinen tuottovaatimus voisi olla korkeampi, jolloin oman "
+             "pääoman arvo olisi perusskenaariota matalampi.")
+    return [{
+        "type": "callout", "variant": "warning",
+        "title": "Diskonttokoron ja luottoriskin suhde",
+        "text": text,
+    }]
+
+
 def build_dcf_detail_blocks(input_data):
     ve = (input_data or {}).get("valuation_engine") or {}
     dcf = ve.get("dcf") or {}
@@ -166,7 +239,20 @@ def build_dcf_detail_blocks(input_data):
     add("+/- Muut erät", _get_list(dcf, "other_items_fcf"))
     add("Vapaa kassavirta (FCFF)", _first_available_list((dcf, "fcff"), (forecast, "free_cash_flow_to_firm")))
     add("Diskontattu FCFF", discounted, terminal_pv)
-    add("Kumulatiivinen diskontattu FCFF", _get_list(dcf, "cumulative_discounted_fcff"), terminal_pv)
+    # A true forward running sum of the discounted-FCFF row. The engine's
+    # `cumulative_discounted_fcff` field is a reverse remaining-PV series (its
+    # first element is the EV, consumed as such at lines 73/88 and in
+    # sensitivity.py), NOT a cumulative sum — showing it verbatim under a
+    # "Kumulatiivinen" label produced a non-monotonic, mislabeled row. The
+    # running sum ends at PV(ennustejakso); its terminal cell is the EV
+    # (PV-forecast + terminal PV), so the label is now accurate.
+    running, _acc = [], 0.0
+    for v in discounted[:n]:
+        if _is_num(v):
+            _acc += v
+        running.append(_acc)
+    ev = _first_num(_get_list(dcf, "cumulative_discounted_fcff"))
+    add("Kumulatiivinen diskontattu FCFF", running, ev)
 
     if not rows:
         return []
@@ -199,7 +285,11 @@ def build_dcf_detail_blocks(input_data):
                 "muodostuu vapaa kassavirta (FCFF). Diskontattu FCFF on saman "
                 "DCF-taulukon nykyarvorivi, ja ennustejakson diskontattujen FCFF:ien "
                 f"summa on {_fmt_num(pv_forecast)} tEUR. Tekoäly ei laske DCF:ää "
-                "uudelleen, vaan esittää Valuatum-moottorin antamat rivit."
+                "uudelleen, vaan esittää Valuatum-moottorin antamat rivit. "
+                "Miinusmerkillä (−) alkavat rivit vähennetään kassavirrasta; "
+                "tappiollisena vuonna rivi “− Maksetut verot” voi "
+                "silti näyttää positiivista lukua, jolloin kyse on verohyödystä, "
+                "joka kasvattaa vapaata kassavirtaa."
             ),
         },
     ]

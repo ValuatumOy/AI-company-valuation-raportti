@@ -1,0 +1,188 @@
+"""Deterministic QA pass over the FINAL assembled report.
+
+The per-stage validators (validators_seed/*) run on each stage's raw output
+*before* assemble.assemble() injects the deterministic DCF-detail / sensitivity /
+headcount tables, so nothing today reconciles the assembled report the client
+actually receives. This module fills that gap.
+
+It is ADVISORY: `warnings()` returns strings surfaced in report_readiness but
+never blocks a delivery — mirroring the existing advisory prose checks
+(stage3_numbers / stage6_final), which were dress-rehearsed against real reports
+before any of them was allowed to block. Promote a check to a hard gate only
+once it is proven false-positive-free.
+
+Scope note — checks deliberately NOT implemented here:
+  * cumulative-monotonic: a cumulative sum of signed cash flows is legitimately
+    non-monotonic (FCFF turns positive in later years), so a monotonicity test
+    would false-flag the corrected row. The old mislabeled row is fixed at the
+    source (dcf_detail.py), not guarded here.
+  * corrupted-header dictionary: the "Oma pääoma ilmaKnop…" collision is a render
+    artifact (CSS overlap) — the block's `columns` strings are clean in the data,
+    so a data-layer check can't see it. Fixed at the source (render.py CSS).
+"""
+import hashlib
+import json
+import re
+
+_SENSITIVITY_CHART_IDS = ("wacc_growth_sensitivity", "revenue_ebit_sensitivity")
+_SEP = "[    ]"
+_NUM_RE = re.compile(r"[−-]?(?:\d{1,3}(?:" + _SEP + r"\d{3})+|\d+)(?:,\d+)?")
+
+
+def _num(x):
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    if isinstance(x, str):
+        m = _NUM_RE.search(x)
+        if m:
+            t = re.sub(_SEP, "", m.group(0)).replace("−", "-").replace(",", ".")
+            try:
+                return float(t)
+            except ValueError:
+                return None
+    return None
+
+
+def _iter_blocks(rep):
+    for sec in (rep or {}).get("sections") or []:
+        if isinstance(sec, dict):
+            for b in sec.get("blocks") or []:
+                if isinstance(b, dict):
+                    yield sec, b
+
+
+def _headline_base_case(rep):
+    cover = (rep or {}).get("cover") or {}
+    for k in ("base_case_value", "headline_value"):
+        v = _num(cover.get(k))
+        if v is not None:
+            return v
+    return _num(((rep or {}).get("_scenarios") or {}).get("realistic_base_case_teur"))
+
+
+def _duplicate_blocks(rep):
+    """Exact-duplicate substantial blocks (a duplicated table or long paragraph is
+    unambiguous corruption — the class the sensitivity-matrix double-print fell in)."""
+    seen, out = {}, []
+    for sec, b in _iter_blocks(rep):
+        t = b.get("type")
+        if t == "table" and b.get("rows"):
+            key = json.dumps({"c": b.get("columns"), "r": b.get("rows")},
+                             sort_keys=True, ensure_ascii=False)
+        elif t in ("paragraph", "callout") and len(str(b.get("text") or "")) >= 120:
+            key = "text:" + str(b.get("text"))
+        else:
+            continue
+        h = hashlib.sha1(key.encode("utf-8")).hexdigest()
+        if h in seen:
+            out.append(f"duplikaattilohko ({t}) osiossa {sec.get('id')} — sama kuin osiossa {seen[h]}")
+        else:
+            seen[h] = sec.get("id")
+    return out
+
+
+def _sensitivity_calibration(rep):
+    """The sensitivity matrices are calibrated so their center cell reproduces the
+    base-case equity value. Flag drift > 5 % — the exact stale-PDF failure (526 vs
+    669). Construction-guaranteed for the code path, so it only fires on regression."""
+    base = _headline_base_case(rep)
+    if not base:
+        return []
+    out = []
+    for sec, b in _iter_blocks(rep):
+        if b.get("chart_id") not in _SENSITIVITY_CHART_IDS:
+            continue
+        series = [s for s in (b.get("series") or []) if isinstance(s, dict)]
+        if not series:
+            continue
+        vals = series[len(series) // 2].get("values") or []
+        if not vals:
+            continue
+        center = _num(vals[len(vals) // 2])
+        if center is None:
+            continue
+        if abs(center - base) > 0.05 * abs(base):
+            out.append(f"herkkyysmatriisin ({b.get('chart_id')}) keskisolu {round(center)} "
+                       f"poikkeaa yli 5 % perusarvosta {round(base)}")
+    return out
+
+
+def _prose_number_reconciliation(rep, limit=12):
+    """Advisory: prose figures that match no number in any table/chart/machine_readable.
+    Heuristic (rounded/derived figures false-flag), so a review aid, never a gate."""
+    allowed = set()
+
+    def _collect(obj):
+        if isinstance(obj, bool):
+            return
+        if isinstance(obj, (int, float)):
+            allowed.add(float(obj))
+        elif isinstance(obj, str):
+            for m in _NUM_RE.findall(obj):
+                v = _num(m)
+                if v is not None:
+                    allowed.add(v)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                _collect(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                _collect(v)
+
+    _collect((rep or {}).get("machine_readable"))
+    for _sec, b in _iter_blocks(rep):
+        if b.get("type") not in ("paragraph", "callout"):
+            _collect(b)  # tables/charts/key_value contribute the allowed set
+
+    def _match(v):
+        tol = max(1.0, 0.005 * abs(v))
+        return any(abs(v - a) <= tol or abs(abs(v) - abs(a)) <= tol for a in allowed)
+
+    out = []
+    for sec, b in _iter_blocks(rep):
+        if b.get("type") not in ("paragraph", "callout"):
+            continue
+        text = b.get("text")
+        if not isinstance(text, str):
+            continue
+        for m in _NUM_RE.findall(text):
+            v = _num(m)
+            if v is None or (v == int(v) and 1900 <= int(v) <= 2100):
+                continue  # year
+            if abs(v) < 100:
+                continue  # percentages / counts / small assumptions — check euro-magnitude figures only
+            if not _match(v):
+                out.append(f"osio {sec.get('id')}: prosaluku {m.strip()} ei täsmää mihinkään taulukko-/lähdearvoon")
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+def warnings(rep):
+    """Non-blocking QA warnings over the assembled report. Never raises."""
+    try:
+        return (_duplicate_blocks(rep)
+                + _sensitivity_calibration(rep)
+                + _prose_number_reconciliation(rep))
+    except Exception as e:  # QA must never break report delivery
+        return [f"report_qa-tarkistus epäonnistui: {e}"]
+
+
+if __name__ == "__main__":
+    # Self-check: duplicate table caught, calibrated matrix passes, drift caught.
+    dup_tbl = {"type": "table", "columns": ["a"], "rows": [["x", "1"]]}
+    rep = {"cover": {"base_case_value": "669 tEUR"}, "sections": [
+        {"id": "9", "blocks": [dup_tbl]},
+        {"id": "11", "blocks": [dict(dup_tbl), {
+            "type": "chart", "chart_id": "wacc_growth_sensitivity",
+            "series": [{"values": [0, 0, 0]}, {"values": [0, 669, 0]}, {"values": [0, 0, 0]}]}]},
+    ]}
+    w = warnings(rep)
+    assert any("duplikaattilohko" in x for x in w), w
+    assert not any("herkkyysmatriisin" in x for x in w), w  # center 669 == base 669, no drift
+    rep["sections"][1]["blocks"][1]["series"][1]["values"][1] = 526  # break the center cell
+    assert any("herkkyysmatriisin" in x for x in warnings(rep)), "drift not caught"
+    assert warnings({}) == [] and warnings(None) == []  # never crashes on sparse input
+    print("report_qa self-check ok")

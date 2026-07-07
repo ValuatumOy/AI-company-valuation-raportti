@@ -125,6 +125,68 @@ def _revenue_margin_matrix(pv_forecast_base, pv_terminal_base, bridge_adj,
     }
 
 
+def _historical_best_margin(input_data):
+    inc = ((input_data or {}).get("actuals") or {}).get("income_statement") or {}
+    ebit, ns = inc.get("ebit") or [], inc.get("net_sales") or []
+    margins = [100.0 * e / s for e, s in zip(ebit, ns)
+               if _is_num(e) and _is_num(s) and s > 0]
+    return max(margins) if margins else None
+
+
+def build_terminal_margin_range_blocks(input_data):
+    """Show the base-case equity value against an alternative computed at the
+    company's best HISTORICALLY ACHIEVED EBIT margin, so a terminal assumption
+    well above anything the company has reached is presented as a range, not a
+    single point. Approximate: scales only the terminal value by the margin
+    ratio, reusing the engine-calibrated PV split (see module docstring)."""
+    ve = (input_data or {}).get("valuation_engine") or {}
+    dcf = ve.get("dcf") or {}
+    disc = dcf.get("discounted_fcff")
+    cum = dcf.get("cumulative_discounted_fcff")
+    equity_gt = dcf.get("equity_value_before_floor")
+    if not (isinstance(disc, list) and disc and isinstance(cum, list) and cum
+            and _is_num(cum[0]) and _is_num(equity_gt)):
+        return []
+    ebit_pct = ((input_data or {}).get("forecast") or {}).get("ebit_pct")
+    base_margin = (ebit_pct[-1] if isinstance(ebit_pct, list) and ebit_pct
+                   and _is_num(ebit_pct[-1]) else None)
+    alt_margin = _historical_best_margin(input_data)
+    # Only meaningful when the terminal assumption is materially above the best
+    # margin the company has actually achieved (the reviewer's exact concern).
+    if not (_is_num(base_margin) and base_margin > 0 and _is_num(alt_margin)
+            and alt_margin < base_margin - 2.0):
+        return []
+    pv_forecast = sum(x for x in disc if _is_num(x))
+    pv_terminal = cum[0] - pv_forecast
+    bridge_adj = equity_gt - cum[0]
+    alt_equity = max(0.0, pv_forecast + pv_terminal * (alt_margin / base_margin) + bridge_adj)
+    return [
+        {
+            "type": "table",
+            "table_id": "deterministic_terminal_margin_range",
+            "title": "Oman pääoman arvo vaihtoehtoisella terminaali-EBIT-marginaalilla",
+            "unit": "tEUR",
+            "columns": ["Terminaali-EBIT-%", "Oman pääoman arvo"],
+            "rows": [
+                [f"{_fmt_pct(base_margin)} (perusskenaario)", _fmt_teur(equity_gt)],
+                [f"{_fmt_pct(alt_margin)} (paras toteutunut)", _fmt_teur(alt_equity)],
+            ],
+        },
+        {
+            "type": "paragraph",
+            "text": (
+                f"Perusskenaario olettaa terminaalivuoden EBIT-marginaaliksi "
+                f"{_fmt_pct(base_margin)}. Jos terminaalimarginaali jää yhtiön "
+                f"parhaaseen toteutuneeseen tasoon {_fmt_pct(alt_margin)}, DCF:n "
+                f"oman pääoman arvo on likimäärin {_fmt_teur(alt_equity)} — arvon "
+                f"herkkyys terminaalioletukselle on siis suuri. Laskelma on "
+                f"likimääräinen: se skaalaa vain terminaaliarvon marginaalin "
+                f"suhteessa eikä muuta ennustejakson kassavirtoja."
+            ),
+        },
+    ]
+
+
 def build_sensitivity_blocks(input_data):
     """Returns a list of ready-to-render `chart` blocks (possibly empty if the
     given data doesn't support the calculation)."""

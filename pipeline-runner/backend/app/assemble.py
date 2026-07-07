@@ -51,16 +51,32 @@ def merge_sections(outputs_by_order):
     return [by_id[k] for k in sorted(by_id, key=_order_index)]
 
 
+_SENSITIVITY_CHART_IDS = ("wacc_growth_sensitivity", "revenue_ebit_sensitivity")
+
+
+def _is_sensitivity_block(b):
+    if not isinstance(b, dict):
+        return False
+    if b.get("chart_id") in _SENSITIVITY_CHART_IDS:
+        return True
+    # An LLM-emitted sensitivity matrix in the herkkyys section: same shape,
+    # different id. The hard prompt rule forbids these, but strip defensively so
+    # they never render duplicated alongside the deterministic ones.
+    return b.get("type") == "chart" and b.get("chart_type") == "heatmap_or_matrix"
+
+
 def _inject_sensitivity_blocks(sections, input_data):
-    """Append the deterministic WACC×growth and revenue×EBIT-margin matrices
-    to section 11 — computed in code (see app/sensitivity.py), never by the
-    LLM, per the hard rule against inventing sensitivity matrices."""
+    """Replace any sensitivity matrices in section 11 with the deterministic
+    WACC×growth and revenue×EBIT-margin matrices — computed in code (see
+    app/sensitivity.py), never by the LLM. Stripping first makes the injection
+    idempotent and prevents the duplicated-matrix bug (unlike a blind append)."""
     blocks = sensitivity.build_sensitivity_blocks(input_data)
     if not blocks:
         return sections
     for sec in sections:
         if isinstance(sec, dict) and str(sec.get("id")) == _SENSITIVITY_SECTION_ID:
-            sec["blocks"] = list(sec.get("blocks") or []) + blocks
+            kept = [b for b in (sec.get("blocks") or []) if not _is_sensitivity_block(b)]
+            sec["blocks"] = kept + blocks
             break
     return sections
 
@@ -151,6 +167,26 @@ def _inject_dcf_detail_blocks(sections, input_data):
     return sections
 
 
+def _inject_dcf_caveats(sections, input_data):
+    """Append the deterministic methodology caveats to the DCF section: a WACC-vs-
+    credit-risk transparency note and an alternative terminal-EBIT-margin value
+    range. Both are computed in code; neither changes any headline number."""
+    extra = (dcf_detail.build_wacc_risk_caveat_blocks(input_data)
+             + sensitivity.build_terminal_margin_range_blocks(input_data))
+    if not extra:
+        return sections
+    for sec in sections:
+        if not (isinstance(sec, dict) and str(sec.get("id")) == _DCF_SECTION_ID):
+            continue
+        current = list(sec.get("blocks") or [])
+        if any(isinstance(b, dict) and b.get("table_id") == "deterministic_terminal_margin_range"
+               for b in current):
+            return sections
+        sec["blocks"] = current + extra
+        break
+    return sections
+
+
 def _inject_headcount_efficiency_blocks(sections, input_data):
     """Append the deterministic per-employee ratio table to section 5 — computed
     in code (see app/headcount_efficiency.py), never by the LLM."""
@@ -190,6 +226,7 @@ def assemble(run):
 
     sections = merge_sections(outputs)
     _inject_dcf_detail_blocks(sections, outputs.get(0))
+    _inject_dcf_caveats(sections, outputs.get(0))
     _inject_sensitivity_blocks(sections, outputs.get(0))
     _inject_headcount_efficiency_blocks(sections, outputs.get(0))
     wrapper["sections"] = sections

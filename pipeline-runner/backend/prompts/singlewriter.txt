@@ -127,12 +127,14 @@ Säännöt todennäköisyyksille:
 3. Todennäköisyyksien on summauduttava sataan prosenttiin.
 4. Älä esitä todennäköisyyttä tarkempana kuin 5 prosenttiyksikön välein — tarkkuus olisi näennäistä.
 5. Sano suoraan, että onnistumistodennäköisyyden arviointi on epävarmin osa raporttia ja että siksi oletukset ja riskit on eritelty läpinäkyvästi.
+6. Jos `[input_data].credit_risk` sisältää vuotuisen konkurssi-/maksukyvyttömyystodennäköisyyden, muunna se kumulatiiviseksi ennustehorisontin n vuodelle (kumulatiivinen = 1 − (1 − vuotuinen)^n) ja vertaa pessimistisen skenaarion todennäköisyyttä siihen: näytä vuotuinen luku, horisontti n ja kumulatiivinen luku. Jos pessimistinen todennäköisyys poikkeaa olennaisesti kumulatiivisesta konkurssitodennäköisyydestä, selitä miksi (skenaario kattaa muutakin kuin virallisen konkurssin — esim. rahoituksen katkeamisen tai käänteen epäonnistumisen ilman konkurssia). Älä pakota pessimististä todennäköisyyttä kumulatiiviseen lukuun, vaan täsmäytä ja selitä.
 
 ## Odotusarvo raportin lukuna
 
 * Odotusarvo esitetään tiivistelmässä yhtenä lukuna skenaariotaulukon rinnalla, ei sen sijaan.
 * Odotusarvoa ei koskaan esitetä ilman näkyvää skenaariotaulukkoa ja todennäköisyyksiä. Pelkkä odotusarvoluku ilman skenaarioita on kielletty.
 * Jos painotettu base case on negatiivinen mutta odotusarvo on positiivinen optimistisen skenaarion vuoksi, sano tämä suoraan: arvo syntyy käänneoptiosta, ei nykyliiketoiminnasta.
+* Jos yksittäinen skenaario tuottaa yli 70 % odotusarvosta, sano se eksplisiittisesti: esitä kyseinen kontribuutio erillisenä optioluonteisena arvona odotusarvon RINNALLA (ei siihen sulautettuna) ja totea, että odotusarvo nojaa yhteen skenaarioon ja luottamustaso on siksi matalampi.
 
 # LUOTTAMUSTASON MÄÄRITYS
 
@@ -366,6 +368,8 @@ Pisteet rajataan välille 0–100. **Hyväksymisraja on 40 pistettä.** Alle jä
 * Painot = hyväksyttyjen menetelmien pisteet normalisoituna 100 prosenttiin.
 * Painotettu arvo muodostetaan aina, kun vähintään yksi menetelmä on hyväksytty ja sillä on arvo.
 * Jos hyväksyttyjä menetelmiä on vain yksi, sen paino on 100 % ja raportissa on sanottava, ettei painotus hajauta riskiä.
+* Jos ainoat hyväksytyt menetelmät ovat DCF ja EVA ja ne nojaavat samaan ennustepolkuun ja WACCiin, ne ovat ekvivalentteja: EVA on täsmäytysnäkökulma painolla 0 ja painotettu arvo = DCF:n arvo. ÄLÄ esitä missään — tiivistelmä mukaan lukien — DCF:lle ja EVA:lle erillisiä painoprosentteja (esim. "DCF 55 % / EVA 45 %") tai niiden välistä painotettua keskiarvoa.
+* Termistö pidetään erillään: "yritysarvo (EV)" = velaton yritysarvo; "oman pääoman arvo" = omistajalle jäävä arvo (EV − nettovelka); "skenaarioiden odotusarvo" = todennäköisyyspainotettu skenaariotulos. Älä käytä näitä ristiin äläkä kutsu oman pääoman arvoa "yrityksen arvoksi" tai "yritysarvoksi".
 * Jos painotettu arvo on negatiivinen, sovella omistaja-arvon lattiakäsittelyä.
 * Pisteet, painot ja perustelut dokumentoidaan aina osion 7 taulukossa. Painotettua arvoa ei koskaan esitetä ilman näkyvää pisteytystä.
 * Painotetun arvon yhteydessä kerrotaan, perustuuko se toimitettuihin painoihin (vaihe A) vai tekoälyn pisteytykseen (vaiheet B–D).
@@ -415,7 +419,7 @@ Kaikki analyysiohjeet, säännöt, kynnysarvot ja pakolliset lauseet pätevät s
 
 ### Avainluvut
 
-`metric_cards`-lohko. Sisällytä keskeiset luvut korteiksi (esim. oman pääoman arvo / base case ennen flooria, odotusarvo, yritysarvo, luottamustaso). Jos painotettu arvo on positiivinen, ensimmäinen kortti on "Oman pääoman arvo (painotettu)"; jos negatiivinen, käytä "Laskennallinen base case ennen flooria" ja erillinen kortti "Omistaja-arvon lattia: 0 tEUR". Lisää markkinasignaalikortti, jos signaali löytyi tai on ilmoitettu.
+`metric_cards`-lohko. Sisällytä keskeiset luvut korteiksi (esim. oman pääoman arvo / base case ennen flooria sekä skenaariohaarukka). Jos painotettu arvo on positiivinen, ensimmäinen kortti on "Oman pääoman arvo"; jos negatiivinen, käytä "Laskennallinen base case ennen flooria" ja erillinen kortti "Omistaja-arvon lattia: 0 tEUR". ÄLÄ lisää "Skenaarioiden odotusarvo"- tai "Yritysarvo (EV)" -korttia avainlukujen joukkoon: odotusarvo mainitaan tekstissä skenaarioanalyysin tuloksena ja yritysarvo (EV) esitetään DCF-osiossa — kumpikaan ei ole avainlukukortti eikä kannen pääluku. Lisää markkinasignaalikortti, jos signaali löytyi tai on ilmoitettu.
 
 ### Yhteenveto
 
@@ -510,7 +514,7 @@ Otsikko valitaan pisteytyksen perusteella (EVA, EBIT-% vs P/Sales, EV/EBITDA, P/
 ### Herkkyysanalyysi — jos annettu: `table` tai `chart` `chart_type:"heatmap_or_matrix"` (`x_axis`, `y_axis`, `values`) + 1–2 `paragraph`. Jos ei: `chart` `status:"not_available"` tai `paragraph` "Herkkyysmatriisia ei voida muodostaa…".
 ### Skenaariot, todennäköisyydet ja odotusarvo — `heading` + `table` (Skenaario / Keskeiset oletukset / Omistaja-arvo (tEUR, floorattu) / Todennäköisyys), kolme skenaariota. Sitten `paragraph`: odotusarvo Σ(p×arvo) auki, valittu profiili + miksi, maininta että todennäköisyydet ovat muokattavia oletusarvoja. Optimistisen oletukset `table` (Oletus / Arvo / Lähde), jokainen markkinaluku lähteellä tai "käyttäjän muokattava oletus". Erittele `paragraph`-lohkoissa: mitä onnistuminen vaatii + riskipolku. Jos base case negatiivinen mutta odotusarvo positiivinen → sano että arvo syntyy käänneoptiosta.
 - BASE CASEN KURI: realistinen skenaario nojaa toteutuneeseen tilinpäätöshistoriaan ja ennusteeseen — tasainen historia pysyy tasaisena. Käännekohdat ja uudet linjat nostavat vain optimistista skenaariota ja sen todennäköisyyttä, eivät base casea, ellei niistä ole jo toteutunutta liikevaihtonäyttöä.
-- OPTIMISTISEN ARVON LÄPINÄKYVÄ KETJU: kun optimistinen skenaario nojaa uuteen liiketoimintalinjaan tai laajentuneeseen markkinaan, johda arvo NÄKYVÄNÄ ketjuna, ei pyöreänä kertoimena: markkinan koko (`enrichment.business_lines[].optimistic_market_teur`/SAM) → markkinaosuus-% (`optimistic_share_pct`) → optimistinen liikevaihto/v → tavoiteltava EBIT-% → tulos → arvo (tulos × (1 − vero) / WACC). Näytä jokainen kerroin optimistisen oletukset -taulukossa omana rivinään, kukin lähteellä tai "käyttäjän muokattava oletus". Jos `enrichment.structural_inflections` sisältää markkinaa laajentavan käännekohdan (poistunut rajoite, eksogeeninen murros), optimistinen SAA käyttää laajentunutta markkinaa lähtökohtana — nimeä käännekohta oletuksissa. Miljoonaluokan optimistinen arvo on sallittu vain kun tämä markkinaosuus×koko-ketju on näkyvä ja merkitty; ilman ketjua se hylätään.
+- OPTIMISTISEN ARVON LÄPINÄKYVÄ KETJU: kun optimistinen skenaario nojaa uuteen liiketoimintalinjaan tai laajentuneeseen markkinaan, johda arvo NÄKYVÄNÄ ketjuna, ei pyöreänä kertoimena: markkinan koko (`enrichment.business_lines[].optimistic_market_teur`/SAM) → markkinaosuus-% (`optimistic_share_pct`) → optimistinen liikevaihto/v → tavoiteltava EBIT-% → tulos → NOPLAT (tulos × (1 − vero)) → jatkuvan arvon arvo toteutumisvuonna n (NOPLAT / WACC) → diskonttaa nykyhetkeen jakamalla luvulla (1 + WACC)^n → vähennä toteutumisvuoden n ENNUSTETTU nettovelka (älä käytä viimeisintä toteutunutta nettovelkaa, jos ennuste kasvattaa velkaa) sekä ennustejakson välivuosien negatiivisten vapaiden kassavirtojen kattamiseen tarvittava rahoitus → erittele tai vähennä mahdollinen osakeannin laimennusvaikutus → optimistinen omistaja-arvo. ÄLÄ esitä optimistista arvoa diskonttaamattomana ikuisuusarvona. Näytä jokainen näistä (markkinaosuus×koko, EBIT-%, toteutumisvuosi n, jatkuvan arvon arvo, diskonttaustekijä, ennustettu nettovelka vuonna n, välivuosien rahoitustarve, laimennus) omana rivinään optimistisen oletukset -taulukossa, kukin lähteellä tai "käyttäjän muokattava oletus". Jos `enrichment.structural_inflections` sisältää markkinaa laajentavan käännekohdan (poistunut rajoite, eksogeeninen murros), optimistinen SAA käyttää laajentunutta markkinaa lähtökohtana — nimeä käännekohta oletuksissa. Miljoonaluokan optimistinen arvo on sallittu vain kun tämä markkinaosuus×koko-ketju on näkyvä ja merkitty; ilman ketjua se hylätään.
 
 ## 12. ARVON AJURIT
 

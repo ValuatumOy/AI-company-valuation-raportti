@@ -161,6 +161,21 @@ def test_appendix_divider_appears_once_before_appendix_sections():
     assert html.index(marker) < html.index(">LÄHTEET</h2>")
 
 
+def test_section_refs_remapped_from_internal_id_to_display_number():
+    # The LLM writes cross-refs in internal-id space; SECTION_ORDER skips id 7,
+    # so id 9 (DCF) must render as "osio 8", id 17 (liite) as "osio 16", while
+    # ids 1-6 are unchanged.
+    from app.runner import SECTION_ORDER
+    sections = [{"id": sid, "title": f"T{sid}", "blocks": []} for sid in SECTION_ORDER]
+    sections[0]["blocks"] = [
+        {"type": "paragraph", "text": "DCF-erittely osiossa 9 ja liite osiossa 17."},
+        {"type": "paragraph", "text": "Historia esitetään osiossa 5."},
+    ]
+    render._resolve_section_refs(sections)
+    assert sections[0]["blocks"][0]["text"] == "DCF-erittely osiossa 8 ja liite osiossa 16."
+    assert sections[0]["blocks"][1]["text"] == "Historia esitetään osiossa 5."
+
+
 # --------------------------------------------------------------- assembler
 def test_assembler_orders_sections_without_section_7():
     run = {"results": [
@@ -282,6 +297,75 @@ def test_assemble_injects_sensitivity_blocks_into_section_11():
     assert types == ["heading", "chart", "chart"]
 
 
+def test_assemble_replaces_existing_sensitivity_matrix_without_duplicating():
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},
+        {"order": 4, "status": "ok", "parsed_json": {"sections": [
+            {"id": "11", "title": "HERKKYYS", "blocks": [
+                {"type": "heading", "text": "x"},
+                {"type": "chart", "chart_type": "heatmap_or_matrix",
+                 "chart_id": "wacc_growth_sensitivity", "series": []}]}]}},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"}]}},
+    ]}
+    rep = assemble.assemble(run)
+    sec11 = next(s for s in rep["sections"] if s["id"] == "11")
+    ids = [b.get("chart_id") for b in sec11["blocks"] if b.get("type") == "chart"]
+    assert ids.count("wacc_growth_sensitivity") == 1  # pre-existing copy stripped
+    assert ids.count("revenue_ebit_sensitivity") == 1
+    assert [b["type"] for b in sec11["blocks"]] == ["heading", "chart", "chart"]
+
+
+def test_report_qa_flags_duplicate_block_and_sensitivity_drift_advisory():
+    from app import report_qa
+    tbl = {"type": "table", "columns": ["a", "b"], "rows": [["x", "1"], ["y", "2"]]}
+    rep = {"cover": {"base_case_value": "669 tEUR"}, "sections": [
+        {"id": "9", "blocks": [tbl]},
+        {"id": "11", "blocks": [dict(tbl), {
+            "type": "chart", "chart_id": "wacc_growth_sensitivity",
+            "series": [{"values": [1, 2, 3]}, {"values": [4, 526, 6]}, {"values": [7, 8, 9]}]}]},
+    ]}
+    w = report_qa.warnings(rep)
+    assert any("duplikaattilohko" in x for x in w)
+    assert any("herkkyysmatriisin" in x for x in w)  # center 526 vs base 669 -> drift
+    assert report_qa.warnings({}) == [] and report_qa.warnings(None) == []  # never crashes
+
+
+def test_wacc_risk_caveat_fires_on_weak_credit_and_negative_equity_but_not_healthy():
+    weak = {
+        "valuation_engine": {"wacc_parameters": {
+            "cost_of_debt_pct": 5.0, "liquidity_premium_pct": 1.0, "target_d_to_de_pct": 30.0}},
+        "credit_risk": {"rating": ["B"], "company_bankruptcy_risk_pct": [4.53]},
+        "forecast": {"equity_excl_capital_loans": [-208.0, -598.0, -1288.0]},
+    }
+    blocks = dcf_detail.build_wacc_risk_caveat_blocks(weak)
+    assert blocks and blocks[0]["variant"] == "warning"
+    assert "luottoluokitus B" in blocks[0]["text"]
+    healthy = {
+        "valuation_engine": {"wacc_parameters": {"cost_of_debt_pct": 4.0}},
+        "credit_risk": {"rating": ["A"], "company_bankruptcy_risk_pct": [0.3]},
+        "forecast": {"equity_excl_capital_loans": [500.0, 600.0]},
+    }
+    assert dcf_detail.build_wacc_risk_caveat_blocks(healthy) == []
+    assert dcf_detail.build_wacc_risk_caveat_blocks({}) == []
+
+
+def test_terminal_margin_range_shows_alt_at_best_historical_margin():
+    idata = {
+        "valuation_engine": {"dcf": {
+            "discounted_fcff": [-112.0], "cumulative_discounted_fcff": [1633.0],
+            "equity_value_before_floor": 669.0}},
+        "forecast": {"ebit_pct": [10.0, 23.3]},
+        "actuals": {"income_statement": {"ebit": [354.0, -100.0], "net_sales": [3770.0, 1000.0]}},
+    }
+    blocks = sensitivity.build_terminal_margin_range_blocks(idata)
+    tbl = next(b for b in blocks if b.get("table_id") == "deterministic_terminal_margin_range")
+    assert len(tbl["rows"]) == 2
+    assert "23,3" in tbl["rows"][0][0] and "9,4" in tbl["rows"][1][0]
+    assert sensitivity.build_terminal_margin_range_blocks({}) == []  # no data -> no block
+
+
 def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
     blocks = dcf_detail.build_dcf_detail_blocks(_engine_input_data())
     table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
@@ -302,6 +386,19 @@ def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
     assert "diskontattu FCFF" in callout["title"]
     assert "EBITistä" in callout["text"]
     assert "nykyarvorivi" in callout["text"]
+
+
+def test_cumulative_discounted_fcff_row_is_a_true_forward_running_sum():
+    blocks = dcf_detail.build_dcf_detail_blocks(_engine_input_data())
+    table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
+    _p = lambda s: int(str(s).replace(" ", "").replace("−", "-"))
+    disc = next(r for r in table["rows"] if r[0] == "Diskontattu FCFF")
+    cum = next(r for r in table["rows"] if r[0] == "Kumulatiivinen diskontattu FCFF")
+    run = 0.0
+    for d_cell, c_cell in zip(disc[1:-1], cum[1:-1]):  # forecast cols (drop label + TRM)
+        run += _p(d_cell)
+        assert abs(run - _p(c_cell)) <= 1  # each cumulative cell = running sum so far
+    assert cum[-1] == "400"  # terminal col = EV (engine cumulative_discounted_fcff[0])
 
 
 def test_dcf_detail_surfaces_partial_dcf_but_stays_silent_when_absent():
