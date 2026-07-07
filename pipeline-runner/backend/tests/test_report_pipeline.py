@@ -1264,6 +1264,34 @@ def test_expert_key_is_capped_and_scoped(monkeypatch):
     assert me["remaining"] == 0 and me["generations_limit"] == 1
 
 
+def test_public_company_search_dedupes_and_needs_no_auth(monkeypatch):
+    from starlette.testclient import TestClient
+    from app import main
+
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+
+    async def fake_search(q):
+        return [
+            {"fid": 1, "company_name": "Testi Oy", "company_code": "184362",
+             "industry_text": "Software", "industry_code": None, "industry_id": None,
+             "analyst_name": "Analyst A"},
+            {"fid": 2, "company_name": "Testi Oy", "company_code": "184362",
+             "industry_text": "Software", "industry_code": None, "industry_id": None,
+             "analyst_name": "Profinder"},  # same company, preferred model
+            {"fid": 3, "company_name": "Testi Group Oy", "company_code": "184362K",
+             "industry_text": "Software", "industry_code": None, "industry_id": None,
+             "analyst_name": "Analyst B"},  # different (K-suffix) company
+        ]
+
+    monkeypatch.setattr(main.valuatum, "search_company", fake_search)
+    c = TestClient(main.app)  # no Authorization header
+    r = c.get("/api/public/company-search?q=Testi")
+    assert r.status_code == 200
+    out = r.json()
+    assert len(out) == 2  # one row per distinct company_code
+    assert out[0]["fid"] == 2  # Profinder model preferred over the plain one
+
+
 def test_public_checkout_generate_mints_key_and_starts_run(monkeypatch):
     from starlette.testclient import TestClient
     from app import main, seed, store

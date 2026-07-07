@@ -96,6 +96,9 @@ async def auth_gate(request, call_next):
         # called by the client site right after a verified Stripe payment.
         if path == "/api/public/checkout-generate" and request.method == "POST":
             return await call_next(request)
+        # GET /api/public/company-search: public homepage search, no invite key.
+        if path == "/api/public/company-search" and request.method == "GET":
+            return await call_next(request)
         if path.startswith("/api/") and path != "/api/health":
             from fastapi.responses import JSONResponse
 
@@ -306,6 +309,41 @@ async def company_search(q: str):
         raise HTTPException(e.response.status_code, e.response.text[:500])
     except RuntimeError as e:
         raise HTTPException(500, str(e))
+
+
+@app.get("/api/public/company-search")
+async def company_search_public(q: str, request: Request):
+    """Public, unauthenticated version of /api/company-search for the client
+    site's homepage search (that page has no invite key to send). One row per
+    company, not per followed model — same disambiguation heuristic as the
+    checkout-generate endpoint, since the marketing site just needs "does this
+    company exist in Valuatum", not the model picker /testi has."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else "?")
+    if not _order_rate_ok(ip):
+        raise HTTPException(429, "liian monta hakua — yritä myöhemmin uudelleen")
+    try:
+        candidates = await valuatum.search_company(q)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, e.response.text[:500])
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+    by_company: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for c in candidates:
+        code = c.get("company_code") or str(c.get("fid"))
+        if code not in by_company:
+            order.append(code)
+        by_company.setdefault(code, []).append(c)
+    out = []
+    for code in order:
+        best = _pick_checkout_candidate(by_company[code])
+        if best:
+            out.append(best)
+    return out
 
 
 # ---- website orders (public intake; operator fulfils in this UI) -------------
