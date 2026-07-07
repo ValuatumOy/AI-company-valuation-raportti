@@ -755,3 +755,15 @@ Confirm the Vercel deploy picked up nettisivut `f480342` and the live
 either promote the stage-5 grounding validator to blocking, or set the
 spend caps — both are one-sitting jobs and both were pushed to "next
 session" today.
+
+## 2026-07-07 (cont., other machine) — Resend email delivery activated
+
+`RESEND_API_KEY` and `REPORT_EMAIL_FROM=Valuatum <reports@valuatum.com>`
+set in Railway (`valu-pipeline` prod service), confirmed via `railway
+variables`. Redeploy confirmed healthy (`build:
+2026-07-07-industry-metadata`). No code changes — `app/email_delivery.py`
+was already built and dormant; this just turns it on. **Not verified
+live** — no report run has actually gone through Resend yet, so PDF
+attachment delivery is unconfirmed end-to-end. Next: run one real
+`/testi` generation with `delivery_email` set (ask before running, per
+the rule above) and confirm the email arrives with the PDF attached.
