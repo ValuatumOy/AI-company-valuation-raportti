@@ -66,6 +66,10 @@ def touch_pipeline(pid):
     db.execute("UPDATE pipelines SET updated_at=? WHERE id=?", (_now(), pid))
 
 
+def rename_pipeline(pid, name):
+    db.execute("UPDATE pipelines SET name=?, updated_at=? WHERE id=?", (name, _now(), pid))
+
+
 def add_stage(pid, s: dict):
     sid = _uuid()
     db.execute(
@@ -329,7 +333,7 @@ def report_readiness(rid):
 
 def list_runs(limit=100):
     rows = db.query(
-        "SELECT id,pipeline_id,input_data,status,total_cost_usd,created_at "
+        "SELECT id,pipeline_id,input_data,status,total_cost_usd,created_at,params "
         "FROM runs ORDER BY created_at DESC LIMIT ?",
         (limit,),
     )
@@ -339,6 +343,13 @@ def list_runs(limit=100):
         company = None
         if isinstance(inp, dict):
             company = (inp.get("meta") or {}).get("company_name")
+        if not company:
+            # Self-serve runs (expert/checkout) are created with input_data=None
+            # — stage 0 fills it in later, but only inside stage_results, never
+            # back onto runs.input_data. The company name lives in params instead.
+            params = db.jload(r.get("params"))
+            if isinstance(params, dict):
+                company = params.get("company_name")
         out.append({
             "id": r["id"],
             "pipeline_id": r["pipeline_id"],

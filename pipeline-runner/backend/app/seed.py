@@ -10,13 +10,17 @@ from .models import DATA_FETCHER_MODEL
 
 _SEED_DIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
 _PROMPT_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts")
-DEFAULT_PIPELINE_NAME = "Valuaatio-pipeline (oletus)"
+# The 6-stage pipeline was the original default; the single-writer mode below
+# is now what every real flow (expert self-serve, paid checkout) actually
+# uses (see _default_pipeline_id in main.py) — this one is kept around for
+# comparison/reference only, not run in production anymore.
+DEFAULT_PIPELINE_NAME = "Valuaatio-pipeline (6-vaihe, ei käytössä)"
 # Second mode: a cheap/reliable research+writer split. Stage 0 (FAKTAT) is
 # shared, stage 1 runs grounded web enrichment, and stage 2 is one strong writer
 # with web search off. assemble() still injects the deterministic
-# DCF/sensitivity/headcount blocks from the data. The operator picks the mode in
-# the UI.
-SINGLE_WRITER_PIPELINE_NAME = "Yhden kirjoittajan raportti (koeajo)"
+# DCF/sensitivity/headcount blocks from the data. This is the real default —
+# every self-serve/paid flow generates through this pipeline.
+SINGLE_WRITER_PIPELINE_NAME = "Yhden kirjoittajan raportti (oletus)"
 
 PLACEHOLDER_PREFIX = "[[ LIITÄ VAIHEEN "
 

@@ -214,6 +214,14 @@ def get_pipeline(pid: str):
     return p
 
 
+@app.patch("/api/pipelines/{pid}")
+def rename_pipeline(pid: str, body: PipelineIn):
+    if not store.get_pipeline(pid):
+        raise HTTPException(404, "pipeline not found")
+    store.rename_pipeline(pid, body.name)
+    return store.get_pipeline(pid)
+
+
 @app.post("/api/pipelines/{pid}/stages")
 def post_stage(pid: str, body: StageIn):
     if not store.get_pipeline(pid):
