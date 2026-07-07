@@ -6,6 +6,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -64,6 +65,7 @@ ROUND2_WRITER_MODEL = (
 _EXPERT_GET = re.compile(
     r"^/api/(pipelines(/[^/]+)?"
     r"|companies"
+    r"|company-search"
     r"|runs/[^/]+(/readiness|/report\.(html|pdf)|/stream)?"
     r"|expert/me)$"
 )
@@ -285,6 +287,22 @@ def del_company(fid: int):
     return {"ok": True}
 
 
+@app.get("/api/company-search")
+async def company_search(q: str):
+    """Resolve a company name or y-tunnus to Valuatum FID(s) so self-serve
+    generation isn't limited to the operator's pre-fetched company list (the
+    long-standing FID blocker)."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+    try:
+        return await valuatum.search_company(q)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, e.response.text[:500])
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+
 # ---- website orders (public intake; operator fulfils in this UI) -------------
 # ponytail: in-memory per-IP rate limit — enough for one process; move to the DB
 # if the backend ever runs more than one instance.
@@ -453,8 +471,11 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     parent = _require_run_access(rid, request)
     # Round-2 is credit-free, so cap refinements per report — otherwise one key
     # can spam unlimited Opus-priced full-report rewrites ($6-runs incident).
+    # Depth-based, not a per-node child count: refining round 2's own result
+    # again would otherwise reset the count (a fresh run always has 0
+    # children of its own) and the cap would never actually bite.
     max_r2 = int(os.getenv("ROUND2_MAX_PER_RUN") or 2)
-    if store.count_children(rid) >= max_r2:
+    if store.lineage_depth(rid) >= max_r2:
         raise HTTPException(
             429, f"Tarkennuskierrosten enimmäismäärä ({max_r2}) on jo käytetty "
                  "tälle raportille."

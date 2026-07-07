@@ -169,11 +169,18 @@ def clone_run(parent_id, params=None):
     return rid
 
 
-def count_children(parent_id):
-    row = db.query_one(
-        "SELECT COUNT(*) AS c FROM runs WHERE parent_run_id=?", (parent_id,)
-    )
-    return int((row or {}).get("c") or 0)
+def lineage_depth(rid):
+    """How many round-2 refinements already led to `rid`, walking
+    parent_run_id back to the root round-1 run. Used to cap total
+    refinements per purchased report — counting only rid's OWN children
+    would miss a chain (refine round 2's result, then round 3's, ...), since
+    each new run starts with zero children of its own."""
+    depth = 0
+    row = get_run(rid)
+    while row and row.get("parent_run_id"):
+        depth += 1
+        row = get_run(row["parent_run_id"])
+    return depth
 
 
 def set_run_status(rid, status):

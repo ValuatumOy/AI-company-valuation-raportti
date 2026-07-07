@@ -10,16 +10,21 @@ Nulls are preserved; nothing is invented.
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
+import httpx
+
 KIT = Path(__file__).resolve().parent.parent / "valuatum_kit"
 FETCH = KIT / "fetch_modeldata.py"
 EXPORT = KIT / "export_modeldata_json.py"
 BACKFILL = KIT / "backfill_modeldata_from_profinder.py"
+
+COMPANY_URL = "https://profinder.valuatum.com/rest/company"
 
 REQUIRED_KEYS = [
     "meta", "headcount", "actuals", "forecast", "forecast_parameters",
@@ -31,6 +36,54 @@ REQUIRED_KEYS = [
 def _slug(value: str) -> str:
     cleaned = "".join(c.lower() if c.isalnum() else "_" for c in value)
     return "_".join(p for p in cleaned.split("_") if p) or "company"
+
+
+def _normalize_query(query: str) -> tuple[str, str]:
+    """A Finnish y-tunnus is 7 digits + a check digit (hyphen optional, e.g.
+    "1612398-8" or "16123988"); anything else is treated as a name search."""
+    digits = re.sub(r"[\s-]", "", query.strip())
+    if digits.isdigit() and len(digits) == 8:
+        return "code", f"{digits[:7]}-{digits[7]}"
+    return "name", query.strip()
+
+
+async def search_company(query: str) -> list[dict]:
+    """Resolve a company name or y-tunnus to Valuatum FIDs via the profinder
+    REST /company endpoint — this is what unblocks self-serve for ANY company,
+    not just the operator's pre-fetched ones. Returns one entry per
+    (company, model) pair, since a company can have more than one followed
+    model (fid); the caller picks when there's more than one candidate."""
+    token = os.environ.get("VALUATUM_TOKEN")
+    if not token:
+        raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
+    param, value = _normalize_query(query)
+    if len(value) < 2:
+        return []
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(
+            COMPANY_URL,
+            params={param: value},
+            headers={"accept": "application/json", "authorization": f"Bearer {token}"},
+        )
+    resp.raise_for_status()
+    out = []
+    for c in resp.json() or []:
+        for m in c.get("models") or []:
+            fid = m.get("followedModelId")
+            if fid is None:
+                continue
+            try:
+                fid = int(fid)
+            except (TypeError, ValueError):
+                continue
+            out.append({
+                "fid": fid,
+                "company_name": c.get("companyName"),
+                "company_code": c.get("companyCode"),
+                "industry_text": c.get("industryText"),
+                "analyst_name": m.get("analystName"),
+            })
+    return out
 
 
 def _run(cmd: list[str]) -> tuple[int, str, str]:

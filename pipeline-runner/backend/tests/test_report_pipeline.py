@@ -1497,6 +1497,110 @@ def test_delete_run_removes_run_and_results():
     assert store.get_run(rid) is None
 
 
+def test_round2_cap_bites_across_a_refinement_chain(monkeypatch):
+    # Regression: the old check counted a run's OWN children, which is always
+    # 0 for a freshly created run — so refining round 2's result again (a
+    # chain, not repeated calls on the same run) never hit the cap. Confirm
+    # round 2 then round 3 succeed (2 refinements included) and round 4 403s.
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+    monkeypatch.setenv("ROUND2_MAX_PER_RUN", "2")
+    c = TestClient(main.app)
+    pid = store.list_pipelines()[0]["id"]
+    r1 = store.create_run(pid, {"meta": {"company_name": "X"}}, True)
+
+    body = {"clarifications": [], "clarifications_free_text": ""}
+    resp2 = c.post(f"/api/runs/{r1}/round2", json=body)
+    assert resp2.status_code == 200
+    r2 = resp2.json()["run_id"]
+
+    resp3 = c.post(f"/api/runs/{r2}/round2", json=body)
+    assert resp3.status_code == 200
+    r3 = resp3.json()["run_id"]
+
+    resp4 = c.post(f"/api/runs/{r3}/round2", json=body)
+    assert resp4.status_code == 429
+
+
+def test_normalize_query_detects_ytunnus_vs_name():
+    from app import valuatum
+
+    assert valuatum._normalize_query("1612398-8") == ("code", "1612398-8")
+    assert valuatum._normalize_query("16123988") == ("code", "1612398-8")
+    assert valuatum._normalize_query("Valuatum Oy") == ("name", "Valuatum Oy")
+
+
+def test_search_company_maps_models_to_fid_candidates(monkeypatch):
+    import asyncio
+    from app import valuatum
+
+    monkeypatch.setenv("VALUATUM_TOKEN", "tok")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [{
+                "companyId": 1,
+                "companyName": "Valuatum Oy",
+                "companyCode": "1612398-8",
+                "industryText": "Software",
+                "models": [
+                    {"followedModelId": "184362", "analystName": "A"},
+                    {"followedModelId": 999, "analystName": "B"},
+                ],
+            }]
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, params=None, headers=None):
+            assert url == valuatum.COMPANY_URL
+            assert headers["authorization"] == "Bearer tok"
+            return FakeResponse()
+
+    monkeypatch.setattr(valuatum.httpx, "AsyncClient", FakeClient)
+    out = asyncio.run(valuatum.search_company("1612398-8"))
+    assert out == [
+        {"fid": 184362, "company_name": "Valuatum Oy", "company_code": "1612398-8",
+         "industry_text": "Software", "analyst_name": "A"},
+        {"fid": 999, "company_name": "Valuatum Oy", "company_code": "1612398-8",
+         "industry_text": "Software", "analyst_name": "B"},
+    ]
+
+
+def test_company_search_endpoint_is_expert_reachable(monkeypatch):
+    from starlette.testclient import TestClient
+    from app import main, store
+
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+
+    async def fake_search(query):
+        return [{"fid": 184362, "company_name": "Valuatum Oy",
+                  "company_code": "1612398-8", "industry_text": None,
+                  "analyst_name": None}]
+
+    monkeypatch.setattr(main.valuatum, "search_company", fake_search)
+    c = TestClient(main.app)
+    key = store.create_access_key("E", generations_limit=1)["key"]
+    exp = {"Authorization": f"Bearer {key}"}
+
+    r = c.get("/api/company-search", params={"q": "1612398-8"}, headers=exp)
+    assert r.status_code == 200
+    assert r.json()[0]["fid"] == 184362
+
+
 @pytest.mark.skipif(not render.pdf_available(), reason="no local Chromium")
 def test_golden_pdf_has_no_blank_pages(tmp_path):
     rep = _golden()
