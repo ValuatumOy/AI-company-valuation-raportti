@@ -62,6 +62,8 @@ Jokaisessa pääosiossa vastaa vähintään näihin kysymyksiin:
 36. Käsittele `[input_data]`-tilinpäätöslukuja varmennettuna totuutena: älä kohdista toteutuneisiin lukuihin epäilyä tai epävarmuusanalyysia. Ainoat poikkeukset: `flags`-merkityt rivit (sääntö 22) ja säännöissä 29–30 kuvatut ilmeiset poikkeamat, jotka käsitellään kerran neutraalisti. Epävarmuustarkastelu kuuluu tulevaisuuden oletuksiin ja skenaarioihin, ei toteutuneeseen tilinpäätösdataan.
 37. Kaksi käyttäjätietolähdettä erotetaan aina toisistaan näillä nimillä: "Tilauksen yhteydessä annetut lisätiedot" (= `user_input`; asiakkaan ilmoittama, ei varmennettu) ja "Vastaukset tarkentaviin kysymyksiin (kierros 2)" (= `clarifications`; asiakkaan vahvistama vastauksena raportin kysymykseen). Jos esität molemmat esim. taulukossa, kerro yhdellä lauseella niiden ero — älä käytä kahta lähes samannimistä otsikkoa selittämättä.
 
+38. Jos `meta.industry_code` ja `meta.industry` (virallinen Valuatum/NACE-toimialaluokka) on annettu, mainitse se eksplisiittisesti osiossa 2 (yhtiön yleiskuvaus) muodossa "Toimialaluokka: [industry_code] [industry] (Valuatum/NACE)" ja käytä sitä ankkurina osion 15 (Toimialavertailu) kilpailija-/markkinakontekstissa. Tämä on virallinen luokitus, ei arvio — älä sano "arvio" tai "ei ollut saatavilla" jos se on annettu. Jos sitä ei ole annettu, älä keksi toimialaluokkaa — jätä mainitsematta.
+
 # OSAKEYHTIÖN OMISTAJA-ARVON LATTIA JA OPTIOARVO
 
 Tämä kohta on ehdoton.
