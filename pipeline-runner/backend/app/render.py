@@ -1463,12 +1463,11 @@ def render_pdf(report, out_path):
         f.write(html_str)
         html_path = f.name
     try:
-        # Headless Chrome's --print-to-pdf hard-crashed (SIGTRAP, exit 133)
-        # every time when the container process ran as root — confirmed live
-        # via `railway ssh`: identical command/flags, only the EUID differed.
-        # The noisy "Failed to connect to the bus" dbus errors in the logs
-        # were a red herring (present in successful runs too); the real fix
-        # is that the container now runs as a non-root user (see Dockerfile).
+        # See Dockerfile: this runs Google Chrome, not Debian's `chromium`
+        # package — the latter hard-crashed (SIGTRAP) on every single
+        # --print-to-pdf call in this container. The noisy "Failed to
+        # connect to the bus" dbus errors in the logs are unrelated — they
+        # show up on successful runs too.
         cmd = [chrome, "--headless=new", f"--print-to-pdf={out_path}",
                "--no-pdf-header-footer", "--virtual-time-budget=12000",
                "--no-sandbox", "--disable-dev-shm-usage", f"file://{html_path}"]
