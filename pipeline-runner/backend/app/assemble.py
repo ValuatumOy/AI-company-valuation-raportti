@@ -130,9 +130,21 @@ def _is_old_dcf_bridge_table(block):
     return sum(any(m in lab for m in bridge_markers) for lab in labels) >= 2
 
 
+def _is_stale_dcf_detail(b):
+    """A deterministic DCF-detail block from a PRIOR assemble (baked into a run's
+    stored output). Strip + rebuild so a re-render reflects the current code,
+    rather than skipping and preserving stale tables/callout text."""
+    if not isinstance(b, dict):
+        return False
+    if str(b.get("table_id", "")).startswith("deterministic_dcf_"):
+        return True
+    return b.get("type") == "callout" and str(b.get("title") or "").strip() == "Mistä diskontattu FCFF tulee?"
+
+
 def _inject_dcf_detail_blocks(sections, input_data):
-    """Replace the prompt-generated DCF cash-flow table with deterministic
-    year-as-columns FCFF driver and EV-to-equity bridge tables."""
+    """Replace the prompt-generated (or previously-baked) DCF cash-flow table with
+    freshly-built deterministic year-as-columns FCFF driver and EV-to-equity
+    bridge tables."""
     blocks = dcf_detail.build_dcf_detail_blocks(input_data)
     if not blocks:
         return sections
@@ -140,15 +152,10 @@ def _inject_dcf_detail_blocks(sections, input_data):
         if not (isinstance(sec, dict) and str(sec.get("id")) == _DCF_SECTION_ID):
             continue
         current = list(sec.get("blocks") or [])
-        if any(
-            isinstance(b, dict) and b.get("table_id") == "deterministic_dcf_fcff_drivers"
-            for b in current
-        ):
-            return sections
         kept = []
         insert_at = None
         for b in current:
-            if _is_old_fcff_table(b) or _is_old_dcf_bridge_table(b):
+            if _is_old_fcff_table(b) or _is_old_dcf_bridge_table(b) or _is_stale_dcf_detail(b):
                 if insert_at is None:
                     insert_at = len(kept)
                 continue

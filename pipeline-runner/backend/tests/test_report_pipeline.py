@@ -366,6 +366,32 @@ def test_terminal_margin_range_shows_alt_at_best_historical_margin():
     assert sensitivity.build_terminal_margin_range_blocks({}) == []  # no data -> no block
 
 
+def test_assemble_refreshes_stale_baked_dcf_detail_blocks():
+    # A run whose stored section 9 already carries deterministic DCF blocks (baked
+    # in by an earlier assemble). Re-assemble must REPLACE them, not skip — so a
+    # re-render reflects current code and never duplicates the FCFF table.
+    stale = [
+        {"type": "table", "table_id": "deterministic_dcf_fcff_drivers",
+         "columns": ["Erä", "2026"], "rows": [["EBIT", "1"]]},
+        {"type": "table", "table_id": "deterministic_dcf_equity_bridge",
+         "columns": ["Erä", "Arvo"], "rows": [["Yritysarvo (EV)", "1"]]},
+        {"type": "callout", "title": "Mistä diskontattu FCFF tulee?", "text": "vanha teksti"},
+    ]
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "9", "title": "DCF", "blocks": list(stale)}]}},
+    ]}
+    rep = assemble.assemble(run)
+    sec9 = next(s for s in rep["sections"] if s["id"] == "9")
+    fcff = [b for b in sec9["blocks"] if b.get("table_id") == "deterministic_dcf_fcff_drivers"]
+    assert len(fcff) == 1  # replaced, not duplicated
+    callout = next(b for b in sec9["blocks"]
+                   if b.get("type") == "callout" and "diskontattu FCFF" in (b.get("title") or ""))
+    assert "verohyödystä" in callout["text"]  # fresh code text, not the stale "vanha teksti"
+
+
 def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
     blocks = dcf_detail.build_dcf_detail_blocks(_engine_input_data())
     table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
