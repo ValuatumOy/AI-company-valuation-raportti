@@ -1335,6 +1335,70 @@ def test_public_checkout_generate_mints_key_and_starts_run(monkeypatch):
     assert me.json()["remaining"] == 0  # the checkout generation already spent it
 
 
+def test_paid_extra_round_checkout_and_redeem(monkeypatch):
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+    monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "sk_test_x")
+    monkeypatch.setenv("CLIENT_SITE_URL", "https://valuatum-arvonmaaritys.vercel.app")
+    c = TestClient(main.app)  # APP_TOKEN unset -> admin
+    pid = store.list_pipelines()[0]["id"]
+    rid = store.create_run(pid, {"meta": {}}, True)
+    store.upsert_result(rid, {"order": 1, "name": "enrichment", "status": "ok",
+                              "parsed_json": {"business_thesis": {"one_line_thesis": "x"}}})
+
+    created_session = {"id": "cs_test_1", "url": "https://checkout.stripe.com/pay/cs_test_1"}
+
+    async def fake_create(**kw):
+        assert kw["amount_cents"] == 500
+        assert kw["metadata"]["rid"] == rid
+        return created_session
+
+    monkeypatch.setattr(main, "_stripe_create_checkout_session", fake_create)
+    r = c.post(f"/api/runs/{rid}/round2/checkout",
+               json={"clarifications": [], "clarifications_free_text": "lisätieto"})
+    assert r.status_code == 200
+    assert r.json() == {"checkout_url": created_session["url"]}
+
+    # Pull the real token back out of the DB directly (checkout doesn't echo it).
+    from app import db
+    pending = db.query_one("SELECT * FROM pending_rounds WHERE run_id=?", (rid,))
+    token = pending["token"]
+
+    async def fake_get_paid(session_id):
+        assert session_id == "cs_test_1"
+        return {"payment_status": "paid", "metadata": {"token": token}}
+
+    monkeypatch.setattr(main, "_stripe_get_checkout_session", fake_get_paid)
+    r2 = c.post(f"/api/runs/{rid}/round2/redeem", json={"token": token, "stripe_session_id": "cs_test_1"})
+    assert r2.status_code == 200
+    child = store.get_run(r2.json()["run_id"])
+    assert child["parent_run_id"] == rid
+    assert child["params"]["clarifications_free_text"] == "lisätieto"
+
+    # Redeeming twice must not run a second round (already consumed).
+    r3 = c.post(f"/api/runs/{rid}/round2/redeem", json={"token": token, "stripe_session_id": "cs_test_1"})
+    assert r3.status_code == 409
+
+    # A second pending round, but Stripe reports it unpaid -> must not redeem.
+    r4 = c.post(f"/api/runs/{rid}/round2/checkout",
+                json={"clarifications": [], "clarifications_free_text": "toinen"})
+    assert r4.status_code == 200
+    pending2 = db.query_one(
+        "SELECT * FROM pending_rounds WHERE run_id=? AND token!=?", (rid, token)
+    )
+    token2 = pending2["token"]
+
+    async def fake_get_unpaid(session_id):
+        return {"payment_status": "unpaid", "metadata": {"token": token2}}
+
+    monkeypatch.setattr(main, "_stripe_get_checkout_session", fake_get_unpaid)
+    r5 = c.post(f"/api/runs/{rid}/round2/redeem", json={"token": token2, "stripe_session_id": "cs_test_2"})
+    assert r5.status_code == 402
+
+
 def test_round2_captures_round1_enrichment_for_maximal_preserve(monkeypatch):
     from starlette.testclient import TestClient
     from app import main, seed, store

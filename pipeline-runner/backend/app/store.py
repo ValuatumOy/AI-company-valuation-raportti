@@ -504,6 +504,32 @@ def create_paid_order(company, email, user_input, stripe_session_id, fid, access
     return oid
 
 
+# ---- paid extra refinement rounds --------------------------------------------
+# Round 3+ costs money (ROUND2_MAX_PER_RUN free rounds are exhausted). Stripe
+# metadata is too small to carry the clarification answers, so they're staged
+# here keyed by a token; Stripe metadata only carries the token.
+
+def create_pending_round(rid, access_key, clarifications, clarifications_free_text):
+    token = _uuid()
+    db.execute(
+        "INSERT INTO pending_rounds(token,run_id,access_key,clarifications,"
+        "clarifications_free_text,consumed,created_at) VALUES(?,?,?,?,?,0,?)",
+        (token, rid, access_key, db.jdump(clarifications), clarifications_free_text, _now()),
+    )
+    return token
+
+
+def get_pending_round(token):
+    row = db.query_one("SELECT * FROM pending_rounds WHERE token=?", (token,))
+    if row:
+        row["clarifications"] = db.jload(row["clarifications"]) or []
+    return row
+
+
+def consume_pending_round(token):
+    db.execute("UPDATE pending_rounds SET consumed=1 WHERE token=?", (token,))
+
+
 # ---- expert access keys -----------------------------------------------------
 # Capped, invite-only keys (prefix `exp_`) that let a trusted expert self-serve a
 # few report generations. Round-1 runs consume quota; round-2 refinements don't.

@@ -82,6 +82,11 @@ class Round2In(BaseModel):
     clarifications_free_text: str = Field(default="", max_length=8000)
 
 
+class RedeemRoundIn(BaseModel):
+    token: str = Field(min_length=8, max_length=100)
+    stripe_session_id: str = Field(min_length=4, max_length=200)
+
+
 class FetchIn(BaseModel):
     identifier: str
     params: dict[str, Any] = Field(default_factory=dict)

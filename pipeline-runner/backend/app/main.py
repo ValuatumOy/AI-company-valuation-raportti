@@ -18,8 +18,8 @@ load_dotenv()
 from . import email_delivery, openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
 from .models import (  # noqa: E402
     AccessKeyIn, CheckoutGenerateIn, CompareIn, ExpertGenerateIn, FetchIn, OrderIn,
-    OrderStatusIn, PipelineIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn,
-    ValuatumExportIn,
+    OrderStatusIn, PipelineIn, RedeemRoundIn, ReorderIn, Round2In, RunIn, StageIn,
+    ValidateIn, ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
 
@@ -58,6 +58,42 @@ ROUND2_WRITER_MODEL = (
     os.getenv("ROUND2_WRITER_MODEL") or "anthropic/claude-sonnet-5"
 )
 
+# Paid extra refinement rounds (round 3+, once ROUND2_MAX_PER_RUN's free
+# rounds are used up). REST calls via httpx, not the stripe SDK — two
+# endpoints (create session, retrieve session) don't justify a new
+# dependency when httpx is already required.
+STRIPE_SECRET_KEY = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+EXTRA_ROUND_PRICE_CENTS = int(os.getenv("EXTRA_ROUND_PRICE_CENTS") or 500)
+_STRIPE_API = "https://api.stripe.com/v1"
+
+
+async def _stripe_create_checkout_session(*, success_url, cancel_url, metadata, amount_cents, name):
+    data = {
+        "mode": "payment",
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "line_items[0][quantity]": "1",
+        "line_items[0][price_data][currency]": "eur",
+        "line_items[0][price_data][unit_amount]": str(amount_cents),
+        "line_items[0][price_data][product_data][name]": name,
+        **{f"metadata[{k}]": v for k, v in metadata.items()},
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.post(
+            f"{_STRIPE_API}/checkout/sessions", data=data, auth=(STRIPE_SECRET_KEY, "")
+        )
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def _stripe_get_checkout_session(session_id: str):
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(
+            f"{_STRIPE_API}/checkout/sessions/{session_id}", auth=(STRIPE_SECRET_KEY, "")
+        )
+    resp.raise_for_status()
+    return resp.json()
+
 
 # Paths a capped expert key (`exp_`) may reach. DENY-BY-DEFAULT: everything not
 # matched here (reseed, pipeline/stage edits, orders, key minting, deletes, cost
@@ -71,7 +107,7 @@ _EXPERT_GET = re.compile(
     r"|expert/me)$"
 )
 _EXPERT_POST = re.compile(
-    r"^/api/(expert/generate|runs/[^/]+/round2)$"
+    r"^/api/(expert/generate|runs/[^/]+/round2(/checkout|/redeem)?)$"
 )
 
 
@@ -550,28 +586,92 @@ async def round2_run(rid: str, body: Round2In, request: Request):
             429, f"Tarkennuskierrosten enimmäismäärä ({max_r2}) on jo käytetty "
                  "tälle raportille."
         )
-    # Maximal-preserve: hand round 2 the round-1 enrichment + assembled report so
-    # it refines (keep the good, apply the fix) instead of regenerating blind.
+    new_rid = _start_refinement_round(rid, parent, body.clarifications, body.clarifications_free_text)
+    return {"run_id": new_rid, "parent_run_id": rid}
+
+
+def _start_refinement_round(rid, parent, clarifications, clarifications_free_text) -> str:
+    # Maximal-preserve: hand the round the prior enrichment + assembled report
+    # so it refines (keep the good, apply the fix) instead of regenerating blind.
     prev_enrichment = next(
         (r.get("parsed_json") for r in (parent.get("results") or [])
          if r.get("order") == 1),
         None,
     )
     new_rid = store.clone_run(rid, params={
-        "clarifications": [c.model_dump() for c in body.clarifications],
-        "clarifications_free_text": body.clarifications_free_text,
+        "clarifications": [
+            c.model_dump() if hasattr(c, "model_dump") else c for c in clarifications
+        ],
+        "clarifications_free_text": clarifications_free_text,
         "previous_enrichment": prev_enrichment,
         "previous_report": store.final_report_json(rid),
         # Careful preserve-and-patch is an editing task, not creative writing —
         # use Opus for the round-2 writer while round 1 stays Fable.
         "round2_writer_model": ROUND2_WRITER_MODEL,
     })
-    # NOTE: round 2 MUST re-run stage 1 (from_order=1): the enrichment stage is
-    # where clarifications get folded in (1_enrichment.txt KIERROS 2 -KURI) —
-    # the writer prompt has no {{clarifications}} of its own, it consumes the
-    # corrected enrichment. The round-2 stage 1 is maximal-preserve + targeted
-    # search, so it's cheap (~$0.15), not a full re-research.
+    # NOTE: every refinement round MUST re-run stage 1 (from_order=1): the
+    # enrichment stage is where clarifications get folded in (1_enrichment.txt
+    # KIERROS 2 -KURI) — the writer prompt has no {{clarifications}} of its
+    # own, it consumes the corrected enrichment. That stage is
+    # maximal-preserve + targeted search, so it's cheap (~$0.15), not a full
+    # re-research.
     _start_bg(new_rid, from_order=1)
+    return new_rid
+
+
+@app.post("/api/runs/{rid}/round2/checkout")
+async def round2_checkout(rid: str, body: Round2In, request: Request):
+    """Round 3+ isn't free — create a Stripe Checkout Session for one paid
+    extra refinement. The clarification answers are staged server-side
+    (Stripe metadata is far too small to hold them); metadata only carries a
+    lookup token, redeemed by round2_redeem after payment succeeds."""
+    _require_run_access(rid, request)
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(503, "Lisäkierrosten maksut eivät ole vielä käytössä.")
+    key = getattr(request.state, "access_key", None)
+    token = store.create_pending_round(
+        rid, key, [c.model_dump() for c in body.clarifications], body.clarifications_free_text
+    )
+    site = (os.getenv("CLIENT_SITE_URL") or "").rstrip("/")
+    key_q = f"&key={key}" if key else ""
+    success_url = (
+        f"{site}/testi?rid={rid}{key_q}&paid_round_token={token}"
+        "&session_id={CHECKOUT_SESSION_ID}"
+    )
+    cancel_url = f"{site}/testi?rid={rid}{key_q}"
+    session = await _stripe_create_checkout_session(
+        success_url=success_url, cancel_url=cancel_url,
+        metadata={"token": token, "rid": rid},
+        amount_cents=EXTRA_ROUND_PRICE_CENTS,
+        name="Arvonmäärityksen lisätarkennuskierros",
+    )
+    return {"checkout_url": session.get("url")}
+
+
+@app.post("/api/runs/{rid}/round2/redeem")
+async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
+    """After Stripe confirms payment, actually run the paid extra round."""
+    _require_run_access(rid, request)
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(503, "Lisäkierrosten maksut eivät ole vielä käytössä.")
+    _check_not_paused()
+    pending = store.get_pending_round(body.token)
+    if not pending or pending["run_id"] != rid:
+        raise HTTPException(404, "Tarkennuskierrosta ei löytynyt.")
+    if pending["consumed"]:
+        raise HTTPException(409, "Tämä tarkennuskierros on jo käytetty.")
+    try:
+        session = await _stripe_get_checkout_session(body.stripe_session_id)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, e.response.text[:500])
+    if (session.get("payment_status") != "paid"
+            or (session.get("metadata") or {}).get("token") != body.token):
+        raise HTTPException(402, "Maksua ei voitu vahvistaa.")
+    store.consume_pending_round(body.token)
+    parent = store.get_run(rid)
+    new_rid = _start_refinement_round(
+        rid, parent, pending["clarifications"], pending["clarifications_free_text"]
+    )
     return {"run_id": new_rid, "parent_run_id": rid}
 
 

@@ -100,6 +100,15 @@ CREATE TABLE IF NOT EXISTS access_keys (
     expires_at TEXT,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pending_rounds (
+    token TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    access_key TEXT,
+    clarifications TEXT,
+    clarifications_free_text TEXT,
+    consumed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 """
 
 _STATEMENTS = [s.strip() for s in SCHEMA.split(";") if s.strip()]
