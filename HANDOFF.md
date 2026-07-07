@@ -1,8 +1,158 @@
-# Handoff — 2026-07-05
+# Handoff — 2026-07-07 (read this first)
 
 ## ⛔ Never run a report generation against prod without asking first — see CLAUDE.md
 This includes "just a verification run" suggested by a previous handoff's
-"pick up here" section. Ask, then run.
+"pick up here" section. Ask, then run. The user said this explicitly, twice,
+in the same session — treat it as non-negotiable, not a one-off preference.
+
+## What shipped this session
+
+Context: CEO tested `/testi` (the nettisivut expert self-serve page) and
+reported two problems: (1) he never saw the round-1 report, only the AI's
+clarifying questions and then the round-2 result, and (2) there was no
+free-text company entry — he was stuck picking from the operator's
+pre-fetched company list. Both are now fixed. A verification run to prove
+it end-to-end has **NOT** been done — see "Pick up here".
+
+**Backend (`AI-company-valuation-raportti`, commit `7e419b8`):**
+- **New `GET /api/company-search?q=...`** (`app/valuatum.py:search_company`,
+  wired in `app/main.py`) resolves a company name or Finnish y-tunnus to
+  Valuatum FID(s) via the real profinder REST API
+  (`https://profinder.valuatum.com/rest/company`, same `VALUATUM_TOKEN` auth
+  as the existing `/rest/modeldata` calls in `valuatum_kit/fetch_modeldata.py`).
+  This is what unblocks self-serve for ANY company — `POST
+  /api/expert/generate` already accepted any `fid`; the pre-fetched-company
+  picker was the only actual blocker, not a backend limitation. Verified
+  live against prod: `curl -H "Authorization: Bearer $APP_TOKEN"
+  ".../api/company-search?q=Valuatum%20Oy"` and `?q=1612398-8` both return
+  the correct 4 model candidates (parent + "K"-suffix group company, each
+  with a "Profinder" auto model and a "Niklas Mäki" manual model). fid=184362
+  ("Profinder" model, parent company code) is the one used all along.
+  **Only maps `fid`/`company_name`/`company_code`/`industry_text`/
+  `analyst_name`** — the Valuatum response also has `industryCode`,
+  `industryId`, and a full `industryTree` that are NOT mapped yet (trivial
+  to add in `valuatum.search_company` if something downstream needs them —
+  e.g. `meta.industry` is hardcoded `None` in the exporter today).
+  Added to the expert GET allowlist in `main.py` (`_EXPERT_GET` regex).
+- **Fixed the round-2 refinement cap** (`app/store.py:lineage_depth`,
+  used in `main.py`'s `round2_run`). The old check
+  (`store.count_children(rid)`) counted a run's OWN direct children, which
+  is always 0 for a freshly created run — so refining round 2's own result
+  again (a chain: R1→R2→R3→...) never actually hit the "2 tarkennuskierrosta
+  sisältyy" cap, since each new node in the chain started with a fresh
+  zero count. Now walks `parent_run_id` back to the root and caps on chain
+  depth, so round 2 and round 3 succeed (2 refinements) and a 3rd refinement
+  attempt correctly 429s. New regression test:
+  `test_round2_cap_bites_across_a_refinement_chain`.
+- Tests: 96 passed (was 92), all new tests for company-search parsing +
+  the lineage-depth cap.
+- **Not started: email delivery.** Neither repo has ANY email-sending
+  integration (no Resend/SendGrid/SMTP/nodemailer — checked, grepped both
+  repos, nothing). This is the next piece the user asked for after the
+  above. Needs a provider decision (Resend is the common pick for a
+  Vercel+FastAPI stack, but this wasn't decided — ask the user) + an API
+  key + a "send report" call point (likely right after a round finishes,
+  in `_drive_run`/`finishRun` equivalent, or a dedicated endpoint the
+  frontend calls once `reportSrc` loads).
+
+**Frontend (`Company_valuation_nettisivut`, commit `c9565fa`):**
+- `src/expert/ExpertApp.tsx` — reordered the round-1/round-2 display: the
+  report iframe + PDF buttons + a clear "Ensimmäinen versio" / "Tarkennettu
+  versio" heading (derived from `run.parent_run_id`) now render FIRST,
+  with the `ClarifyPanel` (amber, asks for round-2 input) clearly separated
+  BELOW it with its own "Haluatko tarkentaa raporttia?" heading. Previously
+  the panel was rendered above the iframe in the same block — since it's a
+  large, attention-grabbing amber box, this is almost certainly why the CEO
+  said he never saw the round-1 report: he likely answered the questions
+  without scrolling down to the iframe below. (The report was always being
+  fetched and set in state correctly — this was a display-order/prominence
+  issue, not a fetch bug.)
+- Replaced the `<select>` dropdown of pre-fetched companies with a
+  free-text "Yritys (nimi tai y-tunnus)" input + "Hae" button, calling the
+  new `/api/company-search`. Shows a picker list when a search returns
+  multiple model candidates (see the 4-candidates-per-company note above),
+  auto-selects when there's exactly one. `src/expert/expertApi.ts` has the
+  new `searchCompany()` + `CompanyCandidate` type.
+- Also fixed a latent bug in `src/components/InlineMd.tsx` (module-level
+  regex `.lastIndex` reset on every render — shared mutable state, unsafe
+  under concurrent renders); made the regex local to the component. Small,
+  unrelated, found while touching nearby files.
+- Build + typecheck clean (`npm run build`), no test suite in this repo.
+
+## What was NOT verified this session (important)
+
+- **No live end-to-end run was completed against prod with the new code.**
+  An earlier verification run (`bab71ae97c324dde98c1411fbaa69259`, started
+  before the user said "no test runs yet, changes first") errored out
+  mid-flight — turned out to be because a `git push` to this repo's `main`
+  triggers a Railway auto-redeploy, which killed the in-flight background
+  task (`_RUN_TASKS` lives in-process; a redeploy restarts the process).
+  **Lesson: don't push to this repo's `main` while a run is in flight** —
+  check `GET /api/runs` for any `"status":"running"` first (I now do this
+  before every push).
+- The `/testi` UI reorder + company search were verified by: (a) `npm run
+  build` + TypeScript passing, (b) the company-search endpoint curled
+  directly against prod (see above, worked correctly), (c) a **mocked**
+  browser session (real Next.js dev server, `window.fetch` intercepted
+  with canned JSON responses standing in for the backend) exercising
+  sign-in → search → multi-candidate picker → select → generate → poll →
+  round-1 report renders first with correct heading → clarify panel below
+  it. This proves the React logic is correct but is NOT the same as a real
+  run against real data. **A real live click-through on
+  https://valuatum-arvonmaaritys.vercel.app/testi (or the local dev
+  environment, see below) with a real report is still owed** — ask the
+  user before spending the money on it (see the ⛔ rule at the top).
+- Browser tooling was unusually painful this session on this Windows
+  machine, worth knowing for next time:
+  - The claude-in-chrome MCP extension was disconnected all session
+    (retried 3×, never connected) — if it's connected next time, prefer it
+    over everything below, it can hit the real deployed URL directly with
+    real CORS/cookies.
+  - Local `next dev` (Turbopack) hard-fails on this machine's actual repo
+    path (`C:\Users\Lauri H\Desktop\Valuatum projektit\Company_valuation_nettisivut`)
+    because of the spaces in `Lauri H` / `Valuatum projektit` — tried `subst
+    V:`, a Windows 8.3 short path, and a junction for `node_modules`; all
+    hit different Turbopack "leaves the filesystem root" panics. **What
+    actually worked:** `robocopy` the whole repo (excluding
+    `node_modules`/`.next`/`.git`) to a spaceless path (`C:\dev\nettisivut`)
+    and run a real `npm install` there (junctioning `node_modules` back
+    also fails the same way — it has to be a real install in the spaceless
+    tree). `.claude/launch.json` (at `C:\Users\Lauri H\.claude\launch.json`)
+    is already configured to `cd /d C:\dev\nettisivut && npm run dev`. Keep
+    that copy in sync manually (`robocopy` again) after editing the real
+    repo, or edit directly in `C:\dev\nettisivut` and copy changes back —
+    it's NOT a git checkout, just a build copy, don't commit from there.
+  - Even with the dev server working, a browser hitting `localhost:3000`
+    can't call the real prod backend — `ALLOWED_ORIGINS` on Railway is set
+    to something that only matches `https://*.vercel.app` (not
+    `localhost`), so the browser's CORS preflight 400s. Either mock
+    `window.fetch` (what I did) or test against a real Vercel deploy URL
+    instead of local dev.
+  - Railway CLI (`railway ...`) is NOT installed/linked on this Windows
+    machine — a previous handoff describing it as "already authenticated"
+    was written on a different (Mac) machine. If you need Railway env vars
+    or `railway variables --set`, you'll need to `railway login` fresh
+    here first (interactive — ask the user to run it).
+
+## Pick up here
+
+1. **Get explicit user approval, then run one real round-1 + round-2 report
+   through `/testi`** (or the admin runner) to confirm: the free-text
+   company search actually flows through to a real generation, the
+   round-1 report is now clearly visible before the clarify panel, and the
+   round-2 cap fix behaves (2 refinements allowed, 3rd blocked). Check `GET
+   /api/runs` shows nothing `"status":"running"` before pushing anything
+   to this repo's `main` while that run is live.
+2. **Build email delivery** (the user's next explicit ask after this
+   batch). Needs: a provider decision (ask the user — Resend is a
+   reasonable default suggestion for a Vercel+FastAPI stack, not decided),
+   an API key/env var, and a send call-point once a round's report is
+   ready (round-1 finishing, and/or round-2/final finishing — probably
+   both, worth asking the user whether round-1 should email too or only
+   the final one).
+3. Optional/low-effort: map `industryCode`/`industryTree` in
+   `valuatum.search_company` if `meta.industry` (currently hardcoded
+   `None`) should start getting populated from the search result.
 
 ## 🚨 PRODUCTION IS PAUSED (cost incident 2026-07-05)
 2-generation runs hit $6+. All report generation is now blocked in prod:
