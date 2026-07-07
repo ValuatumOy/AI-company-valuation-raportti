@@ -484,6 +484,26 @@ def set_order_status(oid, status):
     return db.query_one("SELECT * FROM orders WHERE id=?", (oid,))
 
 
+def get_order_by_session(stripe_session_id):
+    return db.query_one(
+        "SELECT * FROM orders WHERE stripe_session_id=?", (stripe_session_id,)
+    )
+
+
+def create_paid_order(company, email, user_input, stripe_session_id, fid, access_key, run_id):
+    """A paid, auto-generated order (client-site checkout -> instant pipeline
+    run), as opposed to create_order's manual-fulfilment intake. Kept in the
+    same table so the operator dashboard sees both kinds together."""
+    oid = _uuid()
+    db.execute(
+        "INSERT INTO orders(id,company,email,user_input,status,created_at,"
+        "stripe_session_id,fid,access_key,run_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (oid, company, email, user_input, "in_progress", _now(),
+         stripe_session_id, fid, access_key, run_id),
+    )
+    return oid
+
+
 # ---- expert access keys -----------------------------------------------------
 # Capped, invite-only keys (prefix `exp_`) that let a trusted expert self-serve a
 # few report generations. Round-1 runs consume quota; round-2 refinements don't.

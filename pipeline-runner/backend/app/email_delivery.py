@@ -40,6 +40,19 @@ def _sender() -> str | None:
     return (os.getenv("REPORT_EMAIL_FROM") or os.getenv("RESEND_FROM") or "").strip() or None
 
 
+def _report_link(rid: str, run: dict) -> str | None:
+    """The exclusive link back to the report + round-2 clarification UI. Only
+    meaningful for a run tied to an access key (self-serve/paid flow) — admin
+    runs have no key for a public page to authenticate with."""
+    key = run.get("access_key")
+    if not key:
+        return None
+    site = (os.getenv("CLIENT_SITE_URL") or "").strip().rstrip("/")
+    if not site:
+        return None
+    return f"{site}/testi?key={key}&rid={rid}"
+
+
 async def send_report_ready(rid: str) -> dict:
     """Send the finished run's report to params.delivery_email when configured.
 
@@ -80,17 +93,25 @@ async def send_report_ready(rid: str) -> dict:
         content = base64.b64encode(Path(html_path).read_bytes()).decode("ascii")
         attachments.append({"filename": f"{safe}.html", "content": content})
 
+    link = _report_link(rid, run)
+
     subject = f"Arvonmaaritysraportti valmis: {company}"
     escaped_company = html.escape(str(company))
+    link_html = (
+        f'<p><a href="{html.escape(link)}">Avaa raportti ja jatka tarkennuksia</a></p>'
+        if link else ""
+    )
+    link_text = f"\n\nAvaa raportti ja jatka tarkennuksia: {link}" if link else ""
     html_body = (
         "<p>Hei,</p>"
         f"<p>{escaped_company} -arvonmaaritysraportin {html.escape(version)} on valmis.</p>"
         "<p>Raportti on taman viestin liitteena.</p>"
+        f"{link_html}"
         "<p>Ystavallisin terveisin,<br>Valuatum</p>"
     )
     text_body = (
         f"Hei,\n\n{company} -arvonmaaritysraportin {version} on valmis. "
-        "Raportti on taman viestin liitteena.\n\nYstavallisin terveisin,\nValuatum"
+        f"Raportti on taman viestin liitteena.{link_text}\n\nYstavallisin terveisin,\nValuatum"
     )
     payload = {
         "from": sender,

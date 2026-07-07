@@ -1264,6 +1264,49 @@ def test_expert_key_is_capped_and_scoped(monkeypatch):
     assert me["remaining"] == 0 and me["generations_limit"] == 1
 
 
+def test_public_checkout_generate_mints_key_and_starts_run(monkeypatch):
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")  # public path must bypass this
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+
+    async def fake_search(q):
+        assert q == "1612398-8"
+        return [{"fid": 184362, "company_name": "Valuatum Oy", "company_code": "184362",
+                  "industry_text": "Software", "industry_code": "62.100",
+                  "industry_id": 1, "industry_tree": None, "analyst_name": "Profinder"}]
+
+    monkeypatch.setattr(main.valuatum, "search_company", fake_search)
+    c = TestClient(main.app)  # no Authorization header at all
+    body = {
+        "business_id": "1612398-8", "company_name": "Valuatum Oy",
+        "email": "owner@valuatum.com", "user_input": "lisatieto",
+        "stripe_session_id": "cs_test_123",
+    }
+    r = c.post("/api/public/checkout-generate", json=body)
+    assert r.status_code == 200
+    data = r.json()
+    key, rid = data["key"], data["run_id"]
+    assert key.startswith("exp_") or key  # minted, not admin
+    run = store.get_run(rid)
+    assert run["access_key"] == key
+    assert run["params"]["delivery_email"] == "owner@valuatum.com"
+    assert run["params"]["company_code"] == "184362"
+
+    # Idempotent: replaying the same Stripe session must not mint a second key
+    # or run (the success page can be loaded more than once for one payment).
+    r2 = c.post("/api/public/checkout-generate", json=body)
+    assert r2.status_code == 200
+    assert r2.json() == {"run_id": rid, "key": key}
+
+    # The minted key can now drive the normal expert flow (view/round2) itself.
+    me = c.get("/api/expert/me", headers={"Authorization": f"Bearer {key}"})
+    assert me.status_code == 200
+    assert me.json()["remaining"] == 0  # the checkout generation already spent it
+
+
 def test_round2_captures_round1_enrichment_for_maximal_preserve(monkeypatch):
     from starlette.testclient import TestClient
     from app import main, seed, store

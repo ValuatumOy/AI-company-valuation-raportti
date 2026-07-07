@@ -95,6 +95,19 @@ class OrderIn(BaseModel):
     website: str = ""  # honeypot — humans leave it empty
 
 
+class CheckoutGenerateIn(BaseModel):
+    # Public, post-payment intake from the client site's Stripe success page.
+    # Unauthenticated like OrderIn — same length caps + honeypot + IP rate
+    # limit, plus idempotency on stripe_session_id (the success page can be
+    # loaded more than once for the same payment).
+    business_id: str = Field(min_length=5, max_length=30)
+    company_name: str = Field(min_length=1, max_length=300)
+    email: str = Field(min_length=5, max_length=200, pattern=r".+@.+\..+")
+    user_input: str = Field(default="", max_length=4000)
+    stripe_session_id: str = Field(min_length=4, max_length=200)
+    website: str = ""  # honeypot — humans leave it empty
+
+
 class OrderStatusIn(BaseModel):
     status: str = Field(pattern=r"^(open|in_progress|delivered|spam)$")
 

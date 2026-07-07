@@ -17,8 +17,9 @@ load_dotenv()
 
 from . import email_delivery, openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
 from .models import (  # noqa: E402
-    AccessKeyIn, CompareIn, ExpertGenerateIn, FetchIn, OrderIn, OrderStatusIn,
-    PipelineIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
+    AccessKeyIn, CheckoutGenerateIn, CompareIn, ExpertGenerateIn, FetchIn, OrderIn,
+    OrderStatusIn, PipelineIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn,
+    ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
 
@@ -90,6 +91,10 @@ async def auth_gate(request, call_next):
         # POST /api/orders is the public website order intake — no bearer.
         # It only writes a capped-length row; abuse guarded by rate limit + honeypot.
         if path == "/api/orders" and request.method == "POST":
+            return await call_next(request)
+        # POST /api/public/checkout-generate: same public/unauthenticated shape,
+        # called by the client site right after a verified Stripe payment.
+        if path == "/api/public/checkout-generate" and request.method == "POST":
             return await call_next(request)
         if path.startswith("/api/") and path != "/api/health":
             from fastapi.responses import JSONResponse
@@ -643,47 +648,139 @@ def expert_me(request: Request):
     }
 
 
+def _default_pipeline_id(pipeline_id: str | None) -> str:
+    # Self-serve defaults to the single-writer "koeajo" pipeline (FAKTAT +
+    # enrichment + one writer), not the 6-stage default. Callers can still
+    # pass an explicit pipeline_id (the admin/operator UI does).
+    if pipeline_id:
+        return pipeline_id
+    pls = store.list_pipelines() or []
+    sw = next((p for p in pls if p.get("name") == seed.SINGLE_WRITER_PIPELINE_NAME), None)
+    return (sw or (pls[0] if pls else {})).get("id")
+
+
+def _create_generation_run(
+    *, fid: int, company_name: str, company_code=None, industry_text=None,
+    industry_code=None, industry_id=None, industry_tree=None,
+    delivery_email=None, user_input="", pipeline_id=None, access_key=None,
+) -> str:
+    """Shared by the invite-key expert flow and the public paid checkout flow:
+    build the stage-0 params and kick off a background run."""
+    pid = _default_pipeline_id(pipeline_id)
+    if not pid or not store.get_pipeline(pid):
+        raise HTTPException(404, "pipeline not found")
+    _check_not_paused()
+    params = {"company_name": company_name}
+    if company_code:
+        params["company_code"] = company_code
+    if industry_text:
+        params["industry_text"] = industry_text
+    if industry_code:
+        params["industry_code"] = industry_code
+    if industry_id is not None:
+        params["industry_id"] = industry_id
+    if industry_tree is not None:
+        params["industry_tree"] = industry_tree
+    if delivery_email:
+        params["delivery_email"] = delivery_email.strip()
+    if user_input.strip():
+        params["user_input"] = user_input.strip()
+    rid = store.create_run(
+        pid, None, True, identifier=str(fid), params=params, access_key=access_key,
+    )
+    _start_bg(rid)
+    return rid
+
+
 @app.post("/api/expert/generate")
 async def expert_generate(body: ExpertGenerateIn, request: Request):
     """Self-serve generation: create a run that fetches the company's Valuatum
     data in stage 0 (by FID) and runs the pipeline. Consumes one generation for
     expert keys; admin (access_key None) is unlimited. Round-2 refinement of the
     resulting report is free (see round2_run)."""
-    # Default experts to the single-writer "koeajo" pipeline (FAKTAT + enrichment
-    # + one writer), not the 6-stage default. Operators can still pass an explicit
-    # pipeline_id.
-    if body.pipeline_id:
-        pid = body.pipeline_id
-    else:
-        pls = store.list_pipelines() or []
-        sw = next((p for p in pls if p.get("name") == seed.SINGLE_WRITER_PIPELINE_NAME), None)
-        pid = (sw or (pls[0] if pls else {})).get("id")
-    if not pid or not store.get_pipeline(pid):
-        raise HTTPException(404, "pipeline not found")
+    _default_pipeline_id(body.pipeline_id) or HTTPException(404, "pipeline not found")
     _check_not_paused()
     key = getattr(request.state, "access_key", None)
     if key and not store.consume_generation(key):
         raise HTTPException(403, "Generointikiintiö on käytetty loppuun.")
-    params = {"company_name": body.company_name}
-    if body.company_code:
-        params["company_code"] = body.company_code
-    if body.industry_text:
-        params["industry_text"] = body.industry_text
-    if body.industry_code:
-        params["industry_code"] = body.industry_code
-    if body.industry_id is not None:
-        params["industry_id"] = body.industry_id
-    if body.industry_tree is not None:
-        params["industry_tree"] = body.industry_tree
-    if body.delivery_email:
-        params["delivery_email"] = body.delivery_email.strip()
-    if body.user_input.strip():
-        params["user_input"] = body.user_input.strip()
-    rid = store.create_run(
-        pid, None, True, identifier=str(body.fid), params=params, access_key=key,
+    rid = _create_generation_run(
+        fid=body.fid, company_name=body.company_name, company_code=body.company_code,
+        industry_text=body.industry_text, industry_code=body.industry_code,
+        industry_id=body.industry_id, industry_tree=body.industry_tree,
+        delivery_email=body.delivery_email, user_input=body.user_input,
+        pipeline_id=body.pipeline_id, access_key=key,
     )
-    _start_bg(rid)
     return {"run_id": rid}
+
+
+def _pick_checkout_candidate(candidates: list[dict]) -> dict | None:
+    """Automated FID pick for the unattended checkout flow (no human in the
+    loop to use the /testi disambiguation picker). Prefer the "Profinder"
+    auto-model, then a parent company_code (no "K" suffix — see HANDOFF for
+    the K-suffix group-company convention), else the first result.
+    ponytail: heuristic, not guaranteed correct for every company — if this
+    ever picks the wrong sibling model, surface a manual picker on the
+    checkout success page instead of guessing harder here."""
+    if not candidates:
+        return None
+    for c in candidates:
+        if c.get("analyst_name") == "Profinder":
+            return c
+    for c in candidates:
+        if not str(c.get("company_code") or "").upper().endswith("K"):
+            return c
+    return candidates[0]
+
+
+@app.post("/api/public/checkout-generate")
+async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
+    """Public, unauthenticated: called by the client site's Stripe success page
+    right after payment is verified server-side. Resolves the paid company to a
+    Valuatum FID, mints a single-use access key, and starts generation — closing
+    the "operator fulfils manually" gap for the self-serve paid flow. Same
+    honeypot + IP rate limit as /api/orders; idempotent on stripe_session_id so
+    a page reload after payment doesn't double-generate or double-mint a key."""
+    if body.website.strip():  # honeypot filled → bot; pretend success
+        return {"ok": True}
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else "?")
+    if not _order_rate_ok(ip):
+        raise HTTPException(429, "liian monta tilausta — yritä myöhemmin uudelleen")
+    existing = store.get_order_by_session(body.stripe_session_id)
+    if existing:
+        return {"run_id": existing.get("run_id"), "key": existing.get("access_key")}
+    _check_not_paused()
+    try:
+        candidates = await valuatum.search_company(body.business_id)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, e.response.text[:500])
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+    candidate = _pick_checkout_candidate(candidates)
+    if not candidate:
+        raise HTTPException(
+            404, f"Yritystä ({body.business_id}) ei löytynyt Valuatumista."
+        )
+    key_row = store.create_access_key(
+        f"Tilaus: {body.company_name} ({body.stripe_session_id[:12]})",
+        generations_limit=1,
+    )
+    key = key_row["key"]
+    # Consume the one paid-for generation now — this call IS that generation,
+    # it doesn't go through /api/expert/generate's own consume_generation.
+    store.consume_generation(key)
+    rid = _create_generation_run(
+        fid=candidate["fid"], company_name=candidate.get("company_name") or body.company_name,
+        company_code=candidate.get("company_code"), industry_text=candidate.get("industry_text"),
+        industry_code=candidate.get("industry_code"), industry_id=candidate.get("industry_id"),
+        industry_tree=candidate.get("industry_tree"), delivery_email=body.email,
+        user_input=body.user_input, access_key=key,
+    )
+    store.create_paid_order(
+        body.company_name, body.email, body.user_input, body.stripe_session_id,
+        candidate["fid"], key, rid,
+    )
+    return {"run_id": rid, "key": key}
 
 
 @app.delete("/api/runs/{rid}")
