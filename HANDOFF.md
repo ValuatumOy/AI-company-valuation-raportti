@@ -1,5 +1,59 @@
 # Handoff — 2026-07-07 (read this first)
 
+## 2026-07-07 (cont.) — Athlos reviewer fixes + report QA net (LIVE + verified)
+
+Acted on a detailed external review of the Athlos report (14 errors + 7 agent
+suggestions). The reviewed PDF was **stale** (predated commit `b0af93d`), so
+several errors were already fixed: sensitivity calibration (526≠669), the DCF/EVA
+method table, and the cover single-anchor. Remaining live issues fixed.
+
+Commits on `main`: `b4abfbe` (fixes + QA net), `c00d4ee` (build marker),
+`c2695d3` (strip+replace baked DCF blocks). Live build: `2026-07-07-athlos-review-fixes-2`.
+Prompts **reseeded** (`POST /api/reseed`) — production pipeline
+`Yhden kirjoittajan raportti (oletus)` (id `8311e744`) carries all edits.
+108 tests pass. Verified live on a real Athlos re-render (GET, no generation).
+
+Deterministic / rendering (effect immediately, incl. re-renders):
+- `dcf_detail.py` — "Kumulatiivinen diskontattu FCFF" is now a true forward
+  running sum (was the engine's mislabeled remaining-value series); DCF callout
+  explains the tax-row sign convention.
+- `valuation_equivalence.py` — EVA narrative matches its straight-to-equity table
+  (dropped the false "yritysarvo minus nettovelka" claim).
+- `assemble.py` — sensitivity and DCF-detail injection now **strip+replace**
+  (idempotent, refresh stale baked blocks) instead of append/skip; new
+  `_inject_dcf_caveats` adds the WACC + terminal-EBIT blocks to §9.
+- `render.py` — wide-table headers wrap (no more "Oma pääoma ilmaKnop…" collision);
+  `_resolve_section_refs` remaps `osio N` prose refs from internal-id to display
+  numbers (fixes the systematic off-by-one); cover headline relabeled
+  "Oman pääoman arvo (realistinen perusskenaario)".
+- `dcf_detail.py` + `sensitivity.py` — new WACC-vs-credit-risk caveat and an
+  alternative terminal-EBIT-margin value range (both fire on Athlos; numbers
+  unchanged — engine outputs are never overwritten).
+
+New `app/report_qa.py` — advisory QA over the ASSEMBLED report (duplicate-block
+hash, sensitivity center-vs-headline calibration ±5%, euro-figure reconciliation),
+wired into `store.report_readiness` (surfaced via `GET /api/runs/{rid}/readiness`
+as `warnings`), **never blocks** a delivery. Skipped two reviewer-suggested checks
+on purpose: cumulative-monotonic (a signed-cashflow cumulative is legitimately
+non-monotonic) and data-layer corrupted-header (that collision is a CSS artifact,
+fixed at the source).
+
+Prompt edits (`singlewriter.txt`, apply to **new runs only**): forbid DCF/EVA
+weight splits, drop the stale "(painotettu)" card + competing EV/odotusarvo cards,
+terminology vocab, optimistic scenario must discount to the realization year with
+forecast net debt + dilution, warn when one scenario drives >70% of expected value,
+bridge annual credit risk to a cumulative probability.
+
+Open / notes:
+- Prompt changes are unverified on a live run (won't generate on prod without
+  approval). Do one test generation when convenient to eyeball scenario/weighting.
+- QA prose-reconciliation has minor false positives (e.g. flags the Y-tunnus
+  `2752258`) — advisory only, tune later.
+- Archived pipeline `Yhden kirjoittajan raportti (oletus, vanha ajohistoria)`
+  still has the old prompt — unused (prod routes to the exact `(oletus)` name),
+  harmless.
+- #13 peers left as the accepted limitation (engine hardcodes `peers: []`).
+
 ## Project map — repos, local paths, live URLs
 
 Two GitHub repos, worked on together as one product (this machine is
