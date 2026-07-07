@@ -767,3 +767,73 @@ live** — no report run has actually gone through Resend yet, so PDF
 attachment delivery is unconfirmed end-to-end. Next: run one real
 `/testi` generation with `delivery_email` set (ask before running, per
 the rule above) and confirm the email arrives with the PDF attached.
+
+## 2026-07-07 (cont.) — PDF export crash fixed (no D-Bus in the container)
+
+`render_pdf` in `app/render.py` was crashing on every run: Chrome's
+headless `--print-to-pdf` tries to connect to `/run/dbus/system_bus_socket`,
+which doesn't exist in the Railway Docker image (`ERROR:dbus/bus.cc:405`).
+Fixed by setting `DBUS_SESSION_BUS_ADDRESS=/dev/null` in the subprocess env
+and adding `--disable-dev-shm-usage`. Commit `72cb99c`. Tests pass (98);
+**not yet verified against a real live PDF export** — next run should
+confirm a PDF actually downloads/attaches, not just that Chrome exits 0.
+
+## 2026-07-07 (cont.) — Public paid checkout now auto-generates (was manual)
+
+Closed the client-site gap from the "colleague-list execution" section
+above: the public homepage → company page → Stripe checkout flow
+("existing financials" product only) now auto-starts generation instead
+of an operator fulfilling by hand.
+
+**Backend** (`cb809ad`): new `POST /api/public/checkout-generate`
+(unauthenticated, same honeypot + IP rate limit as `/api/orders`,
+idempotent on `stripe_session_id` so a page reload doesn't double-generate
+or double-mint a key). Resolves the paid `business_id` (y-tunnus) to a
+Valuatum FID via `valuatum.search_company` (heuristic pick when there's
+more than one candidate model — see `_pick_checkout_candidate` in
+`main.py`, documented as a ponytail-tagged guess, not guaranteed correct),
+mints a single-use `access_key` (`generations_limit=1`, consumed
+immediately), and starts the run with `delivery_email` set so the
+existing Resend code actually fires. Orders table gained
+`stripe_session_id`/`access_key`/`run_id`/`fid` columns
+(`create_paid_order` in `store.py`) so the operator dashboard still sees
+these alongside manually-fulfilled orders. `email_delivery.py`'s
+`send_report_ready` now includes a `{CLIENT_SITE_URL}/testi?key=&rid=`
+link in the email body when the run has an access key — `CLIENT_SITE_URL`
+is now set in Railway (`https://valuatum-arvonmaaritys.vercel.app`). New
+test: `test_public_checkout_generate_mints_key_and_starts_run` (covers the
+mint-and-consume ordering bug I caught myself: the checkout call must
+consume the generation itself, or the same key could still fire a free
+`/api/expert/generate` afterward). 99 tests pass.
+
+**Frontend** (`Company_valuation_nettisivut@6952ee0`): `BuyBox.tsx` gained
+a free-text "info the AI can't find" field and now sends `businessId`
+(y-tunnus) through checkout metadata (Stripe metadata values are capped at
+500 chars, DB/model allow 4000 — only the Stripe round-trip is truncated).
+`kassa/valmis/page.tsx` calls the new endpoint for `kind==='existing'`
+only (`import`/`creditsafe` still need a human — upload/Creditsafe fetch
+isn't wired to auto-generation) and shows a live "Seuraa raporttia tästä"
+link plus an excl@valuatum.com contact line on the thank-you page.
+`ExpertApp.tsx` (`/testi`) now reads `?key=&rid=` from the URL on mount
+and jumps straight into that run (`resumeFromLink`) instead of requiring
+manual key re-entry — this is what makes the emailed/on-screen link
+actually useful. Also added a persistent "if something goes wrong,
+excl@valuatum.com" footer line. `npm run build` + `tsc --noEmit` clean
+(one pre-existing unrelated error in `.next/dev/types` about
+`asiantuntija/page` — not caused by this change, noted in an earlier
+session too).
+
+**Not verified / open:**
+- No real checkout has been run through this path yet (ask before running
+  — same rule as report generations).
+- **`STRIPE_SECRET_KEY` is still not set on Vercel** (see "Deferred / not
+  done" above) — so the client site is still in demo-checkout mode in
+  production. This code is ready for real payments but real money won't
+  flow until that key is set — that's a decision for whoever owns the
+  Stripe account, not something to flip unasked.
+- The FID-resolution heuristic (`_pick_checkout_candidate`) has never
+  been exercised against a real ambiguous multi-model company end-to-end
+  in this flow — only in the unit test's single-candidate case.
+- `import`/`creditsafe` checkout kinds are unchanged (still manual) —
+  full auto-generation for those needs the file-storage and Creditsafe
+  work noted elsewhere in this file first.
