@@ -1463,11 +1463,18 @@ def render_pdf(report, out_path):
         f.write(html_str)
         html_path = f.name
     try:
+        # Railway/Docker containers have no D-Bus daemon; Chrome's headless
+        # print-to-pdf tries to connect to it and crashes (dbus/bus.cc:405
+        # "Failed to connect to socket /run/dbus/..."). Pointing the bus
+        # address at /dev/null makes those calls fail fast instead of
+        # crashing the renderer. --disable-dev-shm-usage avoids the other
+        # classic Chrome-in-Docker crash (tiny /dev/shm).
+        env = {**os.environ, "DBUS_SESSION_BUS_ADDRESS": "/dev/null"}
         proc = subprocess.run(
             [chrome, "--headless=new", f"--print-to-pdf={out_path}",
              "--no-pdf-header-footer", "--virtual-time-budget=12000",
-             "--no-sandbox", f"file://{html_path}"],
-            capture_output=True, text=True, timeout=120)
+             "--no-sandbox", "--disable-dev-shm-usage", f"file://{html_path}"],
+            capture_output=True, text=True, timeout=120, env=env)
         if proc.returncode != 0 or not os.path.exists(out_path):
             raise RuntimeError("PDF-renderöinti epäonnistui:\n" + (proc.stderr or "")[:2000])
     finally:
