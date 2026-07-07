@@ -1,5 +1,9 @@
 # Handoff — 2026-07-05
 
+## ⛔ Never run a report generation against prod without asking first — see CLAUDE.md
+This includes "just a verification run" suggested by a previous handoff's
+"pick up here" section. Ask, then run.
+
 ## 🚨 PRODUCTION IS PAUSED (cost incident 2026-07-05)
 2-generation runs hit $6+. All report generation is now blocked in prod:
 `openrouter.runs_paused()` defaults to PAUSED whenever APP_TOKEN is set and
