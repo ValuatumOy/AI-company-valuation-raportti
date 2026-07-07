@@ -2,14 +2,10 @@
 # for the JSON→HTML report generator). Frontend deploys separately to Vercel.
 FROM python:3.11-slim
 
-# node → runs scripts/generate.js;  chromium → PDF;  fonts → report rendering;
-# dbus-user-session → provides dbus-run-session, giving headless Chrome's
-# print-to-pdf a throwaway session bus (this minimal image has no D-Bus
-# daemon at all, which crashed every PDF export — see app/render.py).
+# node → runs scripts/generate.js;  chromium → PDF;  fonts → report rendering.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nodejs \
         chromium \
-        dbus-user-session \
         fonts-dejavu-core \
         fonts-liberation \
         ca-certificates \
@@ -28,6 +24,16 @@ COPY scripts   /app/scripts
 COPY template  /app/template
 # Backend app + vendored Valuatum kit.
 COPY pipeline-runner/backend /app/pipeline-runner/backend
+
+# Run as a real (non-root) user. Headless Chrome's --print-to-pdf hard-crashes
+# (SIGTRAP) when run as EUID 0 in this image — confirmed by isolating the
+# exact failing syscall path via `railway ssh`: identical flags/command only
+# crash as root, never as a regular user. Give it a real home dir (Chrome's
+# headless profile-directory setup needs one) and own everything it writes to.
+RUN useradd -m -u 10001 appuser \
+    && chown -R appuser:appuser /app /data
+USER appuser
+ENV HOME=/home/appuser
 
 WORKDIR /app/pipeline-runner/backend
 EXPOSE 8080

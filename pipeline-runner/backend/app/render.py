@@ -1463,21 +1463,15 @@ def render_pdf(report, out_path):
         f.write(html_str)
         html_path = f.name
     try:
-        # Railway/Docker containers have no D-Bus daemon; Chrome's headless
-        # print-to-pdf tries to connect to one and crashes (dbus/bus.cc:405
-        # "Failed to connect to socket /run/dbus/..."). Pointing
-        # DBUS_SESSION_BUS_ADDRESS at /dev/null did NOT fix this in
-        # production — it's not a valid D-Bus address string, so Chrome just
-        # logs a second error ("Address does not contain a colon") and still
-        # fails the same way. dbus-run-session (from the dbus-user-session
-        # apt package) gives Chrome a real, working throwaway session bus
-        # instead of fighting the missing one. Falls back to a bare
-        # invocation if dbus-run-session isn't installed (e.g. local dev).
+        # Headless Chrome's --print-to-pdf hard-crashed (SIGTRAP, exit 133)
+        # every time when the container process ran as root — confirmed live
+        # via `railway ssh`: identical command/flags, only the EUID differed.
+        # The noisy "Failed to connect to the bus" dbus errors in the logs
+        # were a red herring (present in successful runs too); the real fix
+        # is that the container now runs as a non-root user (see Dockerfile).
         cmd = [chrome, "--headless=new", f"--print-to-pdf={out_path}",
                "--no-pdf-header-footer", "--virtual-time-budget=12000",
                "--no-sandbox", "--disable-dev-shm-usage", f"file://{html_path}"]
-        if shutil.which("dbus-run-session"):
-            cmd = ["dbus-run-session", "--"] + cmd
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if proc.returncode != 0 or not os.path.exists(out_path):
             raise RuntimeError(
