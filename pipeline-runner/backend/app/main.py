@@ -311,6 +311,23 @@ async def company_search(q: str):
         raise HTTPException(500, str(e))
 
 
+_SEARCH_HITS: dict[str, list[float]] = {}
+_SEARCH_LIMIT, _SEARCH_WINDOW_S = 60, 60.0  # search-as-you-type needs a per-minute cap, not per-hour
+
+
+def _search_rate_ok(ip: str) -> bool:
+    import time
+
+    now = time.monotonic()
+    hits = [t for t in _SEARCH_HITS.get(ip, []) if now - t < _SEARCH_WINDOW_S]
+    if len(hits) >= _SEARCH_LIMIT:
+        _SEARCH_HITS[ip] = hits
+        return False
+    hits.append(now)
+    _SEARCH_HITS[ip] = hits
+    return True
+
+
 @app.get("/api/public/company-search")
 async def company_search_public(q: str, request: Request):
     """Public, unauthenticated version of /api/company-search for the client
@@ -323,8 +340,12 @@ async def company_search_public(q: str, request: Request):
         return []
     ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
         or (request.client.host if request.client else "?")
-    if not _order_rate_ok(ip):
-        raise HTTPException(429, "liian monta hakua — yritä myöhemmin uudelleen")
+    # Own limiter, not _order_rate_ok's 5/hour — that's sized for order
+    # submission, not autocomplete, and a search box blows through 5/hour in
+    # one typing session (bug found live: "Athlos" then "Athlos Oy" locked
+    # the visitor out of search for an hour).
+    if not _search_rate_ok(ip):
+        raise HTTPException(429, "liian monta hakua — yritä hetken kuluttua uudelleen")
     try:
         candidates = await valuatum.search_company(q)
     except httpx.HTTPStatusError as e:
