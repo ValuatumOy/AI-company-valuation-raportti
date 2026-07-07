@@ -62,6 +62,11 @@ class ExpertGenerateIn(BaseModel):
     fid: int
     company_name: str = Field(min_length=1, max_length=300)
     company_code: Optional[str] = None
+    industry_text: Optional[str] = None
+    industry_code: Optional[str] = None
+    industry_id: Optional[Any] = None
+    industry_tree: Optional[Any] = None
+    delivery_email: Optional[str] = Field(default=None, max_length=200, pattern=r".+@.+\..+")
     pipeline_id: Optional[str] = None
     user_input: str = Field(default="", max_length=4000)
 

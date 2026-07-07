@@ -41,10 +41,61 @@ def _slug(value: str) -> str:
 def _normalize_query(query: str) -> tuple[str, str]:
     """A Finnish y-tunnus is 7 digits + a check digit (hyphen optional, e.g.
     "1612398-8" or "16123988"); anything else is treated as a name search."""
-    digits = re.sub(r"[\s-]", "", query.strip())
-    if digits.isdigit() and len(digits) == 8:
-        return "code", f"{digits[:7]}-{digits[7]}"
+    clean = re.sub(r"[\s-]", "", query.strip()).upper()
+    code = clean[:-1] if clean.endswith("K") else clean
+    if code.isdigit() and len(code) == 8:
+        return "code", f"{code[:7]}-{code[7]}"
     return "name", query.strip()
+
+
+def _industry_metadata(company: dict | None) -> dict:
+    company = company or {}
+    return {
+        "industry_text": company.get("industryText"),
+        "industry_code": company.get("industryCode"),
+        "industry_id": company.get("industryId"),
+        "industry_tree": company.get("industryTree"),
+    }
+
+
+def _apply_company_metadata(data: dict, metadata: dict | None) -> dict:
+    """Hydrate the stage-0 FAKTAT meta block with company-search metadata.
+
+    The /modeldata endpoint does not currently include industry details, but
+    /rest/company does. Keep this as a small overlay so the numeric export stays
+    the source of truth and the report writer can still read meta.industry.
+    """
+    if not isinstance(data, dict) or not isinstance(metadata, dict):
+        return data
+    meta = data.setdefault("meta", {})
+    if not isinstance(meta, dict):
+        data["meta"] = meta = {}
+
+    industry_text = metadata.get("industry_text")
+    if industry_text:
+        meta["industry"] = industry_text
+    industry_code = metadata.get("industry_code")
+    if industry_code is not None and industry_code != "":
+        meta["industry_code"] = str(industry_code)
+    if metadata.get("industry_id") is not None:
+        meta["industry_id"] = metadata.get("industry_id")
+    if metadata.get("industry_tree") is not None:
+        meta["industry_tree"] = metadata.get("industry_tree")
+    return data
+
+
+async def _company_rows(param: str, value: str) -> list[dict]:
+    token = os.environ.get("VALUATUM_TOKEN")
+    if not token:
+        raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(
+            COMPANY_URL,
+            params={param: value},
+            headers={"accept": "application/json", "authorization": f"Bearer {token}"},
+        )
+    resp.raise_for_status()
+    return resp.json() or []
 
 
 async def search_company(query: str) -> list[dict]:
@@ -53,21 +104,13 @@ async def search_company(query: str) -> list[dict]:
     not just the operator's pre-fetched ones. Returns one entry per
     (company, model) pair, since a company can have more than one followed
     model (fid); the caller picks when there's more than one candidate."""
-    token = os.environ.get("VALUATUM_TOKEN")
-    if not token:
-        raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
     param, value = _normalize_query(query)
     if len(value) < 2:
         return []
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(
-            COMPANY_URL,
-            params={param: value},
-            headers={"accept": "application/json", "authorization": f"Bearer {token}"},
-        )
-    resp.raise_for_status()
+    rows = await _company_rows(param, value)
     out = []
-    for c in resp.json() or []:
+    for c in rows:
+        industry = _industry_metadata(c)
         for m in c.get("models") or []:
             fid = m.get("followedModelId")
             if fid is None:
@@ -80,10 +123,44 @@ async def search_company(query: str) -> list[dict]:
                 "fid": fid,
                 "company_name": c.get("companyName"),
                 "company_code": c.get("companyCode"),
-                "industry_text": c.get("industryText"),
+                **industry,
                 "analyst_name": m.get("analystName"),
             })
     return out
+
+
+async def lookup_company_metadata(
+    fid: int,
+    company_name: str | None = None,
+    company_code: str | None = None,
+) -> dict:
+    """Best-effort Valuatum /company metadata lookup for a known followed model.
+
+    Used by the exporter/admin path too, so meta.industry is not limited to the
+    self-serve UI that already called /api/company-search.
+    """
+    queries = [q for q in (company_code, company_name) if q]
+    seen: set[tuple[str, str]] = set()
+    for query in queries:
+        param, value = _normalize_query(str(query))
+        if len(value) < 2 or (param, value) in seen:
+            continue
+        seen.add((param, value))
+        try:
+            rows = await _company_rows(param, value)
+        except Exception:
+            continue
+        fallback = rows[0] if rows else None
+        for c in rows:
+            for m in c.get("models") or []:
+                try:
+                    if int(m.get("followedModelId")) == int(fid):
+                        return _industry_metadata(c)
+                except (TypeError, ValueError):
+                    continue
+        if fallback:
+            return _industry_metadata(fallback)
+    return {}
 
 
 def _run(cmd: list[str]) -> tuple[int, str, str]:
@@ -130,6 +207,10 @@ async def export_stream(
     actuals: int = 15,
     estimates: int = 10,
     company_code_override: str | None = None,
+    industry_text: str | None = None,
+    industry_code: str | None = None,
+    industry_id=None,
+    industry_tree=None,
 ):
     """Async generator yielding {step,...} events, ending with a 'ready' (or
     'error') event that carries the final JSON."""
@@ -197,6 +278,20 @@ async def export_stream(
                 )
 
         data = json.loads(complete.read_text(encoding="utf-8"))
+        supplied_metadata = {
+            "industry_text": industry_text,
+            "industry_code": industry_code,
+            "industry_id": industry_id,
+            "industry_tree": industry_tree,
+        }
+        if not any(v is not None and v != "" for v in supplied_metadata.values()):
+            meta = data.get("meta") or {}
+            supplied_metadata = await lookup_company_metadata(
+                fid=fid,
+                company_name=company_name,
+                company_code=company_code or meta.get("y_tunnus"),
+            )
+        data = _apply_company_metadata(data, supplied_metadata)
         warnings += _analyze(data)
         filename = f"{_slug(company_name)}_{fid}_modeldata_complete.json"
         yield {"step": "ready", "filename": filename, "warnings": warnings,

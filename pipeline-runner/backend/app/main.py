@@ -15,7 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 
 load_dotenv()
 
-from . import openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
+from . import email_delivery, openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
 from .models import (  # noqa: E402
     AccessKeyIn, CompareIn, ExpertGenerateIn, FetchIn, OrderIn, OrderStatusIn,
     PipelineIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
@@ -48,7 +48,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-05-runs-paused-switch"
+BUILD = "2026-07-07-industry-metadata"
 
 # Round-2 refinement writer. Preserve-and-patch is an editing task, not creative
 # writing — Sonnet 5 ($2/$10) does it at 1/2.5 of Opus 4.8's price; round-1
@@ -435,6 +435,12 @@ async def _drive_run(rid: str, only=None, from_order=None):
         except Exception:
             pass
     finally:
+        try:
+            final_run = store.get_run(rid)
+            if final_run and final_run.get("status") == "ok":
+                await email_delivery.send_report_ready(rid)
+        except Exception as e:
+            print(f"report email delivery failed for {rid}: {e}", flush=True)
         _RUN_TASKS.pop(rid, None)
 
 
@@ -661,6 +667,16 @@ async def expert_generate(body: ExpertGenerateIn, request: Request):
     params = {"company_name": body.company_name}
     if body.company_code:
         params["company_code"] = body.company_code
+    if body.industry_text:
+        params["industry_text"] = body.industry_text
+    if body.industry_code:
+        params["industry_code"] = body.industry_code
+    if body.industry_id is not None:
+        params["industry_id"] = body.industry_id
+    if body.industry_tree is not None:
+        params["industry_tree"] = body.industry_tree
+    if body.delivery_email:
+        params["delivery_email"] = body.delivery_email.strip()
     if body.user_input.strip():
         params["user_input"] = body.user_input.strip()
     rid = store.create_run(

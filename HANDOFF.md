@@ -44,7 +44,7 @@ free-text company entry — he was stuck picking from the operator's
 pre-fetched company list. Both are now fixed. A verification run to prove
 it end-to-end has **NOT** been done — see "Pick up here".
 
-**Backend (`AI-company-valuation-raportti`, commit `7e419b8`):**
+**Backend (`AI-company-valuation-raportti`, commit `7e419b8` + latest continuation commit):**
 - **New `GET /api/company-search?q=...`** (`app/valuatum.py:search_company`,
   wired in `app/main.py`) resolves a company name or Finnish y-tunnus to
   Valuatum FID(s) via the real profinder REST API
@@ -58,11 +58,15 @@ it end-to-end has **NOT** been done — see "Pick up here".
   the correct 4 model candidates (parent + "K"-suffix group company, each
   with a "Profinder" auto model and a "Niklas Mäki" manual model). fid=184362
   ("Profinder" model, parent company code) is the one used all along.
-  **Only maps `fid`/`company_name`/`company_code`/`industry_text`/
-  `analyst_name`** — the Valuatum response also has `industryCode`,
-  `industryId`, and a full `industryTree` that are NOT mapped yet (trivial
-  to add in `valuatum.search_company` if something downstream needs them —
-  e.g. `meta.industry` is hardcoded `None` in the exporter today).
+  Now maps `fid`/`company_name`/`company_code`/`industry_text`/
+  `industry_code`/`industry_id`/`industry_tree`/`analyst_name`.
+  `POST /api/expert/generate` accepts those industry fields, the `/testi`
+  frontend forwards them, and stage 0 overlays them into `input_data.meta`
+  (`industry`, `industry_code`, `industry_id`, `industry_tree`) before the
+  report writer sees the FAKTAT JSON. `export_stream` also does a best-effort
+  `/rest/company` metadata lookup by FID for admin/operator exports, so the
+  old `meta.industry = None` gap should be closed when Valuatum can match the
+  FID.
   Added to the expert GET allowlist in `main.py` (`_EXPERT_GET` regex).
 - **Fixed the round-2 refinement cap** (`app/store.py:lineage_depth`,
   used in `main.py`'s `round2_run`). The old check
@@ -74,16 +78,17 @@ it end-to-end has **NOT** been done — see "Pick up here".
   depth, so round 2 and round 3 succeed (2 refinements) and a 3rd refinement
   attempt correctly 429s. New regression test:
   `test_round2_cap_bites_across_a_refinement_chain`.
-- Tests: 96 passed (was 92), all new tests for company-search parsing +
-  the lineage-depth cap.
-- **Not started: email delivery.** Neither repo has ANY email-sending
-  integration (no Resend/SendGrid/SMTP/nodemailer — checked, grepped both
-  repos, nothing). This is the next piece the user asked for after the
-  above. Needs a provider decision (Resend is the common pick for a
-  Vercel+FastAPI stack, but this wasn't decided — ask the user) + an API
-  key + a "send report" call point (likely right after a round finishes,
-  in `_drive_run`/`finishRun` equivalent, or a dedicated endpoint the
-  frontend calls once `reportSrc` loads).
+- Tests: 98 passed, including industry metadata mapping, expert generate
+  params, round-2 cap, and a fake Resend email-with-PDF-attachment test.
+- **Email delivery scaffold is now built but inert until env vars are set.**
+  New `app/email_delivery.py` sends finished reports through Resend's REST API
+  after `_drive_run` finishes with status `ok`, but only when the run has
+  `params.delivery_email` and Railway has `RESEND_API_KEY` plus
+  `REPORT_EMAIL_FROM` (or `RESEND_FROM`). `REPORT_EMAIL_ENABLED=0` disables it.
+  It attaches the generated PDF; if PDF rendering fails it falls back to an HTML
+  attachment. `/testi` now has an optional email field that becomes
+  `delivery_email`. No real email has been sent and no provider env vars were
+  configured in this session.
 
 **Frontend (`Company_valuation_nettisivut`, commit `c9565fa`):**
 - `src/expert/ExpertApp.tsx` — reordered the round-1/round-2 display: the
@@ -101,13 +106,18 @@ it end-to-end has **NOT** been done — see "Pick up here".
   free-text "Yritys (nimi tai y-tunnus)" input + "Hae" button, calling the
   new `/api/company-search`. Shows a picker list when a search returns
   multiple model candidates (see the 4-candidates-per-company note above),
-  auto-selects when there's exactly one. `src/expert/expertApi.ts` has the
-  new `searchCompany()` + `CompanyCandidate` type.
+  auto-selects when there's exactly one, now displays the industry label in
+  candidate rows, and forwards `industry_text`/`industry_code`/
+  `industry_id`/`industry_tree` to the backend. `src/expert/expertApi.ts` has
+  the new `searchCompany()` + `CompanyCandidate` type. The form also has an
+  optional delivery email field; this only sends after backend env vars for
+  Resend are configured.
 - Also fixed a latent bug in `src/components/InlineMd.tsx` (module-level
   regex `.lastIndex` reset on every render — shared mutable state, unsafe
   under concurrent renders); made the regex local to the component. Small,
   unrelated, found while touching nearby files.
-- Build + typecheck clean (`npm run build`), no test suite in this repo.
+- Build + typecheck clean (`npm.cmd run build` on Windows; `npm run build`
+  hits the local PowerShell execution-policy block), no test suite in this repo.
 
 ## What was NOT verified this session (important)
 
@@ -169,20 +179,21 @@ it end-to-end has **NOT** been done — see "Pick up here".
 1. **Get explicit user approval, then run one real round-1 + round-2 report
    through `/testi`** (or the admin runner) to confirm: the free-text
    company search actually flows through to a real generation, the
-   round-1 report is now clearly visible before the clarify panel, and the
-   round-2 cap fix behaves (2 refinements allowed, 3rd blocked). Check `GET
-   /api/runs` shows nothing `"status":"running"` before pushing anything
-   to this repo's `main` while that run is live.
-2. **Build email delivery** (the user's next explicit ask after this
-   batch). Needs: a provider decision (ask the user — Resend is a
-   reasonable default suggestion for a Vercel+FastAPI stack, not decided),
-   an API key/env var, and a send call-point once a round's report is
-   ready (round-1 finishing, and/or round-2/final finishing — probably
-   both, worth asking the user whether round-1 should email too or only
-   the final one).
-3. Optional/low-effort: map `industryCode`/`industryTree` in
-   `valuatum.search_company` if `meta.industry` (currently hardcoded
-   `None`) should start getting populated from the search result.
+   round-1 report is now clearly visible before the clarify panel,
+   `input_data.meta.industry*` is populated from `/rest/company`, optional
+   email delivery works when env vars are configured, and the round-2 cap
+   behaves (2 refinements allowed, 3rd blocked). Check `GET /api/runs` shows
+   nothing `"status":"running"` before pushing anything to this repo's `main`
+   while that run is live.
+2. **Configure email delivery if/when the user wants it live:** choose/verify
+   the sender domain in Resend, then set Railway `RESEND_API_KEY` and
+   `REPORT_EMAIL_FROM` (or `RESEND_FROM`). No env vars were set here and no
+   email was sent. The code will send both round-1 and refinement outputs when
+   `delivery_email` exists because round-2 inherits parent params; change this
+   if the product decision becomes "final only".
+3. Still open after this session: signed report links/accountless paid
+   self-serve, Stripe webhook durability, real upload storage, friendly UI copy
+   for paused/429 errors, and the live `/testi` verification above.
 
 ## 🚨 PRODUCTION IS PAUSED (cost incident 2026-07-05)
 2-generation runs hit $6+. All report generation is now blocked in prod:

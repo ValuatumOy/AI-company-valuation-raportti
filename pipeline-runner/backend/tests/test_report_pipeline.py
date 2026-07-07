@@ -1226,13 +1226,28 @@ def test_expert_key_is_capped_and_scoped(monkeypatch):
     pid = store.list_pipelines()[0]["id"]
     key = store.create_access_key("E", generations_limit=1)["key"]
     exp = {"Authorization": f"Bearer {key}"}
-    gen = {"fid": 12345, "company_name": "Testi Oy", "pipeline_id": pid}
+    gen = {
+        "fid": 12345,
+        "company_name": "Testi Oy",
+        "pipeline_id": pid,
+        "industry_text": "Software",
+        "industry_code": "62.100",
+        "industry_id": 123,
+        "industry_tree": [{"code": "62", "name": "IT"}],
+        "delivery_email": "owner@testi.fi",
+    }
 
     # One generation allowed via the self-serve endpoint, consuming quota.
     r = c.post("/api/expert/generate", json=gen, headers=exp)
     assert r.status_code == 200
     rid = r.json()["run_id"]
-    assert c.get(f"/api/runs/{rid}", headers=exp).status_code == 200   # owns it
+    own = c.get(f"/api/runs/{rid}", headers=exp)
+    assert own.status_code == 200   # owns it
+    assert own.json()["params"]["industry_text"] == "Software"
+    assert own.json()["params"]["industry_code"] == "62.100"
+    assert own.json()["params"]["industry_id"] == 123
+    assert own.json()["params"]["industry_tree"] == [{"code": "62", "name": "IT"}]
+    assert own.json()["params"]["delivery_email"] == "owner@testi.fi"
     # Quota now exhausted → second generation blocked.
     assert c.post("/api/expert/generate", json=gen, headers=exp).status_code == 403
     # Deny-by-default: raw run creation + admin surfaces are off-limits.
@@ -1530,6 +1545,7 @@ def test_normalize_query_detects_ytunnus_vs_name():
 
     assert valuatum._normalize_query("1612398-8") == ("code", "1612398-8")
     assert valuatum._normalize_query("16123988") == ("code", "1612398-8")
+    assert valuatum._normalize_query("16123988K") == ("code", "1612398-8")
     assert valuatum._normalize_query("Valuatum Oy") == ("name", "Valuatum Oy")
 
 
@@ -1549,6 +1565,9 @@ def test_search_company_maps_models_to_fid_candidates(monkeypatch):
                 "companyName": "Valuatum Oy",
                 "companyCode": "1612398-8",
                 "industryText": "Software",
+                "industryCode": "62.100",
+                "industryId": 123,
+                "industryTree": [{"id": 12, "code": "62", "name": "IT"}],
                 "models": [
                     {"followedModelId": "184362", "analystName": "A"},
                     {"followedModelId": 999, "analystName": "B"},
@@ -1574,10 +1593,31 @@ def test_search_company_maps_models_to_fid_candidates(monkeypatch):
     out = asyncio.run(valuatum.search_company("1612398-8"))
     assert out == [
         {"fid": 184362, "company_name": "Valuatum Oy", "company_code": "1612398-8",
-         "industry_text": "Software", "analyst_name": "A"},
+         "industry_text": "Software", "industry_code": "62.100", "industry_id": 123,
+         "industry_tree": [{"id": 12, "code": "62", "name": "IT"}],
+         "analyst_name": "A"},
         {"fid": 999, "company_name": "Valuatum Oy", "company_code": "1612398-8",
-         "industry_text": "Software", "analyst_name": "B"},
+         "industry_text": "Software", "industry_code": "62.100", "industry_id": 123,
+         "industry_tree": [{"id": 12, "code": "62", "name": "IT"}],
+         "analyst_name": "B"},
     ]
+
+
+def test_apply_company_metadata_hydrates_stage0_meta():
+    from app import valuatum
+
+    data = {"meta": {"company_name": "Valuatum Oy", "industry": None, "industry_code": None}}
+    out = valuatum._apply_company_metadata(data, {
+        "industry_text": "62.100 Computer programming activities",
+        "industry_code": "62.100",
+        "industry_id": 123,
+        "industry_tree": [{"code": "62", "name": "Computer programming"}],
+    })
+
+    assert out["meta"]["industry"] == "62.100 Computer programming activities"
+    assert out["meta"]["industry_code"] == "62.100"
+    assert out["meta"]["industry_id"] == 123
+    assert out["meta"]["industry_tree"] == [{"code": "62", "name": "Computer programming"}]
 
 
 def test_company_search_endpoint_is_expert_reachable(monkeypatch):
@@ -1589,6 +1629,7 @@ def test_company_search_endpoint_is_expert_reachable(monkeypatch):
     async def fake_search(query):
         return [{"fid": 184362, "company_name": "Valuatum Oy",
                   "company_code": "1612398-8", "industry_text": None,
+                  "industry_code": None, "industry_id": None, "industry_tree": None,
                   "analyst_name": None}]
 
     monkeypatch.setattr(main.valuatum, "search_company", fake_search)
@@ -1599,6 +1640,60 @@ def test_company_search_endpoint_is_expert_reachable(monkeypatch):
     r = c.get("/api/company-search", params={"q": "1612398-8"}, headers=exp)
     assert r.status_code == 200
     assert r.json()[0]["fid"] == 184362
+
+
+def test_email_delivery_sends_pdf_attachment_with_resend(monkeypatch, tmp_path):
+    import asyncio
+    from app import email_delivery
+
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+    calls = {}
+
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("REPORT_EMAIL_FROM", "Valuatum <reports@example.com>")
+    monkeypatch.setattr(email_delivery.store, "get_run", lambda rid: {
+        "id": rid,
+        "params": {"delivery_email": "owner@testi.fi"},
+        "parent_run_id": None,
+    })
+    monkeypatch.setattr(email_delivery.store, "final_report_json", lambda rid: {
+        "meta": {"company_name": "Valuatum Oy"},
+    })
+    monkeypatch.setattr(email_delivery.report, "generate_pdf", lambda rid, report_json: str(pdf))
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"id":"email_123"}'
+
+        def json(self):
+            return {"id": "email_123"}
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            calls["url"] = url
+            calls["headers"] = headers
+            calls["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(email_delivery.httpx, "AsyncClient", FakeClient)
+    out = asyncio.run(email_delivery.send_report_ready("run123"))
+
+    assert out == {"sent": True, "provider": "resend", "id": "email_123"}
+    assert calls["url"] == email_delivery.RESEND_URL
+    assert calls["headers"]["Authorization"] == "Bearer re_test"
+    assert calls["json"]["to"] == ["owner@testi.fi"]
+    assert calls["json"]["attachments"][0]["filename"].endswith(".pdf")
+    assert calls["json"]["attachments"][0]["content"]
 
 
 @pytest.mark.skipif(not render.pdf_available(), reason="no local Chromium")

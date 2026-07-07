@@ -10,7 +10,7 @@ requiring a hand-pasted JSON. The operator can still paste input_data directly.
 
 async def fetch_company_data(identifier: str, params: dict) -> dict:
     """identifier: a Valuatum FID (numeric). params: {company_name, company_code,
-    actuals?, estimates?}. Returns the FAKTAT input_data dict, or raises."""
+    industry_*, actuals?, estimates?}. Returns FAKTAT input_data, or raises."""
     from app import valuatum
 
     params = params or {}
@@ -28,6 +28,10 @@ async def fetch_company_data(identifier: str, params: dict) -> dict:
         actuals=int(params.get("actuals") or 15),
         estimates=int(params.get("estimates") or 10),
         company_code_override=params.get("company_code"),
+        industry_text=params.get("industry_text"),
+        industry_code=params.get("industry_code"),
+        industry_id=params.get("industry_id"),
+        industry_tree=params.get("industry_tree"),
     ):
         if ev.get("step") == "error":
             raise RuntimeError(ev.get("message") or "Valuatum-haku epäonnistui")
