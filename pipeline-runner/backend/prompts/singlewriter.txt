@@ -191,7 +191,7 @@ Jos vaiheen 2 tulokset viittaavat kansainväliseen toimintaan, kasvurahoitukseen
 * DCF-oletuksia, WACCia, markkinakertoimia, asiakasmääriä, ennusteita, arvostuskertoimia
 * yrityksen arvoa ilman selkeää lähdettä
 
-Merkitse kaikki verkkolähteisiin perustuvat väitteet lähdeviitteellä muodossa: [lähde, haettu pvm]
+Merkitse verkkolähteisiin perustuvat väitteet lähdeviitteellä TÄSMÄLLEEN muodossa "(lähde: verkkotunnus)" (esim. "(lähde: athlos.fi)") — EI muotoa "[lähde, haettu pvm]" äläkä mitään muuta kaarisulkeista poikkeavaa muotoa, koska vain tämä täsmällinen muoto muuttuu raportissa klikattavaksi linkiksi. Älä toista samaa lähdeviitettä useaan kertaan samassa kappaleessa — yksi viite kappaletta tai selvästi rajattua väitekokonaisuutta kohden riittää, ei jokaista virkettä kohden. Päivämäärä ("haettu") EI kuulu inline-viitteeseen — se näkyy vain osion 15 Lähderekisteri-taulukossa.
 
 Jos tieto on epävarma, kirjoita: "Julkisista lähteistä ei löytynyt riittävän varmennettua tietoa tästä markkinasignaalista."
 
@@ -529,7 +529,7 @@ Sitten 4–6 toimenpidettä (`heading` + `paragraph`-lohkot per toimenpide), kon
 
 ## 15. TILINPÄÄTÖSTAULUKOT JA LÄHTEET
 
-`paragraph` taustataulukoiden listasta. ### Toimialavertailu — `table` jos data, muuten `paragraph` "Toimialavertailua ei voida muodostaa…". ### Lähderekisteri — `table` (Lähde / Tieto / Haettu) jos lähteitä.
+`paragraph` taustataulukoiden listasta. ### Toimialavertailu — `table` jos data, muuten `paragraph` "Toimialavertailua ei voida muodostaa…". ### Lähderekisteri — `table` (Lähde / Tieto / Haettu) jos lähteitä. Lähde-sarakkeeseen KOKO URL-osoite (esim. "https://www.athlos.fi/uutiset"), poimittuna `[enrichment].source_register`-listan `source`-kentästä sellaisenaan — EI pelkkää verkkotunnusta äläkä kuvailevaa nimeä ("Yhtiön verkkosivut"). Tämä taulukko on koko raportin ainoa paikka, josta muualla tekstissä käytetyt "(lähde: verkkotunnus)"-viitteet saavat todellisen linkkiosoitteensa.
 
 ## 16. METODOLOGIA, TEKOÄLYN ROOLI JA RAJOITUKSET
 

@@ -88,9 +88,9 @@ LUOTETTAVUUSLUOKITUS markkinasignaaleille: Vahva (toteutunut kauppa, virallinen 
 
 TUOREUS: jos eri lähteet ovat ristiriidassa keskenään (esim. vanha markkinointiteksti kuvaa ilmaisen työkalun, mutta tuoreempi lähde kertoo yritysasiakkaista tai uusista tuotteista), käytä tuoreinta varmennettua tietoa äläkä esitä vanhentunutta kuvausta yhtiön nykyisenä liiketoimintana. Jos yhtiöllä on sekä ilmainen/itsepalvelutuote että maksullinen yritysasiakastuote, kerro molemmat äläkä kuvaa yhtiötä pelkän ilmaistyökalun kautta.
 
-LÄHTEIDEN LAATU: `source_register`-listaan kirjataan VAIN lähteitä, jotka kertovat jotain TÄSTÄ yhtiöstä, sen kilpailijoista tai sen markkinasta. ÄLÄ kirjaa yleisiä arvonmääritysmenetelmiä käsitteleviä sivuja (arvonmäärityslaskurit, opinnäytetyöt, blogit arvonmäärityksestä, verotusartikkelit) — ne eivät ole tämän yhtiön lähteitä vaan menetelmäkirjallisuutta, ja ne heikentävät raportin uskottavuutta. Jos hakutulos ei mainitse yhtiötä, sen kilpailijaa tai sen markkinaa, jätä se pois rekisteristä.
+LÄHTEIDEN LAATU: `source_register`-listaan kirjataan VAIN lähteitä, jotka kertovat jotain TÄSTÄ yhtiöstä, sen kilpailijoista tai sen markkinasta. ÄLÄ kirjaa yleisiä arvonmääritysmenetelmiä käsitteleviä sivuja (arvonmäärityslaskurit, opinnäytetyöt, blogit arvonmäärityksestä, verotusartikkelit) — ne eivät ole tämän yhtiön lähteitä vaan menetelmäkirjallisuutta, ja ne heikentävät raportin uskottavuutta. Jos hakutulos ei mainitse yhtiötä, sen kilpailijaa tai sen markkinaa, jätä se pois rekisteristä. `source_register[].source`-kenttään KOKO URL-osoite (esim. "https://www.athlos.fi/uutiset/..."), EI pelkkä verkkotunnus äläkä sivun kuvaileva nimi — raportin lähdeviitteet linkittyvät klikattaviksi vain tästä täydestä osoitteesta.
 
-Merkitse jokainen väite lähdeviitteellä [lähde, haettu pvm]. Jos epävarma: "Julkisista lähteistä ei löytynyt riittävän varmennettua tietoa."
+Merkitse jokainen väite lähdeviitteellä täsmälleen muodossa "(lähde: verkkotunnus)" (esim. "(lähde: athlos.fi)"), ei muodossa "[lähde, haettu pvm]". Jos epävarma: "Julkisista lähteistä ei löytynyt riittävän varmennettua tietoa."
 
 OUTPUT (palauta täsmälleen tämä JSON):
 {
