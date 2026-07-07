@@ -1,5 +1,35 @@
 # Handoff — 2026-07-07 (read this first)
 
+## Project map — repos, local paths, live URLs
+
+Two GitHub repos, worked on together as one product (this machine is
+Windows; paths below are for it):
+
+- **Backend + admin runner** — `github.com/ValuatumOy/AI-company-valuation-raportti`
+  (this repo). Local: `C:\Users\Lauri H\Desktop\Valuatum projektit\AI-company-valuation-raportti`.
+  - `pipeline-runner/backend` — FastAPI, deploys to Railway
+    (`https://valu-pipeline-production-88f2.up.railway.app`, project
+    `valu-pipeline`, service `valu-pipeline`, env `production`). Push to
+    `main` auto-redeploys in ~45s.
+  - `pipeline-runner/frontend` — the operator/admin tool (Vite/React),
+    deploys to Vercel at `https://frontend-one-phi-77.vercel.app`.
+- **Client site** — `github.com/ValuatumOy/Company_valuation_nettisivut`
+  (recently moved from the `Valuatum` org — `git remote` may still point
+  at the old `Valuatum/Company_valuation_nettisivut` URL and redirect; fine
+  to leave as-is, GitHub forwards it). Local:
+  `C:\Users\Lauri H\Desktop\Valuatum projektit\Company_valuation_nettisivut`.
+  Next.js, deploys to Vercel at `https://valuatum-arvonmaaritys.vercel.app`.
+  Push to `main` auto-redeploys.
+  - `/` — public marketing site + Stripe purchase flow (BuyBox → operator
+    fulfils manually, not self-serve yet).
+  - `/testi` — the expert self-serve interface (`src/expert/ExpertApp.tsx`),
+    invite-key gated (`exp_...`), this session's main focus. This is the
+    interface intended to become the production customer-facing flow.
+
+Both repos have their own `HANDOFF.md` (this file, and
+`../Company_valuation_nettisivut/HANDOFF.md`) — the nettisivut one is kept
+short and points back here for anything cross-repo.
+
 ## ⛔ Never run a report generation against prod without asking first — see CLAUDE.md
 This includes "just a verification run" suggested by a previous handoff's
 "pick up here" section. Ask, then run. The user said this explicitly, twice,
