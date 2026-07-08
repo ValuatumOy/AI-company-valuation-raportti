@@ -1,5 +1,20 @@
 # Handoff — 2026-07-08 (read this first)
 
+## 2026-07-08 (cont. 2) — Sage accent + table-layout fix (LIVE)
+
+CEO disliked the gold accent and the broken prose tables. Commit `989e5f6`,
+build `2026-07-08-brand-refresh-2`, 111 tests pass, verified on a live Athlos
+re-render:
+- Accent gold → tonal sage green (`#4F7A6A`/`#33604F`) — single-hue palette
+  with `#12352B`; section chips and chart segment labels now white-on-fill.
+- Table root cause: `overflow-wrap:anywhere` collapsed min-content widths to
+  ~1 char, starving the first column (mid-word breaks). Now `break-word`.
+  The two remaining `anywhere` uses (mcard values, wide-table headers) are
+  intentional.
+- `_render_table` alignment is content-aware (`_col_aligns`): only columns
+  whose cells are mostly figures stay right-aligned; prose columns left.
+- Cover mockup v3 (sage accent): same artifact URL as below.
+
 ## 2026-07-08 (cont.) — Brand refresh + cover mockup v2 (LIVE)
 
 New Valuatum brand applied to the whole report (`render.py`, commit `f626379`,
