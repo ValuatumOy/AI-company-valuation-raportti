@@ -1,5 +1,20 @@
 # Handoff — 2026-07-08 (read this first)
 
+## 2026-07-08 (cont.) — Brand refresh + cover mockup v2 (LIVE)
+
+New Valuatum brand applied to the whole report (`render.py`, commit `f626379`,
+build `2026-07-08-brand-refresh`): primary green `#12352B`, warm gold accent
+(`#D9973B`/`#B87A22`) replacing the old lime, display face Georgia (Gelasio
+webfont fallback for the PDF container), body = system sans. `C["lime"]` key
+kept but now holds the gold. Verified on a real prod Athlos re-render
+(`report.html?force=1` — old `#A6CE39`/Archivo absent, screenshot checked).
+
+Cover mockup v2 (user feedback: no overlapping texts, no boxes, brand color):
+https://claude.ai/code/artifact/cc8e4f8d-1648-45e3-ad06-55a9aa695347 —
+range-bar tags now all below the track on two staggered rows; explanations are
+hairline legend rows. Source: session scratchpad `kansisivu-mockup.html`
+(not in repo — copy it in if the design is approved for implementation).
+
 ## 2026-07-08 — $7.09 run explained + cost guards (LIVE)
 
 Colleague's Turun tislaamo run (`8d49a301…`) cost **$7.09 and failed at "Vaihe 3"**.
