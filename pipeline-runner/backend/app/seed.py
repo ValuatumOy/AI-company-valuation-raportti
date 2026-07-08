@@ -178,7 +178,11 @@ def _single_writer_stages():
             "prompt_template": _load_prompt("singlewriter.txt"),
             "expects_json": True,
             "web_search": False,
-            "max_tokens": 64000,  # whole report (all sections + tables + charts) in one call
+            # Whole report (all sections + tables + charts) in one call. 96k, not
+            # 64k: Fable's hidden thinking tokens count toward the cap, and a
+            # 'length' truncation triggers a full-price re-run of the whole stage
+            # (~2x cost — the 2026-07-08 $6.96 writer call). Headroom is cheaper.
+            "max_tokens": 96000,
             "validator_code": _load_validator("stage6_final.py"),
             "input_mapping": {
                 "input_data": "Vaihe 0 FAKTAT",

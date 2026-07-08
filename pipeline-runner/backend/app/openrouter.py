@@ -206,7 +206,10 @@ async def _openrouter_chat(
     # injecting a lot of context via the native agentic engine) can legitimately
     # run well past 10 min. Give such stages headroom — the run is a server-side
     # background task, so a long request is fine. Ordinary stages keep 600s.
-    client_timeout = 1500 if (max_tokens or 0) >= 40000 else 600
+    # 2700s, not 1500: a full Fable report at ~60-90k completion tokens runs
+    # 20-35 min. A client timeout here retries the call — and the provider bills
+    # the aborted generation anyway — so an undersized timeout multiplies cost.
+    client_timeout = 2700 if (max_tokens or 0) >= 40000 else 600
     body = None
     for attempt in range(4):
         last = attempt == 3
@@ -277,7 +280,10 @@ async def _google_chat(
     if web_search:
         payload["tools"] = [{"google_search": {}}]
 
-    client_timeout = 1500 if (max_tokens or 0) >= 40000 else 600
+    # 2700s, not 1500: a full Fable report at ~60-90k completion tokens runs
+    # 20-35 min. A client timeout here retries the call — and the provider bills
+    # the aborted generation anyway — so an undersized timeout multiplies cost.
+    client_timeout = 2700 if (max_tokens or 0) >= 40000 else 600
     body = None
     endpoint = f"{GOOGLE_BASE}/models/{model_id}:generateContent"
     for attempt in range(4):

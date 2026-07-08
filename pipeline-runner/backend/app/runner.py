@@ -192,7 +192,7 @@ def _correction_prompt(base_prompt, correction):
 
 
 async def _execute_stage(stage, context, run_input_data, identifier, params,
-                         correction=None):
+                         correction=None, rid=None):
     """Run one stage. Returns a result dict (not yet persisted). When `correction`
     is given, the prompt is augmented with the prior failure + output so the model
     fixes the specific issue (feedback-driven self-correction)."""
@@ -278,7 +278,12 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
         # token cap, so give it more room. 'error' = the provider returned a
         # truncated/aborted HTTP 200 (seen with z-ai/glm-5.2) — transient, retry
         # at the same size. Both are the #1 intermittent failures on big runs.
-        if parsed is None and r.get("finish_reason") in ("length", "error"):
+        # A truncation retry re-pays the FULL prompt + generation on the same
+        # model (the 2026-07-08 Turun tislaamo run: 64k-cap truncation on the
+        # Fable writer doubled the stage to $6.96). Never start one once the
+        # spend cap is reached.
+        if (parsed is None and r.get("finish_reason") in ("length", "error")
+                and not (rid and _spend_cap_exceeded(rid))):
             retry_max = int(stage["max_tokens"])
             if r.get("finish_reason") == "length":
                 retry_max = min(retry_max * 2, 120000)
@@ -437,6 +442,15 @@ async def run_stages(run, stages, only=None, from_order=None):
             yield _ev("stage", order=s["order"], status="skipped", name=s["name"])
             continue
 
+        # A model stage with a blank prompt is an accidental admin-UI artifact
+        # ("Stage N – new"), never real work — skip it instead of burning a paid
+        # call / failing the run at the cap check (2026-07-08 Turun tislaamo).
+        if (s["order"] >= 1 and s["model"] != DATA_FETCHER_MODEL
+                and not (s.get("prompt_template") or "").strip()):
+            store.upsert_result(rid, {**_base(s), "status": "skipped"})
+            yield _ev("stage", order=s["order"], status="skipped", name=s["name"])
+            continue
+
         cap_msg = _spend_cap_exceeded(rid) if s["order"] >= 1 else None
         if cap_msg:
             store.upsert_result(rid, {**_base(s), "status": "error",
@@ -450,7 +464,8 @@ async def run_stages(run, stages, only=None, from_order=None):
                                   "started_at": _now()})
         yield _ev("stage", order=s["order"], status="running", name=s["name"])
 
-        res = await _execute_stage(_eff(s), context, input_data, identifier, params)
+        res = await _execute_stage(_eff(s), context, input_data, identifier,
+                                   params, rid=rid)
         store.add_run_cost(rid, res.get("cost_usd", 0.0))
 
         # Self-heal: a transient model slip — a blank required field, a one-off
@@ -476,7 +491,7 @@ async def run_stages(run, stages, only=None, from_order=None):
                       name=s["name"], retry=True)
             retry = await _execute_stage(_correction_model(_eff(s)), context,
                                          input_data, identifier,
-                                         params, correction=correction)
+                                         params, correction=correction, rid=rid)
             store.add_run_cost(rid, retry.get("cost_usd", 0.0))
             rank = {"ok": 2, "validation_failed": 1, "error": 0}
             if rank.get(retry["status"], 0) > rank.get(res["status"], 0):

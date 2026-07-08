@@ -1270,7 +1270,7 @@ def test_self_heal_retries_failed_stage(monkeypatch):
     p = store.get_pipeline(pid)
     calls = {"n": 0, "correction": None}
 
-    async def fake_exec(stage, ctx, inp, ident, params, correction=None):
+    async def fake_exec(stage, ctx, inp, ident, params, correction=None, rid=None):
         calls["n"] += 1
         if calls["n"] == 1:
             return {**runner._base(stage), "status": "validation_failed",
@@ -1964,3 +1964,74 @@ def test_golden_pdf_has_no_blank_pages(tmp_path):
     # ensured, so the divider always fires) + one page per section — and
     # crucially NO trailing blank pages.
     assert _pdf_page_count(out) == n_sections + 3
+
+
+def test_blank_prompt_stage_is_skipped(monkeypatch):
+    """An accidentally added admin-UI stage ('Stage 3 – new', empty prompt) must
+    be skipped, not executed or cap-failed (2026-07-08 Turun tislaamo run)."""
+    import asyncio
+    from app import runner, seed, store
+
+    seed.ensure_seeded()
+    sw = next(p for p in store.list_pipelines()
+              if p["name"] == seed.SINGLE_WRITER_PIPELINE_NAME)
+    store.add_stage(sw["id"], {"order": 3, "name": "Stage 3 – new",
+                               "model": "google/gemini-2.5-flash",
+                               "prompt_template": ""})
+    rid = store.create_run(sw["id"], {"meta": {"company_name": "X"}}, False)
+    store.add_run_cost(rid, 10.0)  # over the $4 cap — skip must beat the cap check
+
+    async def boom(*a, **k):  # a blank stage must never reach the model
+        raise AssertionError("blank stage was executed")
+
+    monkeypatch.setattr(runner, "_execute_stage", boom)
+
+    async def drive():
+        async for _ in runner.run_stages(store.get_run(rid),
+                                         store.get_pipeline(sw["id"])["stages"],
+                                         only=3):
+            pass
+
+    asyncio.run(drive())
+    s3 = [r for r in store.get_run(rid)["results"] if r["order"] == 3][0]
+    assert s3["status"] == "skipped"
+
+
+def test_truncation_retry_respects_spend_cap(monkeypatch):
+    """finish_reason='length' triggers a full-price re-run of the whole stage.
+    Once the per-run cap is hit, that retry must NOT fire (the $6.96 writer
+    call, 2026-07-08)."""
+    import asyncio
+    from app import openrouter, runner, seed, store
+
+    seed.ensure_seeded()
+    sw = next(p for p in store.list_pipelines()
+              if p["name"] == seed.SINGLE_WRITER_PIPELINE_NAME)
+    rid = store.create_run(sw["id"], {"meta": {"company_name": "X"}}, False)
+    store.add_run_cost(rid, 10.0)  # already over the cap
+    stage2 = next(s for s in store.get_pipeline(sw["id"])["stages"]
+                  if s["order"] == 2)
+    calls = {"n": 0}
+
+    async def fake_chat(**kw):
+        calls["n"] += 1
+        return {"text": "not json {", "finish_reason": "length",
+                "tokens_prompt": 1, "tokens_completion": 1,
+                "request_payload": {}}
+
+    monkeypatch.setattr(openrouter, "chat", fake_chat)
+    res = asyncio.run(runner._execute_stage(
+        stage2, {"input_data": "{}", "enrichment": "{}",
+                 "previous_report": "", "user_input": ""},
+        None, None, None, rid=rid))
+    assert calls["n"] == 1  # no second full-price attempt past the cap
+    assert res["status"] == "error"
+
+    # Without a cap breach the retry still fires (self-heal behaviour kept).
+    rid2 = store.create_run(sw["id"], {"meta": {"company_name": "X"}}, False)
+    calls["n"] = 0
+    asyncio.run(runner._execute_stage(
+        stage2, {"input_data": "{}", "enrichment": "{}",
+                 "previous_report": "", "user_input": ""},
+        None, None, None, rid=rid2))
+    assert calls["n"] == 2
