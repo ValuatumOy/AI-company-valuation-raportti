@@ -744,12 +744,16 @@ def _conf_pills(level, note="", caption="Arvion luottamustaso"):
 def _scenario_values(report):
     scen = (report.get("_scenarios") or {}).get("scenarios")
     if not isinstance(scen, list):
+        # Single-writer reports have no stage-4 sidecar — their scenarios live
+        # in machine_readable.scenarios (owner_value_teur/probability_pct).
+        scen = (report.get("machine_readable") or {}).get("scenarios")
+    if not isinstance(scen, list):
         return None
     out = []
     for s in scen:
         if isinstance(s, dict):
             out.append({"name": str(s.get("name", "")),
-                        "value": _to_num(s.get("value_teur")),
+                        "value": _to_num(s.get("value_teur", s.get("owner_value_teur"))),
                         "prob": _to_num(s.get("probability_pct"))})
     return out or None
 
@@ -758,7 +762,13 @@ def _derive(report):
     d = {}
     sc = report.get("_scenarios") or {}
     ev = _to_num(sc.get("expected_value_teur"))
+    if ev is None:  # single-writer shape: top-level expected_value object
+        evf = report.get("expected_value")
+        ev = _to_num(evf.get("value") if isinstance(evf, dict) else evf)
     base = _to_num(sc.get("realistic_base_case_teur"))
+    if base is None:
+        base = _to_num((report.get("machine_readable") or {})
+                       .get("base_case_value_before_floor"))
     vals = _scenario_values(report)
     if vals:
         nums = [v["value"] for v in vals if v["value"] is not None]

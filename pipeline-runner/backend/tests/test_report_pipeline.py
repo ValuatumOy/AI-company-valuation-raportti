@@ -2053,3 +2053,21 @@ def test_table_prose_columns_align_left_numeric_right():
         [["Liikevaihto", "1 274", "980"], ["EBITDA", "-312", "-100"]])
     # numeric year columns keep the default right alignment (no inline style)
     assert h2.count("<th>2024</th>") == 1 and h2.count("<th>2025</th>") == 1
+
+
+def test_cover_range_track_from_machine_readable_scenarios():
+    """Single-writer reports have no _scenarios sidecar — the cover's range
+    track must build from machine_readable.scenarios (Athlos 2026-07-08)."""
+    rep = _golden()
+    rep.pop("_scenarios", None)
+    rep["machine_readable"] = {"scenarios": [
+        {"name": "Pessimistinen", "owner_value_teur": 0, "probability_pct": 35},
+        {"name": "Realistinen", "owner_value_teur": 669, "probability_pct": 40},
+        {"name": "Optimistinen", "owner_value_teur": 10850, "probability_pct": 25}]}
+    rep["expected_value"] = {"value": 2980, "unit": "tEUR"}
+    rep["cover"] = {"headline_label": "Skenaarioiden odotusarvo",
+                    "headline_value": "2 980 tEUR", "base_case_value": "669 tEUR"}
+    h = render.render_html(rep)
+    assert "cv2-track" in h                      # track rendered
+    assert "Skenaarioiden odotusarvo" in h       # expected-value marker
+    assert "Optimistinen skenaario" in h
