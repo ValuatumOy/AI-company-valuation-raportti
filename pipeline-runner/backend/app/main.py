@@ -49,7 +49,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-08-brand-refresh-2"
+BUILD = "2026-07-08-design-review-fixes"
 
 # Round-2 refinement writer. Preserve-and-patch is an editing task, not creative
 # writing — Sonnet 5 ($2/$10) does it at 1/2.5 of Opus 4.8's price; round-1

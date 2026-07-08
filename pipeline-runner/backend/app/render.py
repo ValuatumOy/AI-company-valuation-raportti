@@ -363,11 +363,16 @@ def _num_cell(v):
     n = _to_num(v)
     formatted = _fmt_raw_number(v)
     txt = _esc(formatted) if formatted is not None else _esc(v)
-    if n is not None and isinstance(v, str) and ("%" in v or v.strip().startswith(("+", "-", "−"))):
+    # Colour only cells that ARE figures — a prose sentence that merely contains
+    # a negative number ("...FCFF n. −112 tEUR; arvo muodostuu...") must not
+    # turn red wholesale.
+    numish = bool(_cell_numish(v)) if isinstance(v, str) else True
+    if numish and n is not None and isinstance(v, str) and (
+            "%" in v or v.strip().startswith(("+", "-", "−"))):
         cls = "neg" if n < 0 else ("pos" if v.strip().startswith("+") else "")
         if cls:
             return f'<span class="{cls}">{txt}</span>'
-    if n is not None and n < 0:
+    if numish and n is not None and n < 0:
         return f'<span class="neg">{txt}</span>'
     return txt
 
@@ -487,6 +492,18 @@ def _svg_bars(labels, series, forecast_from=None):
     return _svg(W, H, "".join(g))
 
 
+def _axis_vals(vals):
+    """Values used for AXIS bounds: drop up to 2 extreme outliers (beyond
+    median ± 6×MAD) so one freak point doesn't flatten the whole series."""
+    if len(vals) < 4:
+        return vals
+    sv = sorted(vals)
+    med = sv[len(sv) // 2]
+    mad = sorted(abs(v - med) for v in vals)[len(vals) // 2] or 1e-9
+    kept = [v for v in vals if abs(v - med) <= 6 * mad]
+    return kept if len(kept) >= len(vals) - 2 and len(kept) >= 2 else vals
+
+
 def _svg_combo(labels, bar_vals, line_vals, line_pct=True, forecast_from=None,
                bar_name=None, line_name=None):
     W, H = 600, 260
@@ -496,7 +513,11 @@ def _svg_combo(labels, bar_vals, line_vals, line_pct=True, forecast_from=None,
     if not bv or not labels:
         return _svg_bars(labels, [{"values": bar_vals}], forecast_from)
     bs = _nice_scale(min(0, *bv), max(0, *bv))
-    ls = _nice_scale(min(0, *lv), max(0, *lv)) if lv else bs
+    # Axis from outlier-robust line values: one launch-year freak (-775 % EBIT)
+    # otherwise stretches the right axis so far every later year reads flat.
+    # Outliers stay in the plot, clamped to the axis edge as open markers.
+    la = _axis_vals(lv)
+    ls = _nice_scale(min(0, *la), max(0, *la)) if la else bs
     ticks = max(bs[3], ls[3])
     bs = _grow(bs, ticks)
     ls = _grow(ls, ticks)
@@ -541,14 +562,19 @@ def _svg_combo(labels, bar_vals, line_vals, line_pct=True, forecast_from=None,
                  f'font-size="9.5" fill="{C["gray"]}">{_esc(lab)}</text>')
     g.append(f'<line x1="{pl}" y1="{yb(0):.1f}" x2="{W - pr}" y2="{yb(0):.1f}" '
              f'stroke="{C["lineStrong"]}" stroke-width="1.2"/>')
-    pts = [f"{xm(i):.1f},{yl(v):.1f}" for i, v in enumerate(line_vals) if v is not None]
+    def ylc(v):
+        return max(pt, min(pt + plotH, yl(v)))  # clamp off-axis outliers to the edge
+
+    pts = [f"{xm(i):.1f},{ylc(v):.1f}" for i, v in enumerate(line_vals) if v is not None]
     if pts:
         g.append(f'<polyline points="{" ".join(pts)}" fill="none" '
                  f'stroke="{C["green"]}" stroke-width="2.6"/>')
         for i, v in enumerate(line_vals):
             if v is not None:
-                g.append(f'<circle cx="{xm(i):.1f}" cy="{yl(v):.1f}" r="3.2" '
-                         f'fill="#fff" stroke="{C["green"]}" stroke-width="1.6"/>')
+                clamped = abs(ylc(v) - yl(v)) > 0.01
+                stroke_extra = ' stroke-dasharray="2 2"' if clamped else ""
+                g.append(f'<circle cx="{xm(i):.1f}" cy="{ylc(v):.1f}" r="3.2" '
+                         f'fill="#fff" stroke="{C["green"]}" stroke-width="1.6"{stroke_extra}/>')
     if bar_name or line_name:
         lx = pl
         for nm_raw, color in ((bar_name, C["lime"]), (line_name, C["green"])):
@@ -618,13 +644,15 @@ def _svg_donut(segments):
 
 
 def _heat_color(t):
-    # t in [0,1]: 0 = red (low/neg), 0.5 = pale, 1 = green (high)
+    # t in [0,1]: 0 = brand red (low/neg), 0.5 = pale neutral, 1 = sage green
+    # (high). Endpoints from the 2026-07 brand palette — the old lime top end
+    # (#A6CF39) clashed with the #12352B primary.
     if t < 0.5:
-        k = t / 0.5
-        r, g, b = 192, int(80 + 145 * k), int(77 + 150 * k)
+        k = t / 0.5  # C["red"] -> pale
+        r, g, b = int(192 + 40 * k), int(80 + 158 * k), int(77 + 157 * k)
     else:
-        k = (t - 0.5) / 0.5
-        r, g, b = int(231 - 65 * k), int(237 - 30 * k), int(216 - 159 * k)
+        k = (t - 0.5) / 0.5  # pale -> C["lime"] (sage #4F7A6A)
+        r, g, b = int(232 - 153 * k), int(238 - 116 * k), int(234 - 128 * k)
     return f"rgb({r},{g},{b})"
 
 
@@ -656,7 +684,8 @@ def _svg_heatmap(x_axis, series):
             g.append(f'<rect x="{x:.1f}" y="{yy:.1f}" width="{cw - 2:.1f}" height="{ch - 2}" '
                      f'rx="2" fill="{fill}"/>')
             if v is not None:
-                tc = "#fff" if (v - vmin) / span < 0.28 else C["ink"]
+                t = (v - vmin) / span
+                tc = "#fff" if (t < 0.28 or t > 0.82) else C["ink"]
                 dec = 0 if v == round(v) else 1
                 g.append(f'<text x="{x + cw / 2:.1f}" y="{yy + ch / 2 + 3:.1f}" text-anchor="middle" '
                          f'font-size="8.5" fill="{tc}">{_fmt(v, dec)}</text>')
@@ -850,8 +879,13 @@ def _block_key_value(b):
             f' <span class="muted" style="font-size:7pt">({_source_inline(src)})</span>'
             if src else ""
         )
-        rows.append(f'<div class="kv"><span class="k">{_esc(it.get("key"))}{src_html}</span>'
-                    f'<span class="v">{_esc(it.get("value"))}</span></div>')
+        val = it.get("value")
+        # A prose value ("Langaton suoramuuntoteknologia korvaa...") reads badly
+        # right-aligned and nowrap'd — stack it under its label instead.
+        long_text = isinstance(val, str) and len(val) > 60 and not _cell_numish(val)
+        cls = "kv kvl" if long_text else "kv"
+        rows.append(f'<div class="{cls}"><span class="k">{_esc(it.get("key"))}{src_html}</span>'
+                    f'<span class="v">{_esc(val)}</span></div>')
     head = f'<h4 class="blk">{_esc(title)}</h4>' if title else ""
     return f'{head}{"".join(rows)}'
 
@@ -1094,23 +1128,18 @@ def _footer():
 
 
 def _cover(report, derived):
+    """Cover v2 (CEO-approved mockup 2026-07-08): dark brand band, ONE hero
+    figure, a scenario range track with labelled markers, plain-language legend
+    rows, an edit-your-assumptions note, and the sign-off colophon."""
     cover = report.get("cover") or {}
     meta = report.get("meta") or {}
     _, legal = _brand(report)
     scale = _report_scale(report, derived)
+    div, unit_lab, dec = scale or (1.0, "tEUR", 0)
     hv = cover.get("headline_value")
     bcv = cover.get("base_case_value")  # realistic base case (DCF/EVA-based)
     rng = derived.get("range")
-    range_html = ""
-    if rng:
-        range_html = _range_bar(rng["low"], rng["high"], None,
-                                caption="Skenaariohaarukka", caption_right="ks. skenaariot",
-                                scale=scale)
     industry = _display_industry(meta)
-    meta_bits = [f'Y-tunnus {_esc(meta.get("y_tunnus"))}' if meta.get("y_tunnus") else "",
-                 _esc(industry),
-                 f'{_esc(meta.get("report_date"))} · {_esc(legal)}' if meta.get("report_date") else ""]
-    meta_lines = "<br>".join(x for x in meta_bits if x)
 
     # Lead with one valuation: the realistic base case. Scenario expected value
     # is a scenario-analysis output, not a competing cover valuation.
@@ -1122,67 +1151,121 @@ def _cover(report, derived):
 
     zero_floor = base_num is not None and base_num <= 0
     if zero_floor:
-        second_block = ('<div class="cv-note" style="margin-top:2px">'
-                        'Realistinen perusskenaario ei tue positiivista omistaja-arvoa. '
-                        'Mahdollinen arvo on optio- tai strategista arvoa — arvoa, joka '
-                        'perustuu epävarman tulevaisuuden mahdollisuuden toteutumiseen, '
-                        'ei nykyiseen kassavirtaan. Se kuvataan skenaarioissa eikä '
-                        'esitetä yrityksen arvona.</div>')
+        note = ("Realistinen perusskenaario ei tue positiivista omistaja-arvoa. "
+                "Mahdollinen arvo on optio- tai strategista arvoa — arvoa, joka "
+                "perustuu epävarman tulevaisuuden mahdollisuuden toteutumiseen, "
+                "ei nykyiseen kassavirtaan. Se kuvataan skenaarioissa eikä "
+                "esitetä yrityksen arvona.")
     else:
-        note = "Skenaarioiden odotusarvo ja todennäköisyyspainot käsitellään skenaario-osiossa; yllä oleva luku on yrityksen arvon perusarvio."
+        note = ("Arvio omistajille kuuluvasta arvosta, jos yhtiön kehitys jatkuu "
+                "toteutuneiden lukujen ja ennusteiden mukaisesti.")
         if base_num is not None and exp_num is not None:
             gap = max(1.0, 0.02 * abs(base_num))
             if exp_num > base_num + gap:
-                note = ("Skenaarioanalyysissä optimistinen polku nostaa odotusarvoa; "
-                        "yrityksen arvona esitetään realistinen perusskenaario.")
+                note += (" Skenaarioanalyysissä optimistinen polku nostaa "
+                         "odotusarvoa; yrityksen arvona esitetään realistinen "
+                         "perusskenaario.")
             elif exp_num < base_num - gap:
-                note = ("Skenaarioanalyysissä pessimistinen polku laskee odotusarvoa; "
-                        "yrityksen arvona esitetään realistinen perusskenaario.")
-        note_html = f'<div class="cv-note">{_esc(note)}</div>' if note else ""
-        second_block = note_html
+                note += (" Skenaarioanalyysissä pessimistinen polku laskee "
+                         "odotusarvoa; yrityksen arvona esitetään realistinen "
+                         "perusskenaario.")
+
+    # --- band -----------------------------------------------------------
+    level_fi = {"parent": "emoyhtiö", "consolidated": "konserni",
+                "group": "konserni"}.get(str(meta.get("level") or "").lower())
+    conf = (report.get("confidence") or {}).get("level")
+    band_meta_bits = [
+        f'Raportin päivä {_esc(meta.get("report_date"))}' if meta.get("report_date") else "",
+        (f'Luvut: {level_fi}, {_esc(unit_lab)}' if level_fi else f'Yksikkö: {_esc(unit_lab)}'),
+        f'Luottamustaso: {_esc(conf)}' if conf else "",
+    ]
+    band_meta = "".join(f"<div>{x}</div>" for x in band_meta_bits if x)
+    doctype_bits = [f'Y-tunnus {_esc(meta.get("y_tunnus"))}' if meta.get("y_tunnus") else "",
+                    _esc(industry)]
+    doctype = " · ".join(x for x in doctype_bits if x)
+
+    band = (
+        '<div class="cv2-band">'
+        '<div>'
+        f'<div class="cv2-brand">{_esc(_brand(report)[0])} · Yritysanalyysi · AI</div>'
+        f'<h1>{_esc(meta.get("company_name"))}</h1>'
+        + (f'<div class="cv2-doctype">{doctype}</div>' if doctype else "")
+        + '</div>'
+        f'<div class="cv2-bandmeta">{band_meta}</div>'
+        '</div>'
+    )
+
+    # --- hero -----------------------------------------------------------
+    hero = (
+        '<div class="cv2-hero">'
+        f'<div class="cap">{_esc(hero_label)}</div>'
+        f'<div class="val">{html.escape(_scaled_cover_str(hero_val, scale))}</div>'
+        f'<div class="sub">{_esc(note)}</div>'
+        '</div>'
+    )
+
+    # --- scenario range track + legend -----------------------------------
+    track_html = legend_html = ""
+    lo = rng.get("low") if rng else None
+    hi = rng.get("high") if rng else None
+    if lo is not None and hi is not None and hi > lo:
+        span = hi - lo
+
+        def _pos(v):
+            return max(5.0, min(95.0, 5 + 90 * (v - lo) / span))
+
+        def _val_lab(v):
+            return f"{_fmt(v / div, dec)} {unit_lab}"
+
+        marks = [(lo, "pess", "Pessimistinen skenaario"),
+                 (hi, "opti", "Optimistinen skenaario")]
+        if base_num is not None:
+            marks.append((base_num, "base", "Realistinen perusskenaario"))
+        if exp_num is not None and (base_num is None
+                                    or abs(exp_num - base_num) > 0.01 * max(1.0, abs(base_num))):
+            marks.append((exp_num, "odds", "Skenaarioiden odotusarvo"))
+        marks.sort(key=lambda m: m[0])
+        mark_html = []
+        for i, (v, css, lab) in enumerate(marks):
+            row = "row1" if i % 2 == 0 else "row2"
+            mark_html.append(
+                f'<div class="cv2-mark {css}" style="left:{_pos(v):.1f}%">'
+                f'<div class="dot"></div>'
+                f'<div class="tag {row}"><b>{_esc(_val_lab(v))}</b>{_esc(lab)}</div></div>')
+        track_html = (
+            '<div class="cv2-range">'
+            '<div class="cv2-sect">Arvion haarukka skenaarioittain</div>'
+            f'<div class="cv2-track"><div class="cv2-fill"></div>{"".join(mark_html)}</div>'
+            '</div>'
+        )
+        legend_rows = [
+            ("var(--ink)", "Realistinen perusskenaario",
+             "Laskettu yhtiön toteutuneista luvuista ja ennusteista kassavirta- (DCF) "
+             "ja lisäarvomenetelmällä (EVA). Tämä on raportin pääluku."),
+            ("var(--lime)", "Skenaarioiden odotusarvo",
+             "Skenaarioiden todennäköisyyksillä painotettu keskiarvo. Todennäköisyydet "
+             "ovat muokattavia oletuksia, eivät ennuste."),
+            ("var(--red)", "Haarukan ääripäät",
+             "Pessimistinen ja optimistinen skenaario kuvaavat arvion ala- ja ylärajan; "
+             "oletukset ja perustelut skenaario-osiossa."),
+        ]
+        legend_html = '<div class="cv2-legend">' + "".join(
+            f'<div class="row"><span class="term"><span class="chip" '
+            f'style="background:{c}"></span>{_esc(t)}</span>'
+            f'<span class="expl">{_esc(e)}</span></div>' for c, t, e in legend_rows) + "</div>"
+
+    foot = ('<div class="cv2-foot"><b>Voit muuttaa oletuksia.</b> Skenaarioiden '
+            'todennäköisyydet ja ennusteparametrit ovat muokattavissa Valuatumin '
+            'järjestelmässä — muutokset päivittävät arvion, ja raportin voi tuottaa '
+            'uudelleen omilla odotuksilla.</div>')
 
     return (
         '<section class="page cover">'
-        f'<div class="cv-top">{_brandmark_cover(report)}<span class="cv-tag">Equity Research · AI</span></div>'
-        '<div class="cv-mid">'
-        '<div class="cv-kicker">AI-Arvonmääritysraportti</div>'
-        f'<h1>{_esc(meta.get("company_name"))}</h1>'
-        f'<div class="cv-meta">{meta_lines}</div></div>'
-        '<div class="cv-headline">'
-        f'<div class="cv-big"><span class="cap">{_esc(hero_label)}</span>'
-        f'{html.escape(_scaled_cover_str(hero_val, scale))}</div>'
-        f'{range_html}</div>'
-        + (f'<div class="cv-headline" style="border-top:none;padding-top:14px;margin-top:14px">'
-           f'{second_block}</div>' if second_block else "")
-        + '</section>'
+        + band
+        + '<div class="cv2-body">'
+        + hero + track_html + legend_html + foot
+        + '</div></section>'
     )
-
-
-def _cover_colophon(report, meta):
-    """Provenance + sign-off block at the foot of the cover: makes the report an
-    auditable, signable artifact (answers the reseller's 'I put my name on this')
-    without adding a page. Run-id is shown only when the caller attaches it."""
-    prov = report.get("_provenance") or {}
-    rid_short = re.sub(r"[^0-9A-Za-z]", "", str(prov.get("run_id") or ""))[:8]
-    bits = [f'Laadittu {_esc(meta.get("report_date"))}' if meta.get("report_date") else "",
-            f'Raportti-ID {html.escape(rid_short)}' if rid_short else ""]
-    line = " · ".join(x for x in bits if x)
-    return (
-        '<div class="cv-colophon">'
-        + (f'<div class="cv-colo-line">{line}</div>' if line else "")
-        + '<div class="cv-colo-note">Laadittu automaattisesti tilinpäätös- ja '
-          'markkinadatasta. Tarkoitettu asiantuntijan tarkastettavaksi ja '
-          'allekirjoitettavaksi ennen päätöksiä.</div>'
-        + '<div class="cv-colo-sig">'
-          '<span>Tarkastanut ja hyväksynyt<span class="cv-sigline"></span></span>'
-          '<span>Päiväys<span class="cv-sigline short"></span></span>'
-          '</div>'
-        + '</div>'
-    )
-
-
-def _brandmark_cover(report):
-    return f'<span class="cv-brand"><i></i>{_esc(_brand(report)[0])}</span>'
 
 
 def _snapshot(report, derived):
@@ -1267,8 +1350,8 @@ def _toc(report, sections):
     # section `id` — SECTION_ORDER has no "7" by design, and showing that raw
     # id would make the ToC jump 6→8 for no reason a reader can see.
     rows = "".join(
-        f'<div class="toc-row"><span class="tn">{i}</span>'
-        f'<span class="tt">{_esc(s.get("title"))}</span></div>'
+        f'<a class="toc-row" href="#sec-{i}"><span class="tn">{i}</span>'
+        f'<span class="tt">{_esc(s.get("title"))}</span></a>'
         for i, s in enumerate(sections, start=1))
     return (
         '<section class="page">'
@@ -1298,8 +1381,37 @@ def _method_visuals(derived):
             f'{left}{right}</div>')
 
 
+def _norm_caption(t):
+    return re.sub(r"[^a-z0-9åäö]+", " ", str(t or "").casefold()).strip()
+
+
+def _dedup_captions(blocks):
+    """The model often emits a heading ("Lähderekisteri") followed by a table
+    whose title repeats it ("LÄHDEREKISTERI") — two stacked titles for one
+    table. Drop the block title when it (nearly) repeats the heading above."""
+    out, last_head = [], ""
+    for b in blocks or []:
+        if not isinstance(b, dict):
+            out.append(b)
+            continue
+        if b.get("type") == "heading":
+            last_head = _norm_caption(b.get("text"))
+            out.append(b)
+            continue
+        title = _norm_caption(b.get("title"))
+        if (title and last_head and b.get("type") in ("table", "key_value")
+                and (title == last_head or last_head.startswith(title)
+                     or title.startswith(last_head))):
+            b = {**b, "title": None}
+        if b.get("type") not in ("paragraph",):
+            last_head = ""  # a heading only covers the block right after it
+        out.append(b)
+    return out
+
+
 def _section(report, sec, derived=None, display_no=None):
-    blocks = "".join(x for x in (_render_block(b) for b in (sec.get("blocks") or [])) if x)
+    blocks = "".join(x for x in (_render_block(b)
+                                 for b in _dedup_captions(sec.get("blocks"))) if x)
     # Section 8 (arvonmääritys) already carries the model's own method table +
     # method-value chart, so we do NOT inject derived visuals here — on distressed
     # companies the derived donut/bars duplicated and contradicted them (scenario
@@ -1308,8 +1420,9 @@ def _section(report, sec, derived=None, display_no=None):
         blocks = ('<p class="muted" style="font-style:italic">'
                   'Tietoa ei ollut saatavilla tähän osioon.</p>')
     num = display_no if display_no is not None else sec.get("id")
+    anchor = f' id="sec-{display_no}"' if display_no is not None else ""
     return (
-        '<section class="page report-section">'
+        f'<section class="page report-section"{anchor}>'
         f'{_header(report)}'
         '<div class="pbody">'
         f'<div class="sec-head"><span class="sec-num">{_esc(num)}</span>'
@@ -1558,7 +1671,10 @@ _STATIC_CSS = """
 *{ box-sizing:border-box; }
 html,body{ margin:0; padding:0; }
 body{ background:#fff; color:var(--ink); font-family:var(--sans); font-size:9.6pt; line-height:1.5; }
-.page{ position:relative; min-height:255mm; padding:0; page-break-after:always; display:flex; flex-direction:column; }
+p{ max-width:72ch; }
+.page{ position:relative; padding:0; display:flex; flex-direction:column; }
+@media print{ .page{ min-height:255mm; page-break-after:always; } }
+@media screen{ .page{ padding-bottom:14mm; } }
 .report-section, .page{ page-break-inside:auto; }
 .pbody{ flex:1 1 auto; padding-top:9px; }
 .phead{ display:flex; justify-content:space-between; align-items:center; font-size:8pt; color:var(--gray);
@@ -1639,38 +1755,54 @@ a.src{ color:var(--gray); text-decoration:none; border-bottom:1px solid var(--li
   font-size:8.6pt; align-items:baseline; }
 .kv .k{ color:var(--gray); flex:1 1 auto; }
 .kv .v{ font-variant-numeric:tabular-nums lining-nums; font-weight:600; white-space:nowrap; }
+.kv.kvl{ flex-direction:column; align-items:flex-start; gap:1px; }
+.kv.kvl .v{ white-space:normal; text-align:left; max-width:72ch; }
 .chart-host{ width:100%; margin:8px 0 12px; page-break-inside:avoid; }
 .two-col{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
 .toc{ font-size:9.8pt; }
-.toc-row{ display:flex; align-items:baseline; gap:8px; padding:7px 0; border-bottom:1px solid var(--line); }
+.toc-row{ display:flex; align-items:baseline; gap:8px; padding:7px 0; border-bottom:1px solid var(--line); text-decoration:none; color:inherit; }
 .toc-row .tn{ font-family:var(--head); font-weight:700; color:var(--lime-deep); width:24px; flex:0 0 24px; }
 .toc-row .tt{ color:var(--ink); font-weight:600; }
 .toc-row .td{ flex:1 1 auto; border-bottom:1px dotted var(--line-strong); margin:0 4px 3px; }
 
 /* cover */
-.cover{ page:cover; padding:24mm 22mm; justify-content:flex-start; min-height:297mm; }
-.cover .cv-top{ display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding-bottom:10px; }
-.cv-brand{ display:flex; align-items:center; gap:9px; font-family:var(--head); font-weight:700; font-size:13pt; color:var(--green); letter-spacing:.02em; }
-.cv-brand i{ width:16px; height:16px; background:var(--lime); display:inline-block; }
-.cv-tag{ font-size:8pt; color:var(--gray); letter-spacing:.14em; text-transform:uppercase; font-weight:700; }
-.cv-mid{ margin-top:40px; }
-.cv-kicker{ font-size:9pt; letter-spacing:.22em; text-transform:uppercase; color:var(--lime-deep); font-weight:700; }
-.cover h1{ font-size:44pt; font-weight:800; letter-spacing:-.02em; line-height:1.02; margin:12px 0 0; color:var(--green); }
-.cover .cv-meta{ margin-top:18px; font-size:10pt; color:var(--gray); line-height:1.7; }
-.cv-headline{ margin-top:34px; border-top:2px solid var(--green); border-bottom:1px solid var(--line);
-  padding:20px 0 10px; display:grid; grid-template-columns:auto 1fr; gap:36px; align-items:end; }
-.cv-big{ font-family:var(--head); font-weight:800; font-size:34pt; color:var(--green); line-height:.98;
-  font-variant-numeric:tabular-nums lining-nums; letter-spacing:0; white-space:nowrap; }
-.cv-big .cap{ display:block; font-family:var(--sans); font-size:8.5pt; font-weight:700; color:var(--gray);
-  text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; white-space:normal; }
-.cv-note{ margin-top:10px; font-size:9pt; color:var(--gray); max-width:160mm; line-height:1.45; }
-.cv-colophon{ margin-top:auto; padding-top:16px; border-top:1px solid var(--line); font-size:8pt; color:var(--gray); }
-.cv-colo-line{ font-weight:600; letter-spacing:.02em; font-variant-numeric:tabular-nums lining-nums; }
-.cv-colo-note{ margin-top:5px; max-width:150mm; line-height:1.45; }
-.cv-colo-sig{ display:flex; gap:30px; margin-top:14px; font-size:8.4pt; }
-.cv-colo-sig > span{ display:flex; align-items:baseline; gap:9px; white-space:nowrap; }
-.cv-sigline{ display:inline-block; width:48mm; border-bottom:1px solid var(--line-strong); }
-.cv-sigline.short{ width:26mm; }
+.cover{ page:cover; padding:0; justify-content:flex-start; }
+@media print{ .cover{ min-height:297mm; } }
+.cv2-band{ background:var(--green); color:#F1F5F2; padding:16mm 22mm 12mm;
+  display:flex; justify-content:space-between; align-items:flex-end; gap:10mm; flex-wrap:wrap; }
+.cv2-brand{ font-size:8pt; letter-spacing:.16em; text-transform:uppercase; color:#9CB2A8; margin-bottom:9px; font-weight:700; }
+.cv2-band h1{ font-family:var(--head); font-size:26pt; font-weight:500; color:#F1F5F2; margin:0; line-height:1.05; }
+.cv2-doctype{ font-size:9.5pt; color:#9CB2A8; margin-top:5px; }
+.cv2-bandmeta{ text-align:right; font-size:8.5pt; color:#9CB2A8; line-height:1.7; }
+.cv2-body{ padding:12mm 22mm 14mm; flex:1 1 auto; display:flex; flex-direction:column; }
+.cv2-hero{ text-align:center; padding:10mm 0 2mm; }
+.cv2-hero .cap{ font-size:8.5pt; letter-spacing:.13em; text-transform:uppercase; color:var(--gray); font-weight:700; }
+.cv2-hero .val{ font-family:var(--head); font-size:40pt; color:var(--green); line-height:1.05; margin:5px 0 3px; font-variant-numeric:tabular-nums; }
+.cv2-hero .sub{ font-size:9pt; color:var(--gray); max-width:120mm; margin:4px auto 0; line-height:1.5; }
+.cv2-sect{ font-size:8pt; letter-spacing:.13em; text-transform:uppercase; color:var(--gray); font-weight:700;
+  border-top:1px solid var(--line); padding-top:14px; }
+.cv2-range{ margin-top:12mm; }
+.cv2-track{ position:relative; height:5px; background:var(--green-soft); border-radius:3px; margin:11mm 6mm 24mm; }
+.cv2-fill{ position:absolute; inset:0; border-radius:3px; opacity:.35;
+  background:linear-gradient(90deg, var(--red), var(--lime) 45%, var(--green)); }
+.cv2-mark{ position:absolute; top:50%; transform:translate(-50%,-50%); }
+.cv2-mark .dot{ width:11px; height:11px; border-radius:50%; border:2.5px solid #fff; box-shadow:0 0 0 1px var(--line-strong); }
+.cv2-mark.base .dot{ width:15px; height:15px; background:var(--green); }
+.cv2-mark.pess .dot{ background:var(--red); }
+.cv2-mark.opti .dot{ background:var(--lime-deep); }
+.cv2-mark.odds .dot{ background:var(--lime); }
+.cv2-mark .tag{ position:absolute; left:50%; transform:translateX(-50%); white-space:nowrap; text-align:center;
+  font-size:7.6pt; color:var(--gray); line-height:1.35; }
+.cv2-mark .tag b{ display:block; color:var(--green); font-family:var(--head); font-size:9.5pt; font-variant-numeric:tabular-nums; }
+.cv2-mark .tag.row1{ top:14px; } .cv2-mark .tag.row2{ top:46px; }
+.cv2-legend{ border-top:1px solid var(--line); margin-top:4mm; }
+.cv2-legend .row{ display:grid; grid-template-columns:52mm 1fr; gap:6mm; padding:8px 0;
+  border-bottom:1px solid var(--line); align-items:baseline; }
+.cv2-legend .term{ display:flex; align-items:baseline; gap:7px; font-size:9pt; color:var(--green); font-weight:700; }
+.cv2-legend .term .chip{ width:8px; height:8px; border-radius:50%; flex:none; position:relative; top:-1px; }
+.cv2-legend .expl{ font-size:8.5pt; color:var(--gray); line-height:1.45; }
+.cv2-foot{ margin-top:6mm; font-size:8.2pt; color:var(--gray); border-top:1px solid var(--line); padding-top:10px; line-height:1.5; }
+.cv2-foot b{ color:var(--ink); }
 
 /* scenario panels */
 .scen{ border:1px solid var(--line-strong); border-top:3px solid var(--green); padding:11px 13px; margin:11px 0; page-break-inside:avoid; }
