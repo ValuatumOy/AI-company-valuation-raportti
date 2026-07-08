@@ -1,4 +1,35 @@
-# Handoff — 2026-07-07 (read this first)
+# Handoff — 2026-07-08 (read this first)
+
+## 2026-07-08 — $7.09 run explained + cost guards (LIVE)
+
+Colleague's Turun tislaamo run (`8d49a301…`) cost **$7.09 and failed at "Vaihe 3"**.
+Root cause chain (verified from the run record, not guessed):
+
+1. Fable writer's first call hit the 64k `max_tokens` cap (`finish_reason='length'`
+   — hidden thinking tokens count toward the cap; visible JSON was only ~59k chars).
+2. The truncation retry in `runner._execute_stage` re-ran the WHOLE stage at 120k
+   — paying the full 47k-token prompt again. Stage totals: 94,216 prompt +
+   120,284 completion tokens = **$6.956 exact** at Fable's $10/$50 per MTok.
+3. A stray empty stage **"Stage 3 – new"** (blank prompt, gemini-flash — an
+   accidental admin-UI add) then hit the pre-stage spend-cap check → run failed.
+   Without it the run would have completed OK at $7.09. (The July 4 runs at
+   $6.4–6.65 were almost certainly the same truncation-double-pay pattern.)
+
+Fixed (commit `286401e`, build `2026-07-08-cost-guards`, 110 tests pass):
+- truncation retry now checks `_spend_cap_exceeded(rid)` before re-paying;
+- enabled model stages with a blank prompt are skipped, never executed;
+- writer `max_tokens` 64k → 96k (headroom so 'length' never fires; reseed applied
+  to prod — verify with `GET /api/pipelines`, stage 2 shows 96000);
+- heavy-stage HTTP timeout 1500s → 2700s (a timeout retry also re-bills);
+- rogue "Stage 3 – new" DELETEd from prod pipeline `8311e744`.
+
+Open: `VALU_RUN_USD_CAP` is still the default $4.0 (env unset) — a legit
+long-thinking Fable run can now cost up to ~$5.3 in ONE call, which the cap only
+catches afterwards but which then blocks round-2 on that run. Decide whether to
+set VALU_RUN_USD_CAP=5.5 in Railway. Esa's 6 improvement points triaged in chat
+2026-07-08 (cover redesign / assumption-editing guidance / old-numbers toggle =
+feature decisions; going-concern wording + §14 heading = small prompt edits;
+emo-vs-konserni = already handled via `meta.level` + prompt §31).
 
 ## 2026-07-07 (cont.) — Athlos reviewer fixes + report QA net (LIVE + verified)
 
