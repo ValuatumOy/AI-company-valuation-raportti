@@ -29,11 +29,12 @@ _CHROME_CANDIDATES = [
     "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
 ]
 
-# Brand palette 2026-07: primary #12352B (Valuatum's new brand green), warm
-# gold accent replacing the old lime. "lime"/"limeDeep" keys kept so callers
-# don't churn — they now hold the gold accent.
+# Brand palette 2026-07: primary #12352B (Valuatum's new brand green); the
+# accent is a tonal sage green — no second hue, everything stays in the brand
+# family. "lime"/"limeDeep" keys kept so callers don't churn — they now hold
+# the sage accent.
 C = {
-    "ink": "#1A1D1A", "lime": "#D9973B", "limeDeep": "#B87A22", "green": "#12352B",
+    "ink": "#1A1D1A", "lime": "#4F7A6A", "limeDeep": "#33604F", "green": "#12352B",
     "greenSoft": "#E8EEEA", "greenLine": "#C3D2C9", "red": "#C0504D",
     "redSoft": "#F6E7E6", "gray": "#6B7280", "line": "#E1E4DE",
     "lineStrong": "#CBD0C9",
@@ -43,7 +44,7 @@ C = {
 HEAD = "Georgia, Gelasio, 'Times New Roman', serif"
 SANS = ("-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', system-ui, "
         "sans-serif")
-SNAP_COLORS = ["#D9973B", "#12352B", "#6B7280", "#B87A22"]
+SNAP_COLORS = ["#4F7A6A", "#12352B", "#6B7280", "#7FA391"]
 
 
 class CoverGuardError(RuntimeError):
@@ -609,7 +610,7 @@ def _svg_donut(segments):
         if frac > 0.06:
             am = (a0 + a1) / 2
             lx, ly = cx + (ro + ri) / 2 * math.cos(am), cy + (ro + ri) / 2 * math.sin(am)
-            tc = "#12352B" if color == C["lime"] else "#fff"
+            tc = "#fff"  # sage/green/gray fills all take white labels
             g.append(f'<text x="{lx:.2f}" y="{ly + 3.6:.2f}" fill="{tc}" font-size="11" '
                      f'text-anchor="middle" font-weight="700">{round(frac * 100)} %</text>')
         a0 = a1
@@ -922,6 +923,39 @@ def _coerce_table_rows(columns, rows):
     return cols, out
 
 
+_LETTER_RE = re.compile(r"[A-Za-zÅÄÖåäö]")
+
+
+def _cell_numish(v):
+    """Does a cell read as a figure ('15 % → n. 3 000 tEUR/v') rather than
+    prose? None = empty, don't vote."""
+    s = str(v if v is not None else "").strip()
+    if not s:
+        return None
+    digits = sum(ch.isdigit() for ch in s)
+    letters = len(_LETTER_RE.findall(s))
+    return digits > 0 and letters <= max(4, digits)
+
+
+def _col_aligns(columns, rows):
+    """Right-align only columns whose body cells are mostly figures. Prose
+    columns (Lähde, Miten näkyy luvuissa, ...) read left-aligned; the old
+    blanket text-align:right made multi-line prose cells ragged."""
+    n = max([len(columns or [])]
+            + [len(r) for r in rows or [] if isinstance(r, list)] or [0])
+    aligns = []
+    for j in range(n):
+        if j == 0:
+            aligns.append("left")
+            continue
+        votes = [_cell_numish(r[j]) for r in rows or []
+                 if isinstance(r, list) and len(r) > j]
+        votes = [v for v in votes if v is not None]
+        numeric = bool(votes) and sum(votes) / len(votes) >= 0.6
+        aligns.append("right" if numeric else "left")
+    return aligns
+
+
 def _render_table(columns, rows, title=None, unit=None):
     columns, rows = _coerce_table_rows(columns, rows)
     cap = ""
@@ -929,14 +963,18 @@ def _render_table(columns, rows, title=None, unit=None):
         u = f' <span class="muted">({_esc(unit)})</span>' if unit else ""
         cap = f'<h4 class="blk">{_esc(title)}{u}</h4>'
     wide = " wide" if isinstance(columns, list) and len(columns) >= 7 else ""
-    ths = "".join(f"<th>{_esc(c)}</th>" for c in (columns or []))
+    aligns = _col_aligns(columns, rows)
+
+    def _al(j):
+        a = aligns[j] if j < len(aligns) else "right"
+        return f' style="text-align:{a}"' if a != "right" else ""
+
+    ths = "".join(f"<th{_al(j)}>{_esc(c)}</th>"
+                  for j, c in enumerate(columns or []))
     trs = []
     for r in rows or []:
         cells = r if isinstance(r, list) else [r]
-        tds = []
-        for j, c in enumerate(cells):
-            align = ' style="text-align:left"' if j == 0 else ""
-            tds.append(f"<td{align}>{_num_cell(c)}</td>")
+        tds = [f"<td{_al(j)}>{_num_cell(c)}</td>" for j, c in enumerate(cells)]
         trs.append("<tr>" + "".join(tds) + "</tr>")
     return (f'{cap}<table class="tbl{wide}"><thead><tr>{ths}</tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table>')
@@ -1510,7 +1548,7 @@ def render_pdf(report, out_path):
 
 _STATIC_CSS = """
 :root{
-  --bg:#FFFFFF; --ink:#1A1D1A; --lime:#D9973B; --lime-deep:#B87A22;
+  --bg:#FFFFFF; --ink:#1A1D1A; --lime:#4F7A6A; --lime-deep:#33604F;
   --green:#12352B; --green-soft:#E8EEEA; --green-line:#C3D2C9; --red:#C0504D;
   --red-soft:#F6E7E6; --gray:#6B7280; --gray-soft:#F2F3F1; --line:#E1E4DE;
   --line-strong:#CBD0C9; --paper:#EDEFEA;
@@ -1534,7 +1572,7 @@ p{ margin:0 0 7px; }
 strong{ font-weight:700; color:var(--ink); }
 .muted{ color:var(--gray); } .neg{ color:var(--red); font-weight:600; } .pos{ color:var(--lime-deep); font-weight:600; }
 .sec-head{ display:flex; align-items:flex-start; gap:11px; margin:0 0 11px; }
-.sec-num{ font-family:var(--head); font-weight:700; font-size:11pt; color:var(--green); background:var(--lime);
+.sec-num{ font-family:var(--head); font-weight:700; font-size:11pt; color:#fff; background:var(--lime);
   width:26px; height:26px; flex:0 0 26px; display:flex; align-items:center; justify-content:center; }
 .sec-head .sh-t{ flex:1 1 auto; }
 .sec-head h2{ font-size:17pt; font-weight:700; letter-spacing:-.01em; }
@@ -1579,7 +1617,7 @@ h4.blk{ font-size:8pt; font-weight:700; color:var(--gray); text-transform:upperc
 .callout.neutral .co-badge{ background:var(--gray); }
 table.tbl{ width:100%; border-collapse:collapse; font-size:8.4pt; margin:6px 0 10px; }
 table.tbl th, table.tbl td{ padding:4.5px 7px; text-align:right; border-bottom:1px solid var(--line);
-  font-variant-numeric:tabular-nums lining-nums; overflow-wrap:anywhere; word-break:break-word; }
+  font-variant-numeric:tabular-nums lining-nums; overflow-wrap:break-word; }
 table.tbl td:first-child{ max-width:80mm; }
 table.tbl.wide{ table-layout:fixed; font-size:7.1pt; line-height:1.15; }
 table.tbl.wide th, table.tbl.wide td{ padding:3px 4px; }

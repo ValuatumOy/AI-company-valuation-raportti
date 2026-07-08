@@ -1045,7 +1045,7 @@ def test_table_coerces_dict_rows_and_never_dumps_raw_dict():
                   {"row": "EBIT", "values": ["-374", "-253", "-137"]}]}
     h = render._block_table(b)
     assert "{'row'" not in h and '{"row"' not in h
-    assert h.count("<th>") == 4  # empty label column prepended + 3 year columns
+    assert h.count("</th>") == 4  # empty label column prepended + 3 year columns
     txt = render._norm_ws(render._strip_tags(h))
     assert "Liikevaihto 9 821 9 632 9 583" in txt
     # list-of-lists rows must pass through unchanged (no regression)
@@ -2035,3 +2035,21 @@ def test_truncation_retry_respects_spend_cap(monkeypatch):
                  "previous_report": "", "user_input": ""},
         None, None, None, rid=rid2))
     assert calls["n"] == 2
+
+
+def test_table_prose_columns_align_left_numeric_right():
+    """Esa/CEO 2026-07-08: prose columns (Lähde, ...) were right-aligned and
+    ugly; numeric year columns must stay right-aligned."""
+    h = render._render_table(
+        ["Oletus", "Arvo", "Lähde"],
+        [["Markkinaosuus pk-SAM:sta", "15 % → n. 3 000 tEUR/v",
+          "asiakkaan vahvistama tavoite kaksinumeroisesta markkinaosuudesta"],
+         ["Rakenteellinen käännekohta", "Markkinaa laajentava käänne",
+          "asiakkaan vahvistama; valuatum.com"]])
+    # Lähde column is prose → every cell in it left-aligned
+    assert h.count('style="text-align:left"') >= 6  # 3 cols x (th + 2 rows) all prose-ish here
+    h2 = render._render_table(
+        ["Erä", "2024", "2025"],
+        [["Liikevaihto", "1 274", "980"], ["EBITDA", "-312", "-100"]])
+    # numeric year columns keep the default right alignment (no inline style)
+    assert h2.count("<th>2024</th>") == 1 and h2.count("<th>2025</th>") == 1
