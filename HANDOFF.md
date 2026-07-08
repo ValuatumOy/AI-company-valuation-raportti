@@ -1,5 +1,30 @@
 # Handoff — 2026-07-08 (read this first)
 
+## 2026-07-08 (cont. 3) — Full design review + 10 fixes incl. cover v2 (LIVE)
+
+Screenshot-by-screenshot review of the re-branded report; all findings fixed in
+the render layer (commits `455c12a`, `d92a074`, build
+`2026-07-08-design-review-fixes-2`, 112 tests pass, verified on live Athlos
+re-render + readiness ready:true):
+- **Cover v2 implemented** (CEO-approved mockup): dark brand band, one hero
+  figure, scenario range track with markers, plain-language legend, "Voit
+  muuttaa oletuksia" note. Old cover CSS + dead colophon removed. NOTE: cover
+  colophon/sign-off block is GONE by test contract
+  (test_cover_cleans_industry_and_omits_trust_boilerplate).
+- Range track needs scenarios: `_scenario_values` falls back to
+  `machine_readable.scenarios` (single-writer runs have no `_scenarios`
+  sidecar) — without this the track silently vanished on all real reports.
+- `_heat_color` gradient red→pale→sage (old lime was hardcoded); white cell
+  text at both dark ends.
+- Combo-chart line axis outlier-robust (median±6·MAD, `_axis_vals`); off-axis
+  points clamp to the edge as dashed markers.
+- `_num_cell` colours only figure-cells (prose with a negative number no
+  longer turns red).
+- `_dedup_captions`: table title that repeats the heading above is dropped.
+- key_value prose values stack under the label (`kv kvl`); paragraphs capped
+  at 72ch; TOC rows are anchor links (`#sec-N`); page-break/min-height rules
+  print-only (screen flows without fake page gaps).
+
 ## 2026-07-08 (cont. 2) — Sage accent + table-layout fix (LIVE)
 
 CEO disliked the gold accent and the broken prose tables. Commit `989e5f6`,
