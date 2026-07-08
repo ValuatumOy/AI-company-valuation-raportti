@@ -21,9 +21,6 @@ import tempfile
 from .runner import APPENDIX_SECTION_IDS, SECTION_ORDER
 
 REPORTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "_reports"))
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-_TEMPLATE = os.path.join(_REPO_ROOT, "template", "report.template.html")
-
 _CHROME_CANDIDATES = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -32,15 +29,21 @@ _CHROME_CANDIDATES = [
     "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
 ]
 
+# Brand palette 2026-07: primary #12352B (Valuatum's new brand green), warm
+# gold accent replacing the old lime. "lime"/"limeDeep" keys kept so callers
+# don't churn — they now hold the gold accent.
 C = {
-    "ink": "#1A1D1A", "lime": "#A6CE39", "limeDeep": "#8FB525", "green": "#2E4B3C",
-    "greenSoft": "#E7EDE8", "greenLine": "#C7D4CB", "red": "#C0504D",
+    "ink": "#1A1D1A", "lime": "#D9973B", "limeDeep": "#B87A22", "green": "#12352B",
+    "greenSoft": "#E8EEEA", "greenLine": "#C3D2C9", "red": "#C0504D",
     "redSoft": "#F6E7E6", "gray": "#6B7280", "line": "#E1E4DE",
     "lineStrong": "#CBD0C9",
 }
-HEAD = "Archivo, system-ui, sans-serif"
-SANS = "'Source Sans 3', system-ui, sans-serif"
-SNAP_COLORS = ["#A6CE39", "#2E4B3C", "#6B7280", "#8FB525"]
+# Gelasio is metric-compatible with Georgia — the PDF container has no
+# Georgia, so the imported webfont keeps print identical to browser view.
+HEAD = "Georgia, Gelasio, 'Times New Roman', serif"
+SANS = ("-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', system-ui, "
+        "sans-serif")
+SNAP_COLORS = ["#D9973B", "#12352B", "#6B7280", "#B87A22"]
 
 
 class CoverGuardError(RuntimeError):
@@ -606,7 +609,7 @@ def _svg_donut(segments):
         if frac > 0.06:
             am = (a0 + a1) / 2
             lx, ly = cx + (ro + ri) / 2 * math.cos(am), cy + (ro + ri) / 2 * math.sin(am)
-            tc = "#2E4B3C" if color == C["lime"] else "#fff"
+            tc = "#12352B" if color == C["lime"] else "#fff"
             g.append(f'<text x="{lx:.2f}" y="{ly + 3.6:.2f}" fill="{tc}" font-size="11" '
                      f'text-anchor="middle" font-weight="700">{round(frac * 100)} %</text>')
         a0 = a1
@@ -1343,22 +1346,6 @@ def _cover_guard(report, derived):
                               + "; ".join(missing) + " — kansiteksti: " + text[:300])
 
 
-_FONT_CSS = None
-
-
-def _font_style():
-    global _FONT_CSS
-    if _FONT_CSS is None:
-        try:
-            with open(_TEMPLATE, encoding="utf-8") as f:
-                t = f.read()
-            blocks = re.findall(r"<style[^>]*>(.*?)</style>", t, re.DOTALL)
-            _FONT_CSS = next((b for b in blocks if "@font-face" in b), "")
-        except Exception:
-            _FONT_CSS = ""
-    return _FONT_CSS
-
-
 def _css_str(v):
     """Sanitise a value for use inside a CSS `content:"..."` string."""
     return (str(v or "").replace("\\", "").replace('"', "'")
@@ -1475,11 +1462,11 @@ def render_html(report):
             + "".join(section_html_parts))
     meta = report.get("meta") or {}
     title = _esc(meta.get("company_name") or "AI-Arvonmääritysraportti")
-    fonts = _font_style()
-    font_block = (f"<style>{fonts}</style>" if fonts
-                  else '<style>@import url("https://fonts.googleapis.com/css2?'
-                       'family=Archivo:wght@400;600;700;800&'
-                       'family=Source+Sans+3:wght@400;600;700&display=swap");</style>')
+    # 2026-07 brand refresh: display face is Georgia; Gelasio (metric-compatible)
+    # covers the PDF container where Georgia isn't installed. Body text is the
+    # system sans stack — no webfont needed.
+    font_block = ('<style>@import url("https://fonts.googleapis.com/css2?'
+                  'family=Gelasio:wght@400;500;700;800&display=swap");</style>')
     return ("<!doctype html><html lang=\"fi\"><head><meta charset=\"utf-8\">"
             f"<title>{title}</title>{font_block}"
             f"<style>{_STATIC_CSS}{_page_css(report)}</style></head>"
@@ -1523,12 +1510,12 @@ def render_pdf(report, out_path):
 
 _STATIC_CSS = """
 :root{
-  --bg:#FFFFFF; --ink:#1A1D1A; --lime:#A6CE39; --lime-deep:#8FB525;
-  --green:#2E4B3C; --green-soft:#E7EDE8; --green-line:#C7D4CB; --red:#C0504D;
+  --bg:#FFFFFF; --ink:#1A1D1A; --lime:#D9973B; --lime-deep:#B87A22;
+  --green:#12352B; --green-soft:#E8EEEA; --green-line:#C3D2C9; --red:#C0504D;
   --red-soft:#F6E7E6; --gray:#6B7280; --gray-soft:#F2F3F1; --line:#E1E4DE;
-  --line-strong:#CBD0C9; --paper:#ECEDE7;
-  --sans:"Source Sans 3", system-ui, sans-serif;
-  --head:"Archivo", system-ui, sans-serif;
+  --line-strong:#CBD0C9; --paper:#EDEFEA;
+  --sans:-apple-system, "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif;
+  --head:Georgia, Gelasio, "Times New Roman", serif;
 }
 *{ box-sizing:border-box; }
 html,body{ margin:0; padding:0; }
