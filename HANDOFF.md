@@ -1,4 +1,50 @@
-# Handoff — 2026-07-08 (read this first)
+# Handoff — 2026-07-09 (read this first)
+
+## 2026-07-09 — Competitor analysis + verottaja cross-check bug fix (committed, NOT prod-verified)
+
+Full competitor analysis of the AI/company-valuation field (Esa/colleague's
+list): 11 sources researched via a 23-agent workflow — 8 competitors (Equidam,
+BizEquity, Eqvista, BVO, ValuAdder, Asiakastieto, Arvento, Rotio) + 3
+best-practice standards (sell-side equity research, IVS/USPAP/NACVA formal
+appraisal, PitchBook). Full report, gap register (37 gaps), prioritized action
+list and "do NOT copy" list in **`kilpailija-analyysi-2026-07-09.md`** (repo
+root). Raw per-competitor data: session scratchpad `tasks/wy8zs1lhh.output`.
+Caveat: public-web research only — the actual competitor PDFs the colleague
+collected were not available; drop them in the repo for a tighter diff.
+
+**Shipped autonomously (overnight, user-approved for clear wins): one bug fix.**
+Commit on `main`, 112 tests pass, verified on real model-data locally — NOT run
+against prod (no paid generation while user asleep, per CLAUDE.md rule).
+- `valuation_equivalence._verottaja_blocks` read `net_income` / `equity`, but
+  real Valuatum model-data uses `net_earnings` / `equity_excl_capital_loans`.
+  The block silently returned `[]` on **every real report** — the intended §8
+  verottajan-malli / substanssiarvo cross-check (our built-in answer to two of
+  the most-cited competitor gaps: Asiakastieto/Arvento substanssiarvo +
+  tuottoarvo) never rendered. Fixed keys (+ legacy fallback), floored
+  substanssiarvo at 0 (Verohallinto rule + no negative reference for distressed
+  cos). Real-data check: block now injects into §8 (e.g. teippimestarit →
+  substanssiarvo 326, tuottoarvo 284, käypä 326 tEUR).
+
+**Deliberately NOT auto-shipped** (await user go-ahead — each would override an
+existing design decision or add a headline-adjacent number unsupervised):
+- Implied-multiple line (EV/EBITDA, EV/liikevaihto of our own value) — §8. #1
+  advisor ask; pure derived ratio, but needs a which-year-EBITDA decision.
+- Method football-field chart (§8) and forward-projection chart (§6) — SVG
+  helpers (`_svg_hbars`, `bar_line`) already exist; BUT §8 "deliberately does
+  not inject derived visuals" (render.py:1426-1430) and the spec mandates no
+  forecast chart. Both are deliberate choices — don't override unsupervised.
+- Everything else (owner-earnings normalization, industry benchmarking to fill
+  the `peers=[]` slot = the single biggest opportunity, expanded ratios,
+  standard-of-value block, IVS statement, SWOT, glossary) → prioritized in the
+  analysis doc §4. Most are prompt-layer → need a paid LLM run to verify.
+
+**Pick up here:** (1) review the analysis doc's quick-win list and greenlight
+which to build; the implied-multiple line + owner-earnings normalization are the
+two cheapest credibility wins. (2) Biggest bet: populate the already-built
+`peers=[]` slot with sourced Finnish sector medians — turns our most visible
+stated weakness into a strength. (3) The verottaja fix is deterministic +
+test-covered; to see it live, free `GET /api/runs/{rid}/report.html?force=1` on
+any real run (no cost) — no prod generation needed.
 
 ## 2026-07-08 (cont. 3) — Full design review + 10 fixes incl. cover v2 (LIVE)
 
