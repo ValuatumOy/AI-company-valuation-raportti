@@ -66,12 +66,17 @@ def _verottaja_blocks(input_data, value):
     actuals = (input_data or {}).get("actuals") or {}
     inc = actuals.get("income_statement") or {}
     bs = actuals.get("balance_sheet") or {}
-    avg_ni = _avg_last(inc.get("net_income"), 3)
-    equity = _last_num(bs.get("equity"))
+    # Real Valuatum model-data keys are net_earnings / equity_excl_capital_loans;
+    # the legacy net_income / equity fallbacks keep older payloads working. Without
+    # this the whole cross-check silently no-opped on every production report.
+    avg_ni = _avg_last(inc.get("net_earnings") or inc.get("net_income"), 3)
+    equity = _last_num(bs.get("equity_excl_capital_loans") or bs.get("equity"))
     if avg_ni is None or equity is None:
         return []
     tuottoarvo = max(0.0, avg_ni) / _VEROTTAJA_RATE
-    substanssiarvo = equity
+    # Verohallinto counts negative net assets as 0; also keeps the cross-check from
+    # printing a negative reference value for distressed companies.
+    substanssiarvo = max(0.0, equity)
     kaypa = (tuottoarvo + substanssiarvo) / 2 if tuottoarvo > substanssiarvo else substanssiarvo
     return [
         {

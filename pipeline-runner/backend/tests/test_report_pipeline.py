@@ -628,9 +628,30 @@ def test_verottaja_crosscheck_income_and_substance_branches():
     rows2 = {r[0]: r[1] for r in veq._verottaja_blocks(sub_data, 450)[0]["rows"]}
     assert rows2["Verottajan käypä arvo"] == "1 000"
 
+    # Real Valuatum model-data keys (net_earnings / equity_excl_capital_loans) must
+    # fire too — with only the legacy keys read, the block silently no-opped on
+    # every production report.
+    real_data = {"actuals": {
+        "income_statement": {"net_earnings": [50, 100, 200, 300]},
+        "balance_sheet": {"equity_excl_capital_loans": [400, 500]},
+    }}
+    rows_real = {r[0]: r[1] for r in veq._verottaja_blocks(real_data, 450)[0]["rows"]}
+    assert rows_real["Tuottoarvo (3 v:n keskitulos / 15 %)"] == "1 333"
+    assert rows_real["Substanssiarvo (oma pääoma)"] == "500"
+    assert rows_real["Verottajan käypä arvo"] == "917"
+
+    # Distressed company: negative equity floors substanssiarvo (and käypä arvo) at 0.
+    neg_data = {"actuals": {
+        "income_statement": {"net_earnings": [-40, -30, -20]},
+        "balance_sheet": {"equity_excl_capital_loans": [-500]},
+    }}
+    rows_neg = {r[0]: r[1] for r in veq._verottaja_blocks(neg_data, -450)[0]["rows"]}
+    assert rows_neg["Substanssiarvo (oma pääoma)"] == "0"
+    assert rows_neg["Verottajan käypä arvo"] == "0"
+
     # Missing data -> no block (graceful skip).
     assert veq._verottaja_blocks({}, 450) == []
-    assert veq._verottaja_blocks({"actuals": {"income_statement": {"net_income": [10]}}}, 450) == []
+    assert veq._verottaja_blocks({"actuals": {"income_statement": {"net_earnings": [10]}}}, 450) == []
 
 
 # --------------------------------------------------------------- validators
