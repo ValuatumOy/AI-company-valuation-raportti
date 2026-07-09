@@ -467,7 +467,11 @@ def costs_summary(limit=200):
         })
     # model stored on result since v2; fall back to live stage if missing.
     rows = db.query(
-        "SELECT COALESCE(sr.model, st.model, '?') AS model, sr.cost_usd AS cost, "
+        # NB: no '?' string literal here — the Postgres shim does a blind
+        # sql.replace("?", "%s"), so a literal '?' becomes a phantom placeholder
+        # and 500s the whole endpoint. The Python `row["model"] or "?"` below
+        # supplies the unknown-model fallback instead.
+        "SELECT COALESCE(sr.model, st.model) AS model, sr.cost_usd AS cost, "
         "sr.tokens_prompt AS tp, sr.tokens_completion AS tc "
         "FROM stage_results sr LEFT JOIN stages st ON st.id = sr.stage_id"
     )
