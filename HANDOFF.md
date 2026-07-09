@@ -21,11 +21,23 @@ onto d9173b4f. Verified: BOTH single-writer pipelines now show §14-NEW=True,
 capital_loans=True, old_numbers_directive=True, max_tokens=96000. Any future run
 on either is now correct.
 
-⚠️ **Durability gap:** `reseed_defaults` still only refreshes 8311e744, so
-d9173b4f will DRIFT again on the next prompt edit. Durable fix (decide): either
-DELETE d9173b4f (it only holds old run history) or make
-`seed._ensure_single_writer_pipeline` refresh every pipeline whose name starts
-with the single-writer base name. Until then, re-sync d9173b4f after any reseed.
+**Durable fix DONE (build `2026-07-09-reseed-all-singlewriter`):**
+`seed._ensure_single_writer_pipeline` now force-refreshes EVERY pipeline whose
+name starts with `SINGLE_WRITER_PIPELINE_PREFIX` ("Yhden kirjoittajan raportti"),
+so reseed keeps all single-writer pipelines (canonical + any duplicate) current —
+no more drift. Test: `test_reseed_refreshes_all_single_writer_pipelines`.
+Reseeded live + verified BOTH single-writer pipelines carry all 5 prompt markers
+(§14, capital_loans, going-concern, assumption-edit, old_numbers_directive) +
+96k tokens. The duplicate d9173b4f was RENAMED to
+"Yhden kirjoittajan raportti — ARKISTO (ÄLÄ KÄYTÄ, vanha ajohistoria)" so it
+isn't mistaken for the default (kept the prefix so reseed still syncs it).
+No pipeline-delete endpoint exists; renaming + always-current is the safe
+equivalent. **Any single-writer pick now produces a correct report** — a
+wrong-pipeline run can no longer waste money on a stale prompt.
+
+Canonical to use for runs: **`8311e744` "Yhden kirjoittajan raportti (oletus)"**
+(also what `_default_pipeline_id(None)` resolves to, so client-site/self-serve
+runs route there automatically).
 
 Note: Lauri's run 1202e59… therefore did NOT exercise the prompt fixes (old
 pipeline). A fresh run on either pipeline now will. His deterministic
