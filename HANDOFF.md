@@ -1,5 +1,31 @@
 # Handoff — 2026-07-09 (read this first)
 
+## 2026-07-09 (cont. 2) — Cost-page 500 fix + konserni fetch fix (LIVE)
+
+Two more fixes, pushed to main, 114 tests pass.
+
+- **Cost history was blank because `/api/costs` 500'd on Postgres** (pre-existing,
+  not this session's cost tab). `costs_summary`'s by_model query had
+  `COALESCE(sr.model, st.model, '?')`; the Postgres shim `db._conv` does a blind
+  `sql.replace("?", "%s")`, turning the `'?'` LITERAL into a phantom placeholder
+  → "1 placeholders but 0 parameters". SQLite tests never hit it. Dropped the
+  literal (Python `row["model"] or "?"` already covers the fallback). Commit
+  `42aeaa1`. Verified live: `/api/costs` now 200, 29 runs, $34.73 total.
+  ⚠️ `_conv` is fragile — any future SQL with a `?` inside a string literal will
+  break the same way on Postgres.
+- **Konserni fetch fix** (`_derive_company_code`, commit `23cdd69`): it stripped
+  the `K` from the y-tunnus, so a konserni FID gave konserni forecasts + a
+  "consolidated" label but PARENT-level Profinder actuals. **Verified against
+  live Profinder**: `valu_balance_sheet` accepts `16123988K` (consolidated) and
+  the dashed `1612398-8K` errors → for consolidated models, append K to the
+  dash-stripped code. Parent + override paths unchanged.
+- **Answered "which level was Esa's run":** all Valuatum runs were `level=parent`
+  (code `16123988`, no K) — **emo, not the konserni he intended**. And konserni
+  ≈ parent for Valuatum's balance total (probe: 0.678 vs 0.679 M€) — consolidating
+  Valu Properties barely moves the total at this level; Esa should verify which
+  konserni figures he expected (subsidiary investment assets may be
+  equity-accounted / in a specific line, not the balance total).
+
 ## 2026-07-09 (cont.) — Esa/Lauri review fixes (pushed to main; reseed + paid run GATED)
 
 Acted on laurik's task list + Esa's phone notes. All committed & pushed to `main`
