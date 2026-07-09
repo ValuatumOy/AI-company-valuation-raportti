@@ -1,5 +1,49 @@
 # Handoff — 2026-07-09 (read this first)
 
+## 2026-07-09 (cont.) — Esa/Lauri review fixes (pushed to main; reseed + paid run GATED)
+
+Acted on laurik's task list + Esa's phone notes. All committed & pushed to `main`
+(`f190f41` prompts, `130f688` cost tab), 112 tests pass, frontend typechecks.
+Railway + Vercel auto-deploying.
+
+Findings first (much was already fixed, only needed verification):
+- **§14 heading** already renamed to "MITKÄ TEKIJÄT LIIKUTTAISIVAT ARVIOTA" in
+  the live prompt (`prompts/singlewriter.txt:529`). No change needed.
+- **Canonical prompt = `pipeline-runner/backend/prompts/singlewriter.txt`** (the
+  single-writer flow is prod). Root `valuatum-arvonmaaritys-prompti-v3.md` is
+  STALE — do not edit it. Prompt does NOT auto-sync on deploy; needs `POST /api/reseed`.
+- **capital_loans 246 vs bridge.interest_bearing_debt 225**: NOT an engine/module
+  bug. Engine correctly treats pääomalaina as equity-like (equity_incl =
+  equity_excl + capital_loans); bridge never includes it. It's a prompt gap — the
+  AI may self-compute "Nettovelka" and fold capital_loans in.
+
+Prompt edits made (singlewriter.txt), reseed pending:
+- Rule 25: self-computed Nettovelka must EXCLUDE capital_loans;
+  dcf.bridge.interest_bearing_debt is the single EV→equity deduction source; the
+  two interest_bearing_debt fields differ legitimately.
+- Pessimistic scenario: keep "going concern" term but steer to concrete wording
+  ("ohut/negatiivinen oman pääoman puskuri", kassan riittävyys); ban abstract
+  "going concern -paine".
+- Probabilities: explain how users edit defaults + that it moves expected value.
+
+Cost tab: `💰 Kustannukset` view already existed; added a **Raportti (company)**
+column (store.costs_summary now returns company_name, CostOverlay renders it) so
+laurik can see which report cost what.
+
+Deliberately NOT done (needs input / risk):
+- **Reseed** (`POST /api/reseed`, free) — REQUIRED for the prompt edits to take
+  effect in prod, but `force=True` OVERWRITES any operator-UI prompt edits.
+  Confirm with Esa there are no pending UI prompt edits, THEN reseed. (Railway CLI
+  is authed; APP_TOKEN readable — can run once deploy lands + confirmed.)
+- **Old-numbers toggle** — conflicting opinions (hide vs show depends on
+  buyer/audience). Left as a future opt-in toggle, no behavior change now.
+- **QA validator hardening** for the Nettovelka class — skipped on purpose; a
+  stricter validator can reject real reports and trigger paid retries.
+
+**Pick up here:** (1) confirm no pending UI prompt edits → reseed prod. (2) Get
+explicit go-ahead for ONE paid single-writer generation (~$3.5) to verify all
+prompt edits on a real report — per CLAUDE.md rule, do NOT start it without a yes.
+
 ## 2026-07-09 — Competitor analysis + verottaja cross-check bug fix (committed, NOT prod-verified)
 
 Full competitor analysis of the AI/company-valuation field (Esa/colleague's
