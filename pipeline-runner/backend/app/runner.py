@@ -398,6 +398,17 @@ async def run_stages(run, stages, only=None, from_order=None):
         or "(Ensimmäinen kierros — ei edellisen kierroksen rikastusta.)"
     context["previous_report"] = (params or {}).get("previous_report") \
         or "(Ensimmäinen kierros — ei edellistä raporttia.)"
+    # Round-2 old-numbers toggle: whether the refreshed report shows the previous
+    # vs updated value where a number changed. Default (False) = clean report with
+    # only current numbers. Always set so {{old_numbers_directive}} never errors.
+    context["old_numbers_directive"] = (
+        "Kun jokin luku muuttuu edelliseen kierrokseen verrattuna, näytä sekä "
+        "vanha että uusi arvo (esim. \"nousi 1 000 → 3 270 tEUR\") ja kerro "
+        "lyhyesti mikä muutoksen aiheutti."
+        if (params or {}).get("show_old_numbers")
+        else "ÄLÄ mainitse edellisen kierroksen lukuja, niiden muutoksia tai "
+             "vertailua aiempaan — esitä vain päivitetyt, ajantasaiset arvot."
+    )
 
     # Round-2 only: swap the writer model (the highest-order LLM stage that
     # produces the report). Round 1 writes fresh with Fable; round 2's careful

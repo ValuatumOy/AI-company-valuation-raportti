@@ -80,6 +80,10 @@ class ClarificationAnswer(BaseModel):
 class Round2In(BaseModel):
     clarifications: list[ClarificationAnswer] = Field(default_factory=list)
     clarifications_free_text: str = Field(default="", max_length=8000)
+    # When True the refreshed report shows both the previous and updated value
+    # wherever a number changed ("nousi 1 000 -> 3 270 tEUR"); when False (default)
+    # it shows only the current numbers with no reference to the prior round.
+    show_old_numbers: bool = False
 
 
 class RedeemRoundIn(BaseModel):

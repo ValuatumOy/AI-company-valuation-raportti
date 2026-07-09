@@ -49,7 +49,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-08-design-review-fixes-2"
+BUILD = "2026-07-09-review-fixes-toggle"
 
 # Round-2 refinement writer. Preserve-and-patch is an editing task, not creative
 # writing — Sonnet 5 ($2/$10) does it at 1/2.5 of Opus 4.8's price; round-1
@@ -594,11 +594,15 @@ async def round2_run(rid: str, body: Round2In, request: Request):
             429, f"Tarkennuskierrosten enimmäismäärä ({max_r2}) on jo käytetty "
                  "tälle raportille."
         )
-    new_rid = _start_refinement_round(rid, parent, body.clarifications, body.clarifications_free_text)
+    new_rid = _start_refinement_round(
+        rid, parent, body.clarifications, body.clarifications_free_text,
+        show_old_numbers=body.show_old_numbers,
+    )
     return {"run_id": new_rid, "parent_run_id": rid}
 
 
-def _start_refinement_round(rid, parent, clarifications, clarifications_free_text) -> str:
+def _start_refinement_round(rid, parent, clarifications, clarifications_free_text,
+                            show_old_numbers=False) -> str:
     # Maximal-preserve: hand the round the prior enrichment + assembled report
     # so it refines (keep the good, apply the fix) instead of regenerating blind.
     prev_enrichment = next(
@@ -613,6 +617,7 @@ def _start_refinement_round(rid, parent, clarifications, clarifications_free_tex
         "clarifications_free_text": clarifications_free_text,
         "previous_enrichment": prev_enrichment,
         "previous_report": store.final_report_json(rid),
+        "show_old_numbers": show_old_numbers,
         # Careful preserve-and-patch is an editing task, not creative writing —
         # use Opus for the round-2 writer while round 1 stays Fable.
         "round2_writer_model": ROUND2_WRITER_MODEL,

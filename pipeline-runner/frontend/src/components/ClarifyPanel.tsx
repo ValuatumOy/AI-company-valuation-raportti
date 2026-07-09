@@ -12,11 +12,13 @@ export function ClarifyPanel({
   busy: boolean;
   onSubmit: (
     answers: { id: string; question: string; answer: string }[],
-    freeText: string
+    freeText: string,
+    showOldNumbers: boolean
   ) => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [freeText, setFreeText] = useState("");
+  const [showOldNumbers, setShowOldNumbers] = useState(false);
   const answered =
     Object.values(answers).filter((v) => v.trim()).length +
     (freeText.trim() ? 1 : 0);
@@ -83,7 +85,8 @@ export function ClarifyPanel({
                   answer: (answers[r.id] || "").trim(),
                 }))
                 .filter((a) => a.answer),
-              freeText.trim()
+              freeText.trim(),
+              showOldNumbers
             )
           }
           disabled={busy || answered === 0}
@@ -91,6 +94,16 @@ export function ClarifyPanel({
         >
           Aja kierros 2 tarkennetuilla tiedoilla
         </button>
+        <label className="flex items-center gap-1.5 text-[11px] text-neutral-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showOldNumbers}
+            onChange={(e) => setShowOldNumbers(e.target.checked)}
+            disabled={busy}
+            className="accent-amber-600"
+          />
+          Näytä vanhat luvut (vanha → uusi)
+        </label>
         <span className="text-[11px] text-neutral-500">
           {answered} vastausta annettu
         </span>

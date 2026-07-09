@@ -1564,6 +1564,28 @@ def test_round2_captures_round1_enrichment_for_maximal_preserve(monkeypatch):
     assert child["parent_run_id"] == parent
 
 
+def test_round2_show_old_numbers_flag_flows_into_params(monkeypatch):
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+    c = TestClient(main.app)
+    pid = store.list_pipelines()[0]["id"]
+    parent = store.create_run(pid, {"meta": {"company_name": "X"}}, True)
+    # Explicit opt-in lands in params (drives the round-2 old-numbers directive).
+    r = c.post(f"/api/runs/{parent}/round2",
+               json={"clarifications": [], "clarifications_free_text": "",
+                     "show_old_numbers": True})
+    assert r.status_code == 200
+    assert store.get_run(r.json()["run_id"])["params"]["show_old_numbers"] is True
+    # Omitted → defaults to False (clean report, no old numbers).
+    r2 = c.post(f"/api/runs/{parent}/round2",
+                json={"clarifications": [], "clarifications_free_text": ""})
+    assert r2.status_code == 200
+    assert store.get_run(r2.json()["run_id"])["params"]["show_old_numbers"] is False
+
+
 def test_fmt_clarifications_renders_answers_and_empty_sentinel():
     from app import runner
 
@@ -2043,7 +2065,8 @@ def test_truncation_retry_respects_spend_cap(monkeypatch):
     monkeypatch.setattr(openrouter, "chat", fake_chat)
     res = asyncio.run(runner._execute_stage(
         stage2, {"input_data": "{}", "enrichment": "{}",
-                 "previous_report": "", "user_input": ""},
+                 "previous_report": "", "user_input": "",
+                 "old_numbers_directive": ""},
         None, None, None, rid=rid))
     assert calls["n"] == 1  # no second full-price attempt past the cap
     assert res["status"] == "error"
@@ -2053,7 +2076,8 @@ def test_truncation_retry_respects_spend_cap(monkeypatch):
     calls["n"] = 0
     asyncio.run(runner._execute_stage(
         stage2, {"input_data": "{}", "enrichment": "{}",
-                 "previous_report": "", "user_input": ""},
+                 "previous_report": "", "user_input": "",
+                 "old_numbers_directive": ""},
         None, None, None, rid=rid2))
     assert calls["n"] == 2
 

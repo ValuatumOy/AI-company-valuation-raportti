@@ -116,6 +116,7 @@ export const api = {
     body: {
       clarifications: { id: string; question: string; answer: string }[];
       clarifications_free_text: string;
+      show_old_numbers?: boolean;
     }
   ) =>
     req(`/api/runs/${rid}/round2`, {
