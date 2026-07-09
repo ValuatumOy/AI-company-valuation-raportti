@@ -1586,6 +1586,23 @@ def test_round2_show_old_numbers_flag_flows_into_params(monkeypatch):
     assert store.get_run(r2.json()["run_id"])["params"]["show_old_numbers"] is False
 
 
+def test_derive_company_code_appends_K_for_konserni():
+    from app import valuatum as v
+
+    # Parent model → plain dash-stripped code (Profinder returns parent statements).
+    assert v._derive_company_code(
+        {"meta": {"y_tunnus": "1612398-8", "level": "parent"}}, None) == "16123988"
+    # Konserni model → K-suffixed so the Profinder backfill returns consolidated
+    # statements instead of parent-level ones (verified live: 16123988K works).
+    assert v._derive_company_code(
+        {"meta": {"y_tunnus": "1612398-8", "level": "consolidated"}}, None) == "16123988K"
+    # Operator override always wins — no forced K.
+    assert v._derive_company_code(
+        {"meta": {"y_tunnus": "1612398-8", "level": "consolidated"}}, "999") == "999"
+    # No y-tunnus → no code.
+    assert v._derive_company_code({"meta": {"level": "consolidated"}}, None) is None
+
+
 def test_fmt_clarifications_renders_answers_and_empty_sentinel():
     from app import runner
 

@@ -174,11 +174,22 @@ def _run(cmd: list[str]) -> tuple[int, str, str]:
 def _derive_company_code(base: dict, override: str | None) -> str | None:
     if override:
         return override.strip()
-    yt = (base.get("meta") or {}).get("y_tunnus")
+    meta = base.get("meta") or {}
+    yt = meta.get("y_tunnus")
     if not yt:
         return None
     code = yt.replace("-", "").strip()
-    return code or None
+    if not code:
+        return None
+    # Konserni (consolidated) models need the K-suffixed company code so the
+    # Profinder backfill returns consolidated statements, not parent-level ones.
+    # Verified against live Profinder: "16123988K" returns consolidated data,
+    # the dashed form "1612398-8K" errors — so append K to the dash-stripped
+    # code. Without this a konserni FID produced konserni forecasts + a
+    # "consolidated" level label but parent-level historical actuals.
+    if meta.get("level") == "consolidated" and not code.endswith("K"):
+        code += "K"
+    return code
 
 
 def _analyze(data: dict) -> list[str]:
