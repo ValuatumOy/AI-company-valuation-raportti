@@ -543,6 +543,17 @@ async def run_stages(run, stages, only=None, from_order=None):
         r["status"] in ("error", "validation_failed") for r in run_after["results"]
     ) else "ok"
     store.set_run_status(rid, final)
+    # A failed run must not permanently eat the user's generation credit — the
+    # spend-cap trip that failed the $7 Turun tislaamo run left the customer at
+    # 0/1 with nothing to show. Refund once, and only for a root run that
+    # actually consumed a credit: skip round-2 clones (credit-free) and admin
+    # runs (no access_key). The params marker guards the restart-trap double-refund.
+    if (final == "error"
+            and run_after.get("access_key")
+            and not run_after.get("parent_run_id")
+            and not (run_after.get("params") or {}).get("_credit_refunded")):
+        store.refund_generation(run_after["access_key"])
+        store.mark_credit_refunded(rid)
     yield _ev("done", status=final, total_cost_usd=run_after["total_cost_usd"])
 
 

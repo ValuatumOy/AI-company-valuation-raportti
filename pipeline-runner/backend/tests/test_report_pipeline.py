@@ -2099,6 +2099,47 @@ def test_truncation_retry_respects_spend_cap(monkeypatch):
     assert calls["n"] == 2
 
 
+def test_failed_run_refunds_generation_credit(monkeypatch):
+    """A run that fails (e.g. spend-cap trip) must give the generation credit
+    back — a failure otherwise permanently eats the customer's one credit
+    (Turun tislaamo 0/1, 2026-07-09). Refund is once-only and skips round-2."""
+    import asyncio
+    from app import runner, seed, store
+
+    seed.ensure_seeded()
+    sw = next(p for p in store.list_pipelines()
+              if p["name"] == seed.SINGLE_WRITER_PIPELINE_NAME)
+    stages = store.get_pipeline(sw["id"])["stages"]
+
+    def drive(rid):
+        async def _d():
+            async for _ in runner.run_stages(store.get_run(rid), stages, from_order=1):
+                pass
+        asyncio.run(_d())
+
+    # Root run tied to a consumed 1-credit key, already over the spend cap so the
+    # first paid stage fails immediately.
+    key = store.create_access_key("Tilaus: X", generations_limit=1)["key"]
+    assert store.consume_generation(key) is True
+    rid = store.create_run(sw["id"], {"meta": {"company_name": "X"}}, False, access_key=key)
+    store.add_run_cost(rid, 10.0)
+    drive(rid)
+    assert store.get_run(rid)["status"] == "error"
+    assert store.get_access_key(key)["generations_used"] == 0  # refunded
+    drive(rid)  # restart trap: re-running the same failed run must not double-refund
+    assert store.get_access_key(key)["generations_used"] == 0
+
+    # A round-2 clone (parent_run_id set) is credit-free — a failed one must NOT refund.
+    key2 = store.create_access_key("Tilaus: Y", generations_limit=1)["key"]
+    store.consume_generation(key2)
+    r2 = store.create_run(sw["id"], {"meta": {"company_name": "Y"}}, False,
+                          access_key=key2, parent_run_id="parent-xyz")
+    store.add_run_cost(r2, 10.0)
+    drive(r2)
+    assert store.get_run(r2)["status"] == "error"
+    assert store.get_access_key(key2)["generations_used"] == 1  # unchanged
+
+
 def test_table_prose_columns_align_left_numeric_right():
     """Esa/CEO 2026-07-08: prose columns (Lähde, ...) were right-aligned and
     ugly; numeric year columns must stay right-aligned."""

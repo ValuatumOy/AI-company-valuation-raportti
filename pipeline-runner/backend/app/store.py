@@ -598,3 +598,23 @@ def consume_generation(key):
         (key, _now()),
     )
     return getattr(cur, "rowcount", 0) > 0
+
+
+def refund_generation(key):
+    """Give back one consumed generation credit — called when a run FAILS so a
+    spend-cap trip (or any error) does not permanently eat the user's credit.
+    Floors at 0 (`generations_used > 0`) so it can never over-refund."""
+    db.execute(
+        "UPDATE access_keys SET generations_used = generations_used - 1 "
+        "WHERE key=? AND generations_used > 0",
+        (key,),
+    )
+
+
+def mark_credit_refunded(rid):
+    """Idempotency marker on the run's params so re-running the same failed run
+    (the restart trap — cost persists, re-hits the cap) can't refund twice."""
+    row = db.query_one("SELECT params FROM runs WHERE id=?", (rid,))
+    params = (db.jload(row.get("params")) if row else None) or {}
+    params["_credit_refunded"] = True
+    db.execute("UPDATE runs SET params=? WHERE id=?", (db.jdump(params), rid))
