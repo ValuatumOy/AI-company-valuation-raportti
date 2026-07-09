@@ -57,8 +57,12 @@ export default function App() {
     api.pipelines()
       .then((ps) => {
         setPipelines(ps);
+        // Default to the canonical single-writer pipeline by EXACT name — a
+        // startsWith match also hit the archived "…— ARKISTO" duplicate (older,
+        // sorts first), which is how the wrong pipeline became the default.
         const def =
-          ps.find((p) => p.name.startsWith("Yhden kirjoittajan")) ??
+          ps.find((p) => p.name === "Yhden kirjoittajan raportti (oletus)") ??
+          ps.find((p) => p.name.startsWith("Yhden kirjoittajan raportti (oletus)")) ??
           ps.find((p) => p.name.startsWith("Valuaatio-pipeline")) ??
           ps[0];
         setPipeline(def);
