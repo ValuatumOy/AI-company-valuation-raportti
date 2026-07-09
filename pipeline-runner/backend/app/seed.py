@@ -21,6 +21,11 @@ DEFAULT_PIPELINE_NAME = "Valuaatio-pipeline (6-vaihe, ei käytössä)"
 # DCF/sensitivity/headcount blocks from the data. This is the real default —
 # every self-serve/paid flow generates through this pipeline.
 SINGLE_WRITER_PIPELINE_NAME = "Yhden kirjoittajan raportti (oletus)"
+# Any pipeline whose name starts with this base is a single-writer pipeline and
+# must be kept in sync on reseed — a stale duplicate (e.g. an archived
+# "…(oletus, vanha ajohistoria)") once served an OLD prompt to a paid run
+# (2026-07-09). Reseed now refreshes ALL of them, not just the canonical name.
+SINGLE_WRITER_PIPELINE_PREFIX = "Yhden kirjoittajan raportti"
 
 PLACEHOLDER_PREFIX = "[[ LIITÄ VAIHEEN "
 
@@ -206,25 +211,31 @@ def _legacy_single_writer_stage(stage):
 
 
 def _ensure_single_writer_pipeline(force=False):
-    """Create (and on force, refresh) the single-writer pipeline alongside the
-    default. Never touches the default pipeline."""
-    pipeline = next(
-        (p for p in store.list_pipelines()
-         if p.get("name") == SINGLE_WRITER_PIPELINE_NAME),
-        None,
+    """Create the canonical single-writer pipeline and, on force, refresh the
+    stages of EVERY single-writer pipeline (any name starting with the base
+    prefix) — never the 6-stage default. Refreshing all of them, not just the
+    canonical name, is what stops a stale duplicate from serving an old prompt
+    to a paid run (the wasted-generation incident, 2026-07-09)."""
+    pipelines = [
+        p for p in store.list_pipelines()
+        if str(p.get("name") or "").startswith(SINGLE_WRITER_PIPELINE_PREFIX)
+    ]
+    canonical = next(
+        (p for p in pipelines if p.get("name") == SINGLE_WRITER_PIPELINE_NAME), None
     )
-    if pipeline is None:
-        pipeline = store.create_pipeline(SINGLE_WRITER_PIPELINE_NAME)
-    by_order = {s["order"]: s for s in pipeline.get("stages", [])}
-    if not force and _legacy_single_writer_stage(by_order.get(1)):
-        force = True
-    for desired in _single_writer_stages():
-        cur = by_order.get(desired["order"])
-        if cur is None:
-            store.add_stage(pipeline["id"], desired)
-        elif force or _placeholder_stage(cur):
-            store.update_stage(cur["id"], desired)
-    return store.get_pipeline(pipeline["id"])
+    if canonical is None:
+        canonical = store.create_pipeline(SINGLE_WRITER_PIPELINE_NAME)
+        pipelines.append(canonical)
+    for pipeline in pipelines:
+        by_order = {s["order"]: s for s in pipeline.get("stages", [])}
+        pforce = force or _legacy_single_writer_stage(by_order.get(1))
+        for desired in _single_writer_stages():
+            cur = by_order.get(desired["order"])
+            if cur is None:
+                store.add_stage(pipeline["id"], desired)
+            elif pforce or _placeholder_stage(cur):
+                store.update_stage(cur["id"], desired)
+    return store.get_pipeline(canonical["id"])
 
 
 def _placeholder_stage(stage):

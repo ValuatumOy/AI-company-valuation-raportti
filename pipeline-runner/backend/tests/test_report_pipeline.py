@@ -2140,6 +2140,27 @@ def test_failed_run_refunds_generation_credit(monkeypatch):
     assert store.get_access_key(key2)["generations_used"] == 1  # unchanged
 
 
+def test_reseed_refreshes_all_single_writer_pipelines(monkeypatch):
+    """Reseed must refresh EVERY single-writer pipeline, not just the canonical
+    one — a stale duplicate ("…vanha ajohistoria") served an old prompt + old
+    64k max_tokens to a paid run on 2026-07-09. Any name with the base prefix
+    is kept current so it can't happen again."""
+    from app import seed, store
+
+    seed.ensure_seeded()
+    dup = store.create_pipeline("Yhden kirjoittajan raportti (oletus, vanha ajohistoria)")
+    store.add_stage(dup["id"], {
+        "order": 2, "name": "Vaihe 2", "model": "anthropic/claude-fable-5",
+        "prompt_template": "STALE OLD PROMPT", "max_tokens": 64000,
+    })
+    seed._ensure_single_writer_pipeline(force=True)
+
+    s2 = next(s for s in store.get_pipeline(dup["id"])["stages"] if s["order"] == 2)
+    assert "STALE OLD PROMPT" not in (s2["prompt_template"] or "")  # refreshed
+    assert s2["max_tokens"] == 96000  # canonical writer limit, not the stale 64k
+    assert len(s2["prompt_template"] or "") > 10000  # real vendored prompt loaded
+
+
 def test_table_prose_columns_align_left_numeric_right():
     """Esa/CEO 2026-07-08: prose columns (Lähde, ...) were right-aligned and
     ugly; numeric year columns must stay right-aligned."""
