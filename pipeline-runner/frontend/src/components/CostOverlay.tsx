@@ -130,6 +130,7 @@ export function CostOverlay({
           <thead className="text-neutral-500 text-left">
             <tr>
               <th className="py-1">Aika</th>
+              <th>Raportti</th>
               <th>Tila</th>
               <th className="text-right">vaiheita</th>
               <th className="text-right">USD</th>
@@ -139,6 +140,9 @@ export function CostOverlay({
             {summary?.runs.map((r) => (
               <tr key={r.id} className="border-t border-neutral-800">
                 <td className="py-1">{r.created_at?.slice(0, 19)}</td>
+                <td className="truncate max-w-[220px]">
+                  {r.company_name || "—"}
+                </td>
                 <td>{r.status}</td>
                 <td className="text-right">{r.stage_count}</td>
                 <td className="text-right text-emerald-300">

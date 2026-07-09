@@ -432,7 +432,7 @@ def final_report_json(rid):
 def costs_summary(limit=200):
     """Per-run, per-model and grand-total cost aggregation across all runs."""
     runs = db.query(
-        "SELECT id,status,total_cost_usd,created_at FROM runs "
+        "SELECT id,input_data,status,total_cost_usd,created_at,params FROM runs "
         "ORDER BY created_at DESC LIMIT ?",
         (limit,),
     )
@@ -440,6 +440,16 @@ def costs_summary(limit=200):
     grand = 0.0
     out_runs = []
     for r in runs:
+        # Same company-name derivation as list_runs: meta.company_name, else
+        # params.company_name (self-serve runs start with input_data=None).
+        inp = db.jload(r.get("input_data"))
+        company = None
+        if isinstance(inp, dict):
+            company = (inp.get("meta") or {}).get("company_name")
+        if not company:
+            params = db.jload(r.get("params"))
+            if isinstance(params, dict):
+                company = params.get("company_name")
         sr = db.query(
             'SELECT "order",name,status,cost_usd,tokens_prompt,tokens_completion '
             "FROM stage_results WHERE run_id=?",
@@ -449,6 +459,7 @@ def costs_summary(limit=200):
         grand += rtotal
         out_runs.append({
             "id": r["id"],
+            "company_name": company,
             "status": r["status"],
             "created_at": r["created_at"],
             "total_cost_usd": rtotal,
