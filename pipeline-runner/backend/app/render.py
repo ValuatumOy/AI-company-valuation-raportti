@@ -1181,8 +1181,11 @@ def _cover(report, derived):
                          "perusskenaario.")
 
     # --- band -----------------------------------------------------------
-    level_fi = {"parent": "emoyhtiö", "consolidated": "konserni",
-                "group": "konserni"}.get(str(meta.get("level") or "").lower())
+    # "parent" is the default for every non-consolidated run, not a signal that
+    # subsidiaries exist — so "emoyhtiö" reads as misleading for a standalone
+    # company. "yhtiötaso" (erillistilinpäätös) is correct in both cases.
+    level_fi = {"parent": "yhtiötaso", "consolidated": "konsernitaso",
+                "group": "konsernitaso"}.get(str(meta.get("level") or "").lower())
     conf = (report.get("confidence") or {}).get("level")
     band_meta_bits = [
         f'Raportin päivä {_esc(meta.get("report_date"))}' if meta.get("report_date") else "",

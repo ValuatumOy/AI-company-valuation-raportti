@@ -3,11 +3,15 @@ stage 0), parse JSON, run the validator, persist, and yield SSE events.
 
 This is an async generator so the HTTP layer can stream progress live.
 """
+import asyncio
 import json
 import os
 import re
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlsplit, urlunsplit
+
+import httpx
 
 from . import openrouter, revenue_anomalies, store, validators
 from .models import DATA_FETCHER_MODEL
@@ -191,6 +195,46 @@ def _correction_prompt(base_prompt, correction):
     )
 
 
+# Gemini + google_search occasionally fabricates deep-link URLs (e.g. a real
+# domain with a made-up article path ending in a placeholder id). The writer
+# copies source_register URLs verbatim into the report's Lähderekisteri, so a
+# dead link becomes a clickable 404. Catch obvious fabrications by pattern and
+# the rest by a HEAD probe; fall a missing deep link back to its domain root,
+# which always resolves.
+_FABRICATED_URL_RE = re.compile(
+    r"1234567890|/x{3,}|example\.(?:com|org|net)|/(?:uuid|placeholder|slug)\b", re.I)
+
+
+async def _prune_dead_source_urls(parsed):
+    reg = parsed.get("source_register") if isinstance(parsed, dict) else None
+    if not isinstance(reg, list):
+        return
+
+    async def check(entry):
+        if not isinstance(entry, dict):
+            return
+        url = (entry.get("source") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            return
+        parts = urlsplit(url)
+        if parts.path in ("", "/"):
+            return  # already domain-level; nothing to verify
+        root = urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+        dead = bool(_FABRICATED_URL_RE.search(url))
+        if not dead:
+            try:
+                async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
+                    resp = await c.head(url, headers={"User-Agent": "Mozilla/5.0"})
+                # 403/405/429 mean "exists but blocked us" — keep the deep link.
+                dead = resp.status_code >= 400 and resp.status_code not in (403, 405, 429)
+            except (httpx.HTTPError, ValueError):
+                dead = True
+        if dead:
+            entry["source"] = root
+
+    await asyncio.gather(*[check(e) for e in reg])
+
+
 async def _execute_stage(stage, context, run_input_data, identifier, params,
                          correction=None, rid=None):
     """Run one stage. Returns a result dict (not yet persisted). When `correction`
@@ -315,6 +359,8 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
             res["latency_ms"] = int((time.time() - t0) * 1000)
             res["finished_at"] = _now()
             return res
+        if stage.get("web_search"):
+            await _prune_dead_source_urls(parsed)
         res["parsed_json"] = parsed
         output = parsed
     else:
