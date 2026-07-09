@@ -1,5 +1,37 @@
 # Handoff — 2026-07-09 (read this first)
 
+## 2026-07-09 (cont. 4) — Credit-refund on failure + paid-round toggle + expert UX (LIVE)
+
+Triggered by Lauri's expert-page confusion. Findings + fixes, pushed to both
+repos (build `2026-07-09-credit-refund-paid-toggle`), 115 backend tests pass.
+
+Diagnosis of what Lauri saw ("Vaihe 3 epäonnistui $7.0875 ≥ $4.00"):
+- That was YESTERDAY's failed Turun tislaamo run (`8d49a30…`, $7.09, when cap was
+  $4). It resurfaced because his browser still had `/testi?key=…&rid=…` from
+  yesterday (tab restore/history) → `resumeFromLink` loaded that failed run and
+  dead-ended. **NOT the email** — a plain key sign-in shows a clean search form.
+- His NEW run today (`1202e59…`) **succeeded at $3.5973** (stage2 writer $3.40),
+  well under the current **$5.5** cap (verified `VALU_RUN_USD_CAP=5.5` live — the
+  earlier "$4" note was stale). The truncation-double-billing fix held. This run
+  was the real verification of all the prompt fixes.
+
+Fixes shipped:
+- **Credit refund on failure** (`runner.run_stages` finalization + `store.refund_generation`
+  / `mark_credit_refunded`): a failed run now gives the generation credit back.
+  Guards: only root runs (no `parent_run_id` — round-2 is credit-free) with an
+  `access_key` (admin runs have none); params marker prevents restart-trap
+  double-refund. Credits live in `access_keys` (`generations_limit/used`); there
+  is still NO grant/reset endpoint — to top up a key manually:
+  `UPDATE access_keys SET generations_used = 0 WHERE key='exp_…'`.
+- **Show-old-numbers toggle now covers PAID rounds too**: flag rides the Stripe
+  success_url → client reads it → `RedeemRoundIn.show_old_numbers` → redeem. No
+  pending_rounds schema change.
+- **Expert UX**: always-reachable "+ Aloita uusi" button in the header (client
+  repo) so a failed/finished run no longer dead-ends the page.
+
+Note: `demo:existin` = demo-mode checkout (Stripe unset on client) minting a
+single-use `exp_` key that burns its credit at creation.
+
 ## 2026-07-09 (cont. 3) — "Show old numbers" toggle added to the CLIENT site (LIVE)
 
 The round-2 toggle now exists on BOTH surfaces. Client repo
