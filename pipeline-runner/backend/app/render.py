@@ -1235,13 +1235,23 @@ def _cover(report, derived):
                                     or abs(exp_num - base_num) > 0.01 * max(1.0, abs(base_num))):
             marks.append((exp_num, "odds", "Skenaarioiden odotusarvo"))
         marks.sort(key=lambda m: m[0])
+        positions = [_pos(v) for v, _, _ in marks]
+        # Centered labels are wide; two dots closer than this (in % of track)
+        # collide horizontally. Fan the pair out: left label's text to the left
+        # of its dot, right label's text to the right. Far-apart marks stay centered.
+        CLOSE = 16.0
+        anchor = [""] * len(marks)
+        for i in range(1, len(marks)):
+            if positions[i] - positions[i - 1] < CLOSE:
+                anchor[i - 1] = " aleft"
+                anchor[i] = " aright"
         mark_html = []
         for i, (v, css, lab) in enumerate(marks):
             row = "row1" if i % 2 == 0 else "row2"
             mark_html.append(
-                f'<div class="cv2-mark {css}" style="left:{_pos(v):.1f}%">'
+                f'<div class="cv2-mark {css}" style="left:{positions[i]:.1f}%">'
                 f'<div class="dot"></div>'
-                f'<div class="tag {row}"><b>{_esc(_val_lab(v))}</b>{_esc(lab)}</div></div>')
+                f'<div class="tag {row}{anchor[i]}"><b>{_esc(_val_lab(v))}</b>{_esc(lab)}</div></div>')
         track_html = (
             '<div class="cv2-range">'
             '<div class="cv2-sect">Arvion haarukka skenaarioittain</div>'
@@ -1805,6 +1815,8 @@ a.src{ color:var(--gray); text-decoration:none; border-bottom:1px solid var(--li
   font-size:7.6pt; color:var(--gray); line-height:1.35; }
 .cv2-mark .tag b{ display:block; color:var(--green); font-family:var(--head); font-size:9.5pt; font-variant-numeric:tabular-nums; }
 .cv2-mark .tag.row1{ top:14px; } .cv2-mark .tag.row2{ top:46px; }
+.cv2-mark .tag.aleft{ left:auto; right:50%; transform:none; text-align:right; padding-right:11px; }
+.cv2-mark .tag.aright{ left:50%; transform:none; text-align:left; padding-left:11px; }
 .cv2-legend{ border-top:1px solid var(--line); margin-top:4mm; }
 .cv2-legend .row{ display:grid; grid-template-columns:52mm 1fr; gap:6mm; padding:8px 0;
   border-bottom:1px solid var(--line); align-items:baseline; }
