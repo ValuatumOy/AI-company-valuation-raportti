@@ -1,5 +1,15 @@
 # Handoff — 2026-07-09 (read this first)
 
+## 2026-07-09 (cont. 3) — "Show old numbers" toggle added to the CLIENT site (LIVE)
+
+The round-2 toggle now exists on BOTH surfaces. Client repo
+`Company_valuation_nettisivut` (Vercel `valuatum-arvonmaaritys`, expert app in
+`src/expert/`), commit `aa4da64`: "Näytä vanhat luvut" checkbox in the client
+ClarifyPanel → `Round2Body.show_old_numbers` → free round-2. tsc clean; verified
+live — string present in the deployed chunk on the **/testi** expert route.
+Pushed only after confirming no run was in progress (per owner). Paid extra-round
+path still defaults to clean (backend pending path doesn't carry the flag).
+
 ## 2026-07-09 (cont. 2) — Cost-page 500 fix + konserni fetch fix (LIVE)
 
 Two more fixes, pushed to main, 114 tests pass.
