@@ -1,5 +1,36 @@
 # Handoff — 2026-07-09 (read this first)
 
+## 2026-07-09 (cont. 5) — 🚨 Prompt fixes weren't reaching reports: STALE DUPLICATE pipeline
+
+Root cause found by checking Lauri's actual report output: it had the OLD §14
+title and none of the prompt edits (but DID have the deterministic verottaja
+fix — that's code, not prompt). **There are TWO single-writer pipelines:**
+- `8311e744` "Yhden kirjoittajan raportti (oletus)" — the canonical one; my
+  reseed updated THIS (new §14, capital_loans rule, going-concern, 96k tokens).
+- `d9173b4f` "Yhden kirjoittajan raportti (oletus, vanha ajohistoria)" — a stale
+  leftover (created 07-03, renamed 07-07) with the OLD prompt + OLD 64k tokens.
+
+Lauri's run went to **d9173b4f** (admin test-platform run with an explicit
+`pipeline_id`; the default resolver picks 8311e744, but he selected the old one).
+`reseed_defaults` only maintains the exact-named `8311e744`, so the duplicate
+never got the fixes — a trap.
+
+**Fixed (live, via API — no repo change):** `PUT /api/stages/{d9173b4f stage-2 sid}`
+copied 8311e744's writer stage (prompt_template + validator + max_tokens 96k)
+onto d9173b4f. Verified: BOTH single-writer pipelines now show §14-NEW=True,
+capital_loans=True, old_numbers_directive=True, max_tokens=96000. Any future run
+on either is now correct.
+
+⚠️ **Durability gap:** `reseed_defaults` still only refreshes 8311e744, so
+d9173b4f will DRIFT again on the next prompt edit. Durable fix (decide): either
+DELETE d9173b4f (it only holds old run history) or make
+`seed._ensure_single_writer_pipeline` refresh every pipeline whose name starts
+with the single-writer base name. Until then, re-sync d9173b4f after any reseed.
+
+Note: Lauri's run 1202e59… therefore did NOT exercise the prompt fixes (old
+pipeline). A fresh run on either pipeline now will. His deterministic
+substanssiarvo/verottaja cross-check DID render (code path).
+
 ## 2026-07-09 (cont. 4) — Credit-refund on failure + paid-round toggle + expert UX (LIVE)
 
 Triggered by Lauri's expert-page confusion. Findings + fixes, pushed to both
