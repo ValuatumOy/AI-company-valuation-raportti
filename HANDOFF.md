@@ -30,19 +30,42 @@ Cost tab: `💰 Kustannukset` view already existed; added a **Raportti (company)
 column (store.costs_summary now returns company_name, CostOverlay renders it) so
 laurik can see which report cost what.
 
-Deliberately NOT done (needs input / risk):
-- **Reseed** (`POST /api/reseed`, free) — REQUIRED for the prompt edits to take
-  effect in prod, but `force=True` OVERWRITES any operator-UI prompt edits.
-  Confirm with Esa there are no pending UI prompt edits, THEN reseed. (Railway CLI
-  is authed; APP_TOKEN readable — can run once deploy lands + confirmed.)
-- **Old-numbers toggle** — conflicting opinions (hide vs show depends on
-  buyer/audience). Left as a future opt-in toggle, no behavior change now.
-- **QA validator hardening** for the Nettovelka class — skipped on purpose; a
-  stricter validator can reject real reports and trigger paid retries.
+**Old-numbers toggle — BUILT** (owner clarified: a real on/off button). Commit
+`a8d1c48`. Old numbers are emergent LLM prose (writer sees `{{previous_report}}`),
+so the toggle is a round-2 param → prompt directive, not a deterministic diff:
+`Round2In.show_old_numbers` (default False) → cloned run params → runner sets
+`{{old_numbers_directive}}` (show "vanha → uusi" vs suppress) → singlewriter round-2
+rule. Admin UI: "Näytä vanhat luvut" checkbox in ClarifyPanel. Default False =
+clean report. 113 tests pass, frontend typechecks. Build marker →
+`2026-07-09-review-fixes-toggle`.
 
-**Pick up here:** (1) confirm no pending UI prompt edits → reseed prod. (2) Get
-explicit go-ahead for ONE paid single-writer generation (~$3.5) to verify all
-prompt edits on a real report — per CLAUDE.md rule, do NOT start it without a yes.
+Owner Q&A (verified in code):
+- **Paid loop already exists.** Round-2 = a few free refinement rounds
+  (ROUND2_MAX_PER_RUN=2), then €5/round Stripe-gated unlimited
+  (`/round2/checkout` → `/redeem`, "Arvonmäärityksen lisätarkennuskierros").
+- **Assumption-editing UI does NOT exist in this repo.** Only the round-2
+  ClarifyPanel free-text path (type assumptions → LLM re-run). The report's
+  "muokata Valuatumin järjestelmässä" promise has no backing slider/number UI;
+  that would live in the SEPARATE client-site repo (valuatum-arvonmaaritys.vercel.app),
+  not this workspace. Real gap — decide: build the editor (client repo) or soften
+  the promise. Probabilities specifically could be a deterministic slider (E[V] =
+  Σ p×value, no LLM) — cheap future win.
+- **Emo/konserni already carried.** `meta.level` auto-derived from the Valuatum
+  company code's `K` suffix (`export_modeldata_json.py:329`); report states it
+  (rule 31). Latent bug: `_derive_company_code` (valuatum.py:174) strips the `K`
+  so consolidated models can get PARENT actuals from the Profinder backfill —
+  NOT fixed (touches external API, K-convention untested; needs a live check).
+  **Subsidiary data (Valu Properties Oy) is not in any fetch path** — genuinely
+  needs Valuatum to expose it or you supply it as `user_input`. Not derivable.
+
+Reseed: owner authorized it directly (full control, no Esa confirmation needed).
+Running `POST /api/reseed` once the new build (`2026-07-09-review-fixes-toggle`)
+is live on Railway (poll `/api/health`). Reseed is free (no LLM).
+
+**Pick up here:** owner runs ONE round-1 generation on the TEST platform himself
+once reseed is confirmed live — verifies all prompt edits (capital_loans/nettovelka,
+going-concern wording, §14, assumption text) on a real report. Then a round-2
+run with the "Näytä vanhat luvut" checkbox to verify the toggle both ways.
 
 ## 2026-07-09 — Competitor analysis + verottaja cross-check bug fix (committed, NOT prod-verified)
 
