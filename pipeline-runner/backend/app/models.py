@@ -89,6 +89,9 @@ class Round2In(BaseModel):
 class RedeemRoundIn(BaseModel):
     token: str = Field(min_length=8, max_length=100)
     stripe_session_id: str = Field(min_length=4, max_length=200)
+    # Rides back from the Stripe success_url (paid rounds have no server-side
+    # slot for it — clarifications live in pending_rounds, this small bool does not).
+    show_old_numbers: bool = False
 
 
 class FetchIn(BaseModel):

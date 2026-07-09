@@ -649,6 +649,7 @@ async def round2_checkout(rid: str, body: Round2In, request: Request):
     key_q = f"&key={key}" if key else ""
     success_url = (
         f"{site}/testi?rid={rid}{key_q}&paid_round_token={token}"
+        f"&show_old_numbers={1 if body.show_old_numbers else 0}"
         "&session_id={CHECKOUT_SESSION_ID}"
     )
     cancel_url = f"{site}/testi?rid={rid}{key_q}"
@@ -683,7 +684,8 @@ async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
     store.consume_pending_round(body.token)
     parent = store.get_run(rid)
     new_rid = _start_refinement_round(
-        rid, parent, pending["clarifications"], pending["clarifications_free_text"]
+        rid, parent, pending["clarifications"], pending["clarifications_free_text"],
+        show_old_numbers=body.show_old_numbers,
     )
     return {"run_id": new_rid, "parent_run_id": rid}
 
