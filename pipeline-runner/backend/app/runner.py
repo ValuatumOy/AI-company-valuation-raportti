@@ -319,15 +319,16 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
     if stage["expects_json"]:
         parsed = openrouter.extract_json(r["text"])
         # Retry once on a truncated/unparseable response. 'length' = hit the
-        # token cap, so give it more room. 'error' = the provider returned a
-        # truncated/aborted HTTP 200 (seen with z-ai/glm-5.2) — transient, retry
-        # at the same size. Both are the #1 intermittent failures on big runs.
+        # token cap, so give it more room. Anything else ('error', but also
+        # 'stop': Gemini + google_search sometimes reports STOP with the JSON
+        # cut mid-object well under the cap — Esa's 2026-07-09 run 8422bb09) =
+        # transient, retry at the same size. These are the #1 intermittent
+        # failures on big runs.
         # A truncation retry re-pays the FULL prompt + generation on the same
         # model (the 2026-07-08 Turun tislaamo run: 64k-cap truncation on the
         # Fable writer doubled the stage to $6.96). Never start one once the
         # spend cap is reached.
-        if (parsed is None and r.get("finish_reason") in ("length", "error")
-                and not (rid and _spend_cap_exceeded(rid))):
+        if parsed is None and not (rid and _spend_cap_exceeded(rid)):
             retry_max = int(stage["max_tokens"])
             if r.get("finish_reason") == "length":
                 retry_max = min(retry_max * 2, 120000)

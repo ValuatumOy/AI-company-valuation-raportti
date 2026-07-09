@@ -170,6 +170,9 @@ def _single_writer_stages():
             "prompt_template": _load_prompt("1_enrichment.txt"),
             "expects_json": True,
             "web_search": True,
+            # 32k, not the 16k default: Gemini's thinking tokens count toward
+            # maxOutputTokens, and a truncated enrichment JSON fails the run.
+            "max_tokens": 32000,
             "validator_code": None,
             "input_mapping": {"input_data": "Vaihe 0 FAKTAT"},
         },
