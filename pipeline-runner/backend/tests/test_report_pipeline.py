@@ -1547,6 +1547,40 @@ def test_public_checkout_generate_mints_key_and_starts_run(monkeypatch):
     assert me.json()["remaining"] == 0  # the checkout generation already spent it
 
 
+def test_public_checkout_generate_retries_after_failed_run(monkeypatch):
+    # Regression: the demo flow's session id is deterministic on
+    # (company, email), unlike a real Stripe session id — so a person whose
+    # first attempt hit e.g. the spend cap must NOT be handed that same dead
+    # run forever on every later retry (Turun Tislaamo incident, 2026-07-10).
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+
+    async def fake_search(q):
+        return [{"fid": 184362, "company_name": "Valuatum Oy", "company_code": "184362",
+                  "industry_text": "Software", "industry_code": "62.100",
+                  "industry_id": 1, "industry_tree": None, "analyst_name": "Profinder"}]
+
+    monkeypatch.setattr(main.valuatum, "search_company", fake_search)
+    c = TestClient(main.app)
+    body = {
+        "business_id": "1612398-8", "company_name": "Turun Tislaamo Oy",
+        "email": "colleague@example.com", "user_input": "",
+        "stripe_session_id": "demo:existing:Turun Tislaamo Oy:colleague@example.com",
+    }
+    r = c.post("/api/public/checkout-generate", json=body)
+    first_rid = r.json()["run_id"]
+    store.set_run_status(first_rid, "error")  # simulate the spend-cap failure
+
+    r2 = c.post("/api/public/checkout-generate", json=body)
+    assert r2.status_code == 200
+    second_rid = r2.json()["run_id"]
+    assert second_rid != first_rid  # fresh run, not the same dead one every time
+
+
 def test_paid_extra_round_checkout_and_redeem(monkeypatch):
     from starlette.testclient import TestClient
     from app import main, seed, store

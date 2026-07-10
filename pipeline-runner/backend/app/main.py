@@ -946,14 +946,21 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
     Valuatum FID, mints a single-use access key, and starts generation — closing
     the "operator fulfils manually" gap for the self-serve paid flow. Same
     honeypot + IP rate limit as /api/orders; idempotent on stripe_session_id so
-    a page reload after payment doesn't double-generate or double-mint a key."""
+    a page reload after payment doesn't double-generate or double-mint a key.
+    Only a SUCCESSFUL prior run is reused this way — a failed one (e.g. the
+    Turun Tislaamo $4 spend-cap trip) is retried fresh instead of permanently
+    stuck: the demo flow's session id is deterministic on (company, email),
+    so without this check the same person retrying the same company would be
+    handed the same dead run forever, no matter how many times they tried."""
     if body.website.strip():  # honeypot filled → bot; pretend success
         return {"ok": True}
     if not _rate_ok("checkout", _client_ip(request)):
         raise HTTPException(429, "liian monta tilausta — yritä myöhemmin uudelleen")
     existing = store.get_order_by_session(body.stripe_session_id)
     if existing:
-        return {"run_id": existing.get("run_id"), "key": existing.get("access_key")}
+        existing_run = store.get_run(existing.get("run_id") or "")
+        if not existing_run or existing_run.get("status") != "error":
+            return {"run_id": existing.get("run_id"), "key": existing.get("access_key")}
     _check_not_paused()
     try:
         candidates = await valuatum.search_company(body.business_id)

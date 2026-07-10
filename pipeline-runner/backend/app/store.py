@@ -515,8 +515,13 @@ def set_order_status(oid, status):
 
 
 def get_order_by_session(stripe_session_id):
+    # ORDER BY: a retried demo-mode checkout (deterministic session id, see
+    # public_checkout_generate's failed-run retry) can leave more than one
+    # order row under the same session id — always resolve to the newest.
     return db.query_one(
-        "SELECT * FROM orders WHERE stripe_session_id=?", (stripe_session_id,)
+        "SELECT * FROM orders WHERE stripe_session_id=? "
+        "ORDER BY created_at DESC LIMIT 1",
+        (stripe_session_id,),
     )
 
 
