@@ -839,9 +839,21 @@ def _scenario_values(report):
     for s in scen:
         if isinstance(s, dict):
             out.append({"name": str(s.get("name", "")),
-                        "value": _to_num(s.get("value_teur", s.get("owner_value_teur"))),
+                        "value": _scenario_num(s),
                         "prob": _to_num(s.get("probability_pct"))})
     return out or None
+
+
+def _scenario_num(s):
+    """The prompt never pinned the scenario-item schema, so the model's key name
+    drifts per generation (value_teur, owner_value_teur, owner_value seen in
+    real runs — the last silently blanked the whole cover chart on 2026-07-10).
+    Accept every observed spelling."""
+    for k in ("value_teur", "owner_value_teur", "owner_value", "value"):
+        v = _to_num(s.get(k))
+        if v is not None:
+            return v
+    return None
 
 
 def _derive(report):

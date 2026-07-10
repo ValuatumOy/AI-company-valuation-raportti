@@ -623,7 +623,11 @@ Vastaus on yksi JSON-objekti. Ei tekstiä ennen tai jälkeen, ei koodiaitoja.
     "weighted_equity_value": null,
     "base_case_value_before_floor": null,
     "owner_value_floor": 0,
-    "scenarios": [],
+    "scenarios": [
+      { "name": "Pessimistinen", "value_teur": null, "probability_pct": null },
+      { "name": "Konservatiivinen", "value_teur": null, "probability_pct": null },
+      { "name": "Optimistinen", "value_teur": null, "probability_pct": null }
+    ],
     "market_signals": [],
     "value_drivers": {"positive": [], "negative": []},
     "value_improvement_actions": []
@@ -632,6 +636,8 @@ Vastaus on yksi JSON-objekti. Ei tekstiä ennen tai jälkeen, ei koodiaitoja.
 ```
 
 `sections` sisältää osiot 1–16 samassa järjestyksessä kuin RAPORTIN RAKENNE -osiossa. KANSI ei ole `sections`-osio. `machine_readable` kokoaa keskeiset koneluettavat arvot — niiden on vastattava `sections`-sisältöä (kova sääntö 21).
+
+`machine_readable.scenarios` on TÄSMÄLLEEN yllä olevan muotoinen: kolme objektia, joissa avaimet `name`, `value_teur` (skenaarion flooriin nostettu omistaja-arvo tuhansina euroina, numero — EI merkkijono, EI muita avainnimiä kuten `owner_value`) ja `probability_pct` (numero). Kansisivun skenaariokaavio rakennetaan suoraan näistä kentistä — väärä avainnimi tai puuttuva arvo tarkoittaa, että kaavio jää pois raportista.
 
 ## Lohkotyypit (`blocks`-listan alkiot)
 

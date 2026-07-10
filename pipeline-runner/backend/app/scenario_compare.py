@@ -54,9 +54,18 @@ def build_scenario_comparison_block(report):
         return []
 
     columns = ["Tunnusluku"] + [_LABELS[k] for k in present]
+
+    def _val(s):
+        # Model key-name drift: value_teur / owner_value_teur / owner_value all
+        # seen in real runs (see render._scenario_num).
+        for key in ("value_teur", "owner_value_teur", "owner_value", "value"):
+            v = s.get(key)
+            if _is_num(v):
+                return v
+        return None
+
     rows = [
-        ["Arvo (tEUR)"] + [_fmt_num(by_name[k].get("value_teur", by_name[k].get("owner_value_teur")))
-                           for k in present],
+        ["Arvo (tEUR)"] + [_fmt_num(_val(by_name[k])) for k in present],
         ["Todennäköisyys (%)"] + [_fmt_num(by_name[k].get("probability_pct")) for k in present],
     ]
 
