@@ -1366,6 +1366,55 @@ def test_access_key_quota_is_atomic_and_bounded():
     assert all(store.consume_generation(u) for _ in range(5))
 
 
+def test_rate_limit_buckets_are_independent(monkeypatch):
+    """/api/orders is called from the visitor's BROWSER (real per-user IPs) but
+    /api/public/checkout-generate is called SERVER-SIDE by the client site, so
+    every customer shares one Vercel egress IP. They used to share the 5/hour
+    order limiter, which silently turned it into a global 5-reports-per-hour
+    ceiling (2026-07-10). Separate buckets: exhausting one must not touch the
+    other, and 'checkout' must allow far more than 5."""
+    from app import main
+
+    monkeypatch.setattr(main, "_RATE_HITS", {})
+    ip = "203.0.113.7"
+
+    # 'order' is the tight browser-facing bucket: 5 per hour, then closed.
+    assert all(main._rate_ok("order", ip) for _ in range(5))
+    assert main._rate_ok("order", ip) is False
+
+    # Exhausting 'order' must NOT close 'checkout' for the same IP — that
+    # conflation is the exact bug.
+    assert main._rate_ok("checkout", ip) is True
+    # …and 'checkout' has room for a real hour of sales, not 5.
+    assert all(main._rate_ok("checkout", ip) for _ in range(39))
+    assert main._rate_ok("checkout", ip) is False
+
+    # Different IPs never share a bucket.
+    assert main._rate_ok("order", "198.51.100.2") is True
+
+
+def test_expert_me_reports_paid_round_availability(monkeypatch):
+    """The client must not offer a 'buy an extra round' button when Stripe is
+    unconfigured — /round2/checkout would 503 into a red error."""
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+    monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "")
+    monkeypatch.setenv("ROUND2_MAX_PER_RUN", "5")
+    key = store.create_access_key("E", generations_limit=1)["key"]
+    c = TestClient(main.app)
+
+    me = c.get("/api/expert/me", headers={"Authorization": f"Bearer {key}"}).json()
+    assert me["paid_rounds_enabled"] is False
+    assert me["free_rounds_per_report"] == 5
+
+    monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "sk_test_x")
+    me = c.get("/api/expert/me", headers={"Authorization": f"Bearer {key}"}).json()
+    assert me["paid_rounds_enabled"] is True
+
+
 def test_expert_key_is_capped_and_scoped(monkeypatch):
     from starlette.testclient import TestClient
     from app import main, seed, store

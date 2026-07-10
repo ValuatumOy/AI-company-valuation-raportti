@@ -355,21 +355,49 @@ async def company_search(q: str):
         raise HTTPException(500, str(e))
 
 
-_SEARCH_HITS: dict[str, list[float]] = {}
-_SEARCH_LIMIT, _SEARCH_WINDOW_S = 60, 60.0  # search-as-you-type needs a per-minute cap, not per-hour
+# ponytail: in-memory per-(bucket, ip) rate limits — enough for one process; move
+# to the DB if the backend ever runs more than one instance.
+#
+# Each caller gets its OWN bucket. They used to share one dict per limiter, which
+# conflated two very different callers: /api/orders is hit from the visitor's
+# BROWSER (real per-user IPs), while /api/public/checkout-generate is hit
+# SERVER-SIDE by the client site's /kassa/valmis Server Component — so every
+# paying customer arrives on the same Vercel egress IP. Sharing the 5/hour order
+# limit made it a *global* 5-reports-per-hour ceiling: the 6th buyer in an hour
+# got a 429 that the client site silently swallowed.
+_RATE_HITS: dict[tuple[str, str], list[float]] = {}
+
+# (limit, window_seconds) per bucket.
+_RATE_RULES = {
+    # search-as-you-type needs a per-minute cap, not per-hour
+    "search": (60, 60.0),
+    # browser-submitted order intake: real per-visitor IPs
+    "order": (5, 3600.0),
+    # server-to-server, one shared Vercel IP for every customer. Idempotent on
+    # stripe_session_id, and VALU_DAILY_USD_CAP is the real money backstop — this
+    # is only a runaway-loop guard, so it must be far above any real hour's sales.
+    "checkout": (40, 3600.0),
+}
 
 
-def _search_rate_ok(ip: str) -> bool:
+def _rate_ok(bucket: str, ip: str) -> bool:
     import time
 
+    limit, window = _RATE_RULES[bucket]
     now = time.monotonic()
-    hits = [t for t in _SEARCH_HITS.get(ip, []) if now - t < _SEARCH_WINDOW_S]
-    if len(hits) >= _SEARCH_LIMIT:
-        _SEARCH_HITS[ip] = hits
+    key = (bucket, ip)
+    hits = [t for t in _RATE_HITS.get(key, []) if now - t < window]
+    if len(hits) >= limit:
+        _RATE_HITS[key] = hits
         return False
     hits.append(now)
-    _SEARCH_HITS[ip] = hits
+    _RATE_HITS[key] = hits
     return True
+
+
+def _client_ip(request: Request) -> str:
+    return (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
+        or (request.client.host if request.client else "?")
 
 
 @app.get("/api/public/company-search")
@@ -382,13 +410,11 @@ async def company_search_public(q: str, request: Request):
     q = (q or "").strip()
     if len(q) < 2:
         return []
-    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
-        or (request.client.host if request.client else "?")
-    # Own limiter, not _order_rate_ok's 5/hour — that's sized for order
-    # submission, not autocomplete, and a search box blows through 5/hour in
-    # one typing session (bug found live: "Athlos" then "Athlos Oy" locked
-    # the visitor out of search for an hour).
-    if not _search_rate_ok(ip):
+    # Own bucket, not the 5/hour order limit — that's sized for order submission,
+    # not autocomplete, and a search box blows through 5/hour in one typing
+    # session (bug found live: "Athlos" then "Athlos Oy" locked the visitor out
+    # of search for an hour).
+    if not _rate_ok("search", _client_ip(request)):
         raise HTTPException(429, "liian monta hakua — yritä hetken kuluttua uudelleen")
     try:
         candidates = await valuatum.search_company(q)
@@ -412,32 +438,12 @@ async def company_search_public(q: str, request: Request):
 
 
 # ---- website orders (public intake; operator fulfils in this UI) -------------
-# ponytail: in-memory per-IP rate limit — enough for one process; move to the DB
-# if the backend ever runs more than one instance.
-_ORDER_HITS: dict[str, list[float]] = {}
-_ORDER_LIMIT, _ORDER_WINDOW_S = 5, 3600.0
-
-
-def _order_rate_ok(ip: str) -> bool:
-    import time
-
-    now = time.monotonic()
-    hits = [t for t in _ORDER_HITS.get(ip, []) if now - t < _ORDER_WINDOW_S]
-    if len(hits) >= _ORDER_LIMIT:
-        _ORDER_HITS[ip] = hits
-        return False
-    hits.append(now)
-    _ORDER_HITS[ip] = hits
-    return True
-
 
 @app.post("/api/orders")
 def post_order(body: OrderIn, request: Request):
     if body.website.strip():  # honeypot filled → bot; pretend success
         return {"ok": True}
-    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
-        or (request.client.host if request.client else "?")
-    if not _order_rate_ok(ip):
+    if not _rate_ok("order", _client_ip(request)):
         raise HTTPException(429, "liian monta tilausta — yritä myöhemmin uudelleen")
     oid = store.create_order(
         body.company.strip(), body.email.strip(),
@@ -625,7 +631,7 @@ def _start_refinement_round(rid, parent, clarifications, clarifications_free_tex
         "previous_report": store.final_report_json(rid),
         "show_old_numbers": show_old_numbers,
         # Careful preserve-and-patch is an editing task, not creative writing —
-        # use Opus for the round-2 writer while round 1 stays Fable.
+        # use Opus for the round-2 writer whatever round 1's writer happens to be.
         "round2_writer_model": ROUND2_WRITER_MODEL,
     })
     # NOTE: every refinement round MUST re-run stage 1 (from_order=1): the
@@ -834,6 +840,11 @@ def expert_me(request: Request):
         "generations_used": row["generations_used"],
         "generations_limit": limit,
         "unlimited": unlimited,
+        # Without Stripe configured, /round2/checkout 503s. Tell the client up
+        # front so it stops offering a "buy an extra round" button that can only
+        # dead-end in a red error once the free rounds run out.
+        "paid_rounds_enabled": bool(STRIPE_SECRET_KEY),
+        "free_rounds_per_report": int(os.getenv("ROUND2_MAX_PER_RUN") or 2),
         "remaining": None if unlimited else max(0, limit - row["generations_used"]),
     }
 
@@ -932,9 +943,7 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
     a page reload after payment doesn't double-generate or double-mint a key."""
     if body.website.strip():  # honeypot filled → bot; pretend success
         return {"ok": True}
-    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() \
-        or (request.client.host if request.client else "?")
-    if not _order_rate_ok(ip):
+    if not _rate_ok("checkout", _client_ip(request)):
         raise HTTPException(429, "liian monta tilausta — yritä myöhemmin uudelleen")
     existing = store.get_order_by_session(body.stripe_session_id)
     if existing:
