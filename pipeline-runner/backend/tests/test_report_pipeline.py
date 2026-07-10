@@ -298,6 +298,34 @@ def test_sensitivity_returns_empty_without_dcf_data():
         {"valuation_engine": {"dcf": {}}}) == []
 
 
+def test_revenue_margin_matrix_suppressed_when_base_ev_negative():
+    """SaaShop 2026-07-10: negative base EV made the linear proxy claim
+    'worse margin -> higher equity' (-3,2 % -> 2 334 tEUR vs 0,8 % -> 0).
+    The matrix must be dropped, not rendered inverted."""
+    d = _engine_input_data()
+    dcf = d["valuation_engine"]["dcf"]
+    # deep-loss shape: every PV negative, terminal positive but EV < 0
+    dcf["fcff"] = [-238.0, -320.0]
+    dcf["discounted_fcff"] = [-226.0, -278.0]
+    dcf["cumulative_discounted_fcff"] = [-781.0, -504.0]
+    dcf["equity_value_before_floor"] = -1508.0
+    d["forecast"]["ebit_pct"] = [0.5, 0.8]
+    blocks = sensitivity.build_sensitivity_blocks(d)
+    assert not any(b.get("chart_id") == "revenue_ebit_sensitivity" for b in blocks)
+
+
+def test_terminal_margin_range_suppressed_when_base_equity_negative():
+    """Same incident: '-9,3 % (paras toteutunut) -> 0 tEUR' rendered next to
+    the UNFLOORED base '-1 508 tEUR' — reads as worse margin, better value."""
+    d = _engine_input_data()
+    dcf = d["valuation_engine"]["dcf"]
+    dcf["equity_value_before_floor"] = -1508.0
+    d["forecast"]["ebit_pct"] = [0.5, 0.8]
+    d["actuals"] = {"income_statement": {
+        "ebit": [-561.0, -169.0], "net_sales": [3364.0, 1824.0]}}
+    assert sensitivity.build_terminal_margin_range_blocks(d) == []
+
+
 def test_assemble_injects_sensitivity_blocks_into_section_11():
     run = {"results": [
         {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},

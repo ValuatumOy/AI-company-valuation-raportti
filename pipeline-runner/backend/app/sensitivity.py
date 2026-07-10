@@ -105,6 +105,14 @@ def _revenue_margin_matrix(pv_forecast_base, pv_terminal_base, bridge_adj,
                             base_rev, base_margin):
     if not base_rev or not base_margin:
         return None
+    # The linear proxy (equity ~ scale x base EV) assumes value moves WITH
+    # rev x margin. When the base EV is negative or the base margin is
+    # non-positive, a more negative margin flips `scale` negative and the
+    # matrix claims "worse margin -> higher equity" (SaaShop 2026-07-10:
+    # EBIT-% -3,2 % showed 2 334 tEUR while the base 0,8 % showed 0).
+    # No proxy output beats a nonsense one — skip the matrix entirely.
+    if base_margin <= 0 or (pv_forecast_base + pv_terminal_base) <= 0:
+        return None
     rev_values = [round(base_rev * s) for s in _REV_SCALES]
     margin_values = [round(base_margin + d, 1) for d in _MARGIN_STEPS_PP]
     series = []
@@ -155,6 +163,14 @@ def build_terminal_margin_range_blocks(input_data):
     # margin the company has actually achieved (the reviewer's exact concern).
     if not (_is_num(base_margin) and base_margin > 0 and _is_num(alt_margin)
             and alt_margin < base_margin - 2.0):
+        return []
+    # The scaled alt value is floored at 0 below, but the base row shows the
+    # UNFLOORED equity — when the base equity is already negative, the pair
+    # reads inverted ("-9,3 % -> 0 tEUR" next to "0,8 % -> -1 508 tEUR",
+    # SaaShop 2026-07-10). A negative best-ever margin also flips the terminal
+    # value's sign, which the linear scaling can't represent. Skip both cases:
+    # the range only informs when the base case is positive.
+    if equity_gt <= 0 or alt_margin <= 0:
         return []
     pv_forecast = sum(x for x in disc if _is_num(x))
     pv_terminal = cum[0] - pv_forecast
