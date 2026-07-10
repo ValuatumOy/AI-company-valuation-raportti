@@ -1858,6 +1858,31 @@ def test_round2_cap_bites_across_a_refinement_chain(monkeypatch):
     assert resp4.status_code == 429
 
 
+def test_round2_cap_skipped_for_unlimited_key(monkeypatch):
+    # An unlimited expert key (generations_limit <= 0, i.e. the CEO's
+    # iterate-until-good key) is not bound by ROUND2_MAX_PER_RUN; limited
+    # keys and keyless calls stay capped (see the chain test above).
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+    monkeypatch.setenv("ROUND2_MAX_PER_RUN", "2")
+    c = TestClient(main.app)
+    pid = store.list_pipelines()[0]["id"]
+    key = store.create_access_key("CEO", generations_limit=0)["key"]
+    hdr = {"Authorization": f"Bearer {key}"}
+    rid = store.create_run(pid, {"meta": {"company_name": "X"}}, True,
+                           access_key=key)
+
+    body = {"clarifications": [], "clarifications_free_text": ""}
+    for _ in range(3):  # one past the cap that bites for limited keys
+        resp = c.post(f"/api/runs/{rid}/round2", json=body, headers=hdr)
+        assert resp.status_code == 200
+        rid = resp.json()["run_id"]
+
+
 def test_normalize_query_detects_ytunnus_vs_name():
     from app import valuatum
 

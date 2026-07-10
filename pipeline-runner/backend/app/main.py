@@ -589,7 +589,13 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     # again would otherwise reset the count (a fresh run always has 0
     # children of its own) and the cap would never actually bite.
     max_r2 = int(os.getenv("ROUND2_MAX_PER_RUN") or 2)
-    if store.lineage_depth(rid) >= max_r2:
+    # Unlimited expert keys (generations_limit <= 0) skip the cap: they're
+    # ours/CEO's, iterate-until-good is the point, and the per-run + daily
+    # USD caps still bound the damage. Keyless/admin calls stay capped.
+    caller_key = getattr(request.state, "access_key", None)
+    key_row = store.get_access_key(caller_key) if caller_key else None
+    uncapped = key_row is not None and (key_row["generations_limit"] or 0) <= 0
+    if not uncapped and store.lineage_depth(rid) >= max_r2:
         raise HTTPException(
             429, f"Tarkennuskierrosten enimmäismäärä ({max_r2}) on jo käytetty "
                  "tälle raportille."
