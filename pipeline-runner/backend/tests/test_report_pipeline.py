@@ -8,7 +8,7 @@ import pytest
 
 from app import (
     assemble, dcf_detail, headcount_efficiency, render, revenue_anomalies, runner,
-    sensitivity, validators,
+    scenario_compare, sensitivity, validators,
 )
 
 VDIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
@@ -2220,3 +2220,99 @@ def test_cover_range_track_from_machine_readable_scenarios():
     assert "cv2-track" in h                      # track rendered
     assert "Skenaarioiden odotusarvo" in h       # expected-value marker
     assert "Optimistinen skenaario" in h
+
+
+def test_dcf_detail_waterfall_steps_match_bridge_ground_truth():
+    blocks = dcf_detail.build_dcf_detail_blocks(_engine_input_data())
+    wf = next(b for b in blocks if b.get("chart_id") == "deterministic_ev_equity_waterfall")
+    assert wf["chart_type"] == "waterfall"
+    steps = {s["label"]: s for s in wf["steps"]}
+    assert steps["Yritysarvo (EV)"] == {"label": "Yritysarvo (EV)", "value": 400.0, "kind": "start"}
+    assert steps["Korolliset velat"]["value"] == -10.0
+    assert steps["Kassa"]["value"] == 60.0
+    assert steps["Oman pääoman arvo"]["value"] == 450.0
+    # EV + debt(signed) + cash must equal the equity total, or the chart lies.
+    total = sum(s["value"] for s in wf["steps"] if s["kind"] != "total")
+    assert abs(total - 450.0) < 1e-6
+
+
+def test_svg_waterfall_renders_a_bar_per_step():
+    svg = render._svg_waterfall([
+        {"label": "EV", "value": 400.0, "kind": "start"},
+        {"label": "Velat", "value": -10.0, "kind": "delta"},
+        {"label": "Kassa", "value": 60.0, "kind": "delta"},
+        {"label": "Oma pääoma", "value": 450.0, "kind": "total"},
+    ])
+    assert svg.count("<rect") == 4
+    assert "EV" in svg and "Oma pääoma" in svg
+
+
+def test_svg_waterfall_empty_without_numeric_steps():
+    assert render._svg_waterfall([]) == ""
+    assert render._svg_waterfall([{"label": "x", "value": None, "kind": "start"}]) == ""
+
+
+def _scenarios_machine_readable():
+    return {"scenarios": [
+        {"name": "Pessimistinen", "value_teur": 0, "probability_pct": 35},
+        {"name": "Realistinen (perusskenaario)", "value_teur": 256, "probability_pct": 40},
+        {"name": "Optimistinen", "value_teur": 1104, "probability_pct": 25},
+    ]}
+
+
+def test_scenario_comparison_columns_ordered_pessimistic_to_optimistic():
+    report = {"machine_readable": _scenarios_machine_readable()}
+    blocks = scenario_compare.build_scenario_comparison_block(report)
+    assert len(blocks) == 1
+    table = blocks[0]
+    assert table["columns"] == ["Tunnusluku", "Pessimistinen", "Realistinen", "Optimistinen"]
+    value_row = next(r for r in table["rows"] if r[0] == "Arvo (tEUR)")
+    assert value_row == ["Arvo (tEUR)", "0", "256", "1 104"]
+    prob_row = next(r for r in table["rows"] if r[0] == "Todennäköisyys (%)")
+    assert prob_row == ["Todennäköisyys (%)", "35", "40", "25"]
+
+
+def test_scenario_comparison_prefers_scenarios_sidecar_over_machine_readable():
+    report = {
+        "_scenarios": {"scenarios": [
+            {"name": "Pessimistinen", "owner_value_teur": 10, "probability_pct": 30},
+            {"name": "Optimistinen", "owner_value_teur": 500, "probability_pct": 30},
+        ]},
+        "machine_readable": _scenarios_machine_readable(),
+    }
+    table = scenario_compare.build_scenario_comparison_block(report)[0]
+    value_row = next(r for r in table["rows"] if r[0] == "Arvo (tEUR)")
+    assert value_row == ["Arvo (tEUR)", "10", "500"]  # from _scenarios, not machine_readable
+
+
+def test_scenario_comparison_empty_with_fewer_than_two_scenarios():
+    assert scenario_compare.build_scenario_comparison_block({}) == []
+    one = {"machine_readable": {"scenarios": [{"name": "Realistinen", "value_teur": 669}]}}
+    assert scenario_compare.build_scenario_comparison_block(one) == []
+
+
+def test_assemble_prepends_scenario_comparison_and_is_idempotent():
+    # Single-writer shape: one stage-2 output carries cover, machine_readable,
+    # AND sections together (see /tmp run inspection — no separate stage 6).
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},
+        {"order": 2, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"},
+                         {"id": "11", "title": "SKENAARIOT", "blocks": [{"type": "heading", "text": "x"}]}],
+            "machine_readable": _scenarios_machine_readable(),
+        }},
+    ]}
+    rep = assemble.assemble(run)
+    sec11 = next(s for s in rep["sections"] if s["id"] == "11")
+    assert sec11["blocks"][0]["table_id"] == "deterministic_scenario_comparison"
+    assert sum(1 for b in sec11["blocks"]
+               if b.get("table_id") == "deterministic_scenario_comparison") == 1
+    # re-running assemble on the already-assembled result must not duplicate it
+    rep2 = assemble.assemble({"results": [
+        {"order": 0, "status": "ok", "parsed_json": _engine_input_data()},
+        {"order": 2, "status": "ok", "parsed_json": rep},
+    ]})
+    sec11b = next(s for s in rep2["sections"] if s["id"] == "11")
+    assert sum(1 for b in sec11b["blocks"]
+               if b.get("table_id") == "deterministic_scenario_comparison") == 1

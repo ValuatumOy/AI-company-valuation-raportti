@@ -692,6 +692,79 @@ def _svg_heatmap(x_axis, series):
     return _svg(600, H, "".join(g))
 
 
+def _svg_waterfall(steps):
+    """Bridge/waterfall chart: a 'start' step draws full-height from zero, a
+    'delta' step floats between the running total and the running total + its
+    (signed) value, a 'total' step draws full-height at its own value. Used for
+    the EV -> oma pääoman arvo bridge (deterministic_ev_equity_waterfall)."""
+    steps = [s for s in (steps or []) if isinstance(s, dict)
+             and isinstance(s.get("value"), (int, float)) and not isinstance(s.get("value"), bool)]
+    if not steps:
+        return ""
+    W, H = 600, 250
+    pt, pr, pb, pl = 16, 14, 34, 42
+    running = 0.0
+    tops, bottoms = [], []
+    for s in steps:
+        kind = s.get("kind")
+        v = s["value"]
+        if kind == "delta":
+            lo, hi = (running, running + v) if v >= 0 else (running + v, running)
+            running += v
+        else:
+            lo, hi = 0.0, v
+            running = v
+        bottoms.append(lo)
+        tops.append(hi)
+    allv = tops + bottoms + [0.0]
+    lo_sc, hi_sc, step, count = _nice_scale(min(allv), max(allv))
+    plotW, plotH = W - pl - pr, H - pt - pb
+
+    def y(v):
+        return pt + plotH * (1 - (v - lo_sc) / (hi_sc - lo_sc))
+
+    g = []
+    for i in range(count + 1):
+        val = lo_sc + (hi_sc - lo_sc) * i / count
+        yy = y(val)
+        g.append(f'<line x1="{pl}" y1="{yy:.1f}" x2="{W - pr}" y2="{yy:.1f}" '
+                 f'stroke="{C["line"]}"/>')
+        g.append(f'<text x="{pl - 6}" y="{yy + 3:.1f}" text-anchor="end" '
+                 f'font-size="9" fill="{C["gray"]}">{_fmt(val).replace(" ", " ")}</text>')
+    n = len(steps)
+    groupW = plotW / n
+    bw = groupW * 0.56
+    for i, s in enumerate(steps):
+        kind = s.get("kind")
+        v = s["value"]
+        lo_v, hi_v = bottoms[i], tops[i]
+        gx = pl + groupW * i + (groupW - bw) / 2
+        yy, y0 = y(hi_v), y(lo_v)
+        if kind == "total":
+            color = C["green"]
+        elif kind == "start":
+            color = C["greenLine"]
+        else:
+            color = C["lime"] if v >= 0 else C["red"]
+        g.append(f'<rect x="{gx:.1f}" y="{min(yy, y0):.1f}" width="{bw:.1f}" '
+                 f'height="{max(abs(yy - y0), 1.5):.1f}" fill="{color}"/>')
+        if i > 0 and kind != "start":
+            px = pl + groupW * (i - 1) + (groupW - bw) / 2 + bw
+            py = y(bottoms[i - 1] if steps[i - 1].get("kind") == "delta" and steps[i - 1]["value"] < 0
+                   else tops[i - 1])
+            g.append(f'<line x1="{px:.1f}" y1="{py:.1f}" x2="{gx:.1f}" y2="{py:.1f}" '
+                     f'stroke="{C["lineStrong"]}" stroke-dasharray="3 3"/>')
+        lab_y = min(yy, y0) - 6 if v >= 0 or kind != "delta" else max(yy, y0) + 14
+        sign = "+" if (kind == "delta" and v > 0) else ""
+        g.append(f'<text x="{gx + bw / 2:.1f}" y="{lab_y:.1f}" text-anchor="middle" '
+                 f'font-size="9" font-weight="700" fill="{C["ink"]}">{sign}{_fmt(v)}</text>')
+        g.append(f'<text x="{pl + groupW * i + groupW / 2:.1f}" y="{H - pb + 16}" '
+                 f'text-anchor="middle" font-size="9" fill="{C["gray"]}">{_esc(s.get("label"))}</text>')
+    g.append(f'<line x1="{pl}" y1="{y(0):.1f}" x2="{W - pr}" y2="{y(0):.1f}" '
+             f'stroke="{C["lineStrong"]}" stroke-width="1.2"/>')
+    return _svg(W, H, "".join(g))
+
+
 # --------------------------------------------------------------------------- #
 # range bar + confidence pills (HTML/CSS, like the original)
 # --------------------------------------------------------------------------- #
@@ -1055,6 +1128,8 @@ def _chart_svg(b):
     try:
         if ctype == "heatmap_or_matrix":
             return _svg_heatmap(x, series)
+        if ctype == "waterfall":
+            return _svg_waterfall(b.get("steps"))
         if ctype == "bar_line":
             bar = next((s for s in series if s.get("type", "bar") == "bar"), None)
             line = next((s for s in series if s.get("type") == "line"), None)

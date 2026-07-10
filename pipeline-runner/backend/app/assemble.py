@@ -7,7 +7,7 @@ arrays from every stage into one list sorted by the canonical section order
 1,2,3,4,5,6,8,9,10,11,12,13,14,15,16 (there is no section 7), and returns the
 final report object that feeds the renderer.
 """
-from . import dcf_detail, headcount_efficiency, sensitivity, valuation_equivalence
+from . import dcf_detail, headcount_efficiency, scenario_compare, sensitivity, valuation_equivalence
 from .runner import SECTION_ORDER
 
 _WRAPPER_MARKERS = ("report_type", "cover", "machine_readable", "meta")
@@ -194,6 +194,25 @@ def _inject_dcf_caveats(sections, input_data):
     return sections
 
 
+def _inject_scenario_comparison_block(sections, wrapper):
+    """Prepend a deterministic Pessimistinen/Realistinen/Optimistinen comparison
+    table to the top of section 11 (HERKKYYSANALYYSI JA SKENAARIOT) — built from
+    the structured scenario data (_scenarios / machine_readable.scenarios), not
+    re-derived. Idempotent: strips any previously-injected copy first, like the
+    other deterministic injectors."""
+    extra = scenario_compare.build_scenario_comparison_block(wrapper)
+    if not extra:
+        return sections
+    for sec in sections:
+        if not (isinstance(sec, dict) and str(sec.get("id")) == _SENSITIVITY_SECTION_ID):
+            continue
+        current = [b for b in (sec.get("blocks") or [])
+                   if not (isinstance(b, dict) and b.get("table_id") == "deterministic_scenario_comparison")]
+        sec["blocks"] = extra + current
+        break
+    return sections
+
+
 def _inject_headcount_efficiency_blocks(sections, input_data):
     """Append the deterministic per-employee ratio table to section 5 — computed
     in code (see app/headcount_efficiency.py), never by the LLM."""
@@ -247,5 +266,6 @@ def assemble(run):
     s4 = outputs.get(4)
     if isinstance(s4, dict):
         wrapper.setdefault("_scenarios", s4)
+    _inject_scenario_comparison_block(sections, wrapper)
     valuation_equivalence.normalize_report(wrapper, outputs.get(0))
     return wrapper

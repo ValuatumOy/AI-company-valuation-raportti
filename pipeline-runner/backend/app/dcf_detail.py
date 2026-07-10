@@ -101,6 +101,28 @@ def _bridge_rows(dcf, pv_forecast):
     return rows
 
 
+def _waterfall_steps(dcf, ev):
+    """Same numbers as _bridge_rows, shaped for the waterfall chart (raw floats,
+    not formatted strings) — one source of truth for the EV -> equity bridge."""
+    bridge = dcf.get("bridge") or {}
+    equity = dcf.get("equity_value_before_floor")
+    if not (_is_num(ev) and _is_num(equity)):
+        return []
+    steps = [{"label": "Yritysarvo (EV)", "value": ev, "kind": "start"}]
+    for key, label in (
+        ("interest_bearing_debt", "Korolliset velat"),
+        ("cash", "Kassa"),
+        ("associated_market_value", "Osakkuusyhtiöt / muut erät"),
+        ("minority_market_value", "Vähemmistöosuudet"),
+        ("prev_year_dividends", "Edellisen vuoden osingot"),
+    ):
+        v = bridge.get(key)
+        if _is_num(v) and v != 0:
+            steps.append({"label": label, "value": v, "kind": "delta"})
+    steps.append({"label": "Oman pääoman arvo", "value": equity, "kind": "total"})
+    return steps
+
+
 def _last(xs):
     for x in reversed(xs or []):
         if x not in (None, ""):
@@ -266,6 +288,14 @@ def build_dcf_detail_blocks(input_data):
             "unit": "tEUR",
             "columns": cols,
             "rows": rows,
+        },
+        {
+            "type": "chart",
+            "chart_id": "deterministic_ev_equity_waterfall",
+            "chart_type": "waterfall",
+            "title": "Arvon muodostuminen: yritysarvosta oman pääoman arvoon",
+            "unit": "tEUR",
+            "steps": _waterfall_steps(dcf, ev),
         },
         {
             "type": "table",
