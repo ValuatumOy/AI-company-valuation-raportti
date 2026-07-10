@@ -164,7 +164,10 @@ def test_appendix_divider_appears_once_before_appendix_sections():
 def test_section_refs_remapped_from_internal_id_to_display_number():
     # The LLM writes cross-refs in internal-id space; SECTION_ORDER skips id 7,
     # so id 9 (DCF) must render as "osio 8", id 17 (liite) as "osio 16", while
-    # ids 1-6 are unchanged.
+    # ids 1-6 are unchanged. Rendering (_inline) then turns each ref into a
+    # clickable #sec-N deep link — a reader hitting a restated figure should be
+    # able to jump straight back to where it was first derived (Esa's "mistä
+    # tuo 256 tEUR tuli?" complaint, 2026-07-10).
     from app.runner import SECTION_ORDER
     sections = [{"id": sid, "title": f"T{sid}", "blocks": []} for sid in SECTION_ORDER]
     sections[0]["blocks"] = [
@@ -172,8 +175,13 @@ def test_section_refs_remapped_from_internal_id_to_display_number():
         {"type": "paragraph", "text": "Historia esitetään osiossa 5."},
     ]
     render._resolve_section_refs(sections)
-    assert sections[0]["blocks"][0]["text"] == "DCF-erittely osiossa 8 ja liite osiossa 16."
-    assert sections[0]["blocks"][1]["text"] == "Historia esitetään osiossa 5."
+    assert render._inline(sections[0]["blocks"][0]["text"]) == (
+        'DCF-erittely <a href="#sec-8" class="secref">osiossa 8</a> ja liite '
+        '<a href="#sec-16" class="secref">osiossa 16</a>.'
+    )
+    assert render._inline(sections[0]["blocks"][1]["text"]) == (
+        'Historia esitetään <a href="#sec-5" class="secref">osiossa 5</a>.'
+    )
 
 
 # --------------------------------------------------------------- assembler

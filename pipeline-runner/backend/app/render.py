@@ -162,15 +162,27 @@ def _linkify_citation(m):
     return f'(lähde: <a class="src" href="{href}">{domain}</a>{rest})'
 
 
+_SECREF_MARKER_RE = re.compile("\x00(\\d+)\x00([^\x00]+)\x00")
+
+
+def _resolve_secref_markers(m):
+    return f'<a href="#sec-{m.group(1)}" class="secref">{m.group(2)}</a>'
+
+
 def _inline(s):
     """Escape, then render the markdown emphasis the prompt contract promises
     (**lihava**, *kursiivi*) — otherwise raw asterisks reach the client PDF.
     Also turns an inline "(lähde: domain, pvm)" citation into a clickable link
-    when that domain's full URL is known from elsewhere in the report."""
+    when that domain's full URL is known from elsewhere in the report, and a
+    "osio N" cross-reference (already marker-wrapped by _resolve_section_refs)
+    into a clickable deep link back to that section — a reader chasing a
+    restated figure like "256 tEUR" should be able to jump straight back to
+    where it was first derived, not just read a section number."""
     t = _esc(s)
     t = _MD_BOLD.sub(r"<strong>\1</strong>", t)
     t = _MD_ITALIC.sub(r"<em>\1</em>", t)
     t = _SOURCE_CITE_RE.sub(_linkify_citation, t)
+    t = _SECREF_MARKER_RE.sub(_resolve_secref_markers, t)
     return t
 
 
@@ -1656,7 +1668,11 @@ _SECTION_REF_RE = re.compile(r"\b(osio\w*)(\s+)(\d{1,2})\b", re.IGNORECASE)
 
 def _resolve_section_refs(sections):
     """Rewrite hard "osio N" cross-references in prose from the prompt's internal
-    section-id space to the sequential display numbers the reader actually sees.
+    section-id space to the sequential display numbers the reader actually sees,
+    AND wrap the corrected reference in a marker (\\x00N\\x00text\\x00) that
+    _inline() later turns into a clickable `#sec-N` deep link — so a reader who
+    hits a restated figure ("...256 tEUR, ks. osio 8...") can jump straight back
+    to where it was first derived instead of hunting for the section by number.
     SECTION_ORDER skips id 7 and keeps 17, so every id >= 8 renders one lower —
     the LLM (which numbers by internal id) otherwise cites "osio 9" for the DCF
     section that prints as 8. One registry, resolved deterministically.
@@ -1670,9 +1686,10 @@ def _resolve_section_refs(sections):
 
     def _repl(m):
         disp = display_by_id.get(m.group(3))
-        if disp is None or str(disp) == m.group(3):
+        if disp is None:
             return m.group(0)
-        return f"{m.group(1)}{m.group(2)}{disp}"
+        text = f"{m.group(1)}{m.group(2)}{disp}"
+        return f"\x00{disp}\x00{text}\x00"
 
     for sec in sections:
         if not isinstance(sec, dict):
@@ -1849,6 +1866,7 @@ table.tbl.wide thead th:not(:first-child){ white-space:normal; overflow-wrap:any
 table.tbl thead th:first-child{ text-align:left; }
 table.tbl tbody tr:nth-child(even) td{ background:#FAFBFA; }
 a.src{ color:var(--gray); text-decoration:none; border-bottom:1px solid var(--line-strong); }
+a.secref{ color:var(--lime); text-decoration:none; border-bottom:1px dotted var(--lime); }
 .kv{ display:flex; justify-content:space-between; gap:10px; padding:3.5px 0; border-bottom:1px solid var(--line);
   font-size:8.6pt; align-items:baseline; }
 .kv .k{ color:var(--gray); flex:1 1 auto; }
