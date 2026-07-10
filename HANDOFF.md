@@ -1,5 +1,35 @@
 # Handoff — 2026-07-10 (read this first)
 
+## 2026-07-10 (cont. 3) — 🚨 Cover chart vanished on 4 externally-tested reports; FIXED (commits 26713a3 + 2f06ba2, LIVE + reseeded)
+
+External testers generated 4 reports (SaaShop, AWAKE.AI, LightningChart,
+Virnex, 15:08–15:12 UTC) whose covers rendered the hero figure but NO
+scenario bar chart / explanation grid — a huge blank middle. Root cause:
+`prompts/singlewriter.txt` skeleton had `"scenarios": []` with NO item
+schema, so Sol picks the value key name per generation. Old runs emitted
+`value_teur`/`owner_value_teur` (handled); this batch emitted `owner_value`
+AND `equity_value` (two new spellings in one batch) → `render._scenario_values`
+parsed every value to None → no `derived["range"]` → `_cover` silently
+dropped the chart, and `scenario_compare` dropped the §11 table.
+
+Fixes (both live, verified on all 4 runs via `report.html?force=1`):
+- `render._scenario_num` + `scenario_compare._val`: known keys first, then a
+  generic fallback — any numeric key containing "value" that isn't a
+  prob/weight/contribution field. Re-renders fix stored reports at request
+  time; **already-downloaded PDFs are static — testers must re-open their
+  report link to get the fixed cover.**
+- `singlewriter.txt`: machine_readable.scenarios schema now PINNED (3 items,
+  `name`/`value_teur`/`probability_pct`, explicit "EI muita avainnimiä kuten
+  owner_value"). Reseeded to prod, marker verified in both single-writer
+  pipelines. Applies to new runs.
+- Regression test `test_cover_chart_survives_scenario_key_name_drift`
+  reproduces the real batch shapes. 128 tests pass.
+
+Lesson (repeat of the Virnex table incident): any machine_readable field the
+renderer builds visuals from MUST have its schema pinned in the prompt AND a
+drift-tolerant reader in render.py — per-generation JSON-shape variance is
+normal model behavior, not an anomaly.
+
 ## 2026-07-10 (cont. 2) — Kansisivu v3 + Esa traceability fixes + GPT-5.6 Sol trial + rate-limit conflation fix (LIVE)
 
 Continuation of the CEO test-session below (same day, commits `4227552`
