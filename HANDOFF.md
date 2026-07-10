@@ -1,4 +1,37 @@
-# Handoff — 2026-07-09 (read this first)
+# Handoff — 2026-07-10 (read this first)
+
+## 2026-07-10 — CEO test-session fixes (round-2 preserve bug + unlimited rounds + error UX)
+
+CEO (Esa) tested overnight/morning; feedback triaged against prod data. Findings + fixes:
+
+1. **Round-2 swallowed the user's correction (worst).** His market-size fix
+   (luottotietomarkkina 5 M€ → 30–40 M€) DID reach the round-2 enrichment
+   (run `f8430a98`, business_lines sam_teur 5000→30000/40000) but the writer
+   kept the old text ("SAM noin 5 000 tEUR") and old scenarios (0/256/1104) —
+   maximal-preserve won. Fix: singlewriter rule 0 now has "KÄYTTÄJÄN KORJAUS
+   VOITTAA SÄILYTTÄMISEN" — compare every market/TAM/SAM/competitor figure in
+   [previous_report] vs fresh [enrichment], propagate diffs through body text,
+   optimistic assumptions table AND the optimistic value chain. Deployed + reseeded.
+2. **"Osta lisäkierros — 5 €" → 503** (Stripe unset) after 2 free rounds.
+   Fix: `ROUND2_MAX_PER_RUN` cap skipped for unlimited keys (generations_limit<=0);
+   keyless/admin stay capped (test_round2_cap_skipped_for_unlimited_key).
+   Esa's demo key `exp_a6643cc8…` PATCHed to unlimited in prod (new endpoint
+   `PATCH /api/access-keys/{key}`), so he can run round-3 on his EXISTING chain.
+3. **Evening failure 18:04** was the known enrichment JSON-parse error — happened
+   BEFORE the retry-fix (47bad3d, committed 21:57) deployed. Morning runs fine.
+   Client now shows a human message + "krediitti palautettu" instead of the raw
+   stage error; expertApi parses FastAPI `{"detail":…}` instead of dumping JSON.
+4. **Resend bounce** to esam@valuatum.com 04:07 (transient, recipient-side;
+   likely greylisting) — that's why he "never got" the round-2 email. The report
+   WAS on the /testi page. No code change; watch if it repeats.
+
+Backend deployed + reseeded (marker "KÄYTTÄJÄN KORJAUS VOITTAA" verified in both
+single-writer pipelines). Client deployed (Vercel Ready). 117 tests pass. Also
+today: QA-pass fixes (EVA plug, signal timing, ranges, null cells — commit
+5d19cc7) + morning colleague fixes (dead source links HTTP-validated, emoyhtiö
+wording, NACE double code, Kyrö column — commit 80ebec6). Competitor backlog
+status + agreed paketti A/B plan in memory (competitor-gap-backlog) — paketti A
+approved but NOT started.
 
 ## 2026-07-09 (cont. 5) — 🚨 Prompt fixes weren't reaching reports: STALE DUPLICATE pipeline
 
