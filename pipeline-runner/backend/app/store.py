@@ -580,6 +580,12 @@ def create_access_key(label, generations_limit=3, expires_at=None):
     return get_access_key(key)
 
 
+def set_access_key_limit(key, generations_limit):
+    db.execute("UPDATE access_keys SET generations_limit=? WHERE key=?",
+               (int(generations_limit), key))
+    return get_access_key(key)
+
+
 def list_access_keys():
     return db.query("SELECT * FROM access_keys ORDER BY created_at DESC")
 

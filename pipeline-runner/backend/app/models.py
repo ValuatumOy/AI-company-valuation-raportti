@@ -58,6 +58,10 @@ class AccessKeyIn(BaseModel):
     expires_at: Optional[str] = None
 
 
+class AccessKeyLimitIn(BaseModel):
+    generations_limit: int = Field(ge=0, le=100000)
+
+
 class ExpertGenerateIn(BaseModel):
     fid: int
     company_name: str = Field(min_length=1, max_length=300)

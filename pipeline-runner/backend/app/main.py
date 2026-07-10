@@ -17,7 +17,7 @@ load_dotenv()
 
 from . import email_delivery, openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
 from .models import (  # noqa: E402
-    AccessKeyIn, CheckoutGenerateIn, CompareIn, ExpertGenerateIn, FetchIn, OrderIn,
+    AccessKeyIn, AccessKeyLimitIn, CheckoutGenerateIn, CompareIn, ExpertGenerateIn, FetchIn, OrderIn,
     OrderStatusIn, PipelineIn, RedeemRoundIn, ReorderIn, Round2In, RunIn, StageIn,
     ValidateIn, ValuatumExportIn,
 )
@@ -807,6 +807,16 @@ def post_access_key(body: AccessKeyIn):
 @app.get("/api/access-keys")
 def list_access_keys():
     return store.list_access_keys()
+
+
+@app.patch("/api/access-keys/{key}")
+def patch_access_key(key: str, body: AccessKeyLimitIn):
+    """Admin-only: change a key's quota in place (e.g. upgrade a checkout-minted
+    1-credit key to unlimited so its existing report chain keeps working)."""
+    row = store.set_access_key_limit(key, body.generations_limit)
+    if not row:
+        raise HTTPException(404, "key not found")
+    return dict(row)
 
 
 @app.get("/api/expert/me")
