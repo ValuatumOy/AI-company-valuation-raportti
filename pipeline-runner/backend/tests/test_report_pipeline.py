@@ -1720,7 +1720,7 @@ def test_single_writer_seed_is_research_writer_split():
     assert stages[1]["model"] == "google/gemini-3.1-pro-preview"
     assert stages[1]["web_search"] is True
     assert stages[1]["prompt_template"] == seed._load_prompt("1_enrichment.txt")
-    assert stages[2]["model"] == "anthropic/claude-fable-5"
+    assert stages[2]["model"] == "openai/gpt-5.6-sol"
     assert stages[2]["web_search"] is False
     assert stages[2]["input_mapping"]["enrichment"] == "Vaihe 1 enrichment"
     assert "{{enrichment}}" in stages[2]["prompt_template"]
@@ -1765,7 +1765,7 @@ def test_legacy_single_writer_web_stage_migrates_to_research_writer_split():
     assert migrated_by_order[1]["model"] == "google/gemini-3.1-pro-preview"
     assert migrated_by_order[1]["web_search"] is True
     assert "business_thesis" in migrated_by_order[1]["prompt_template"]
-    assert migrated_by_order[2]["model"] == "anthropic/claude-fable-5"
+    assert migrated_by_order[2]["model"] == "openai/gpt-5.6-sol"
     assert migrated_by_order[2]["web_search"] is False
     assert "{{enrichment}}" in migrated_by_order[2]["prompt_template"]
 

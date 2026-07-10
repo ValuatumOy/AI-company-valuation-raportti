@@ -20,6 +20,9 @@ export const MODEL_GROUPS: { group: string; items: ModelPreset[] }[] = [
   {
     group: "OpenAI",
     items: [
+      { id: "openai/gpt-5.6-sol", label: "GPT-5.6 Sol" },
+      { id: "openai/gpt-5.6-terra", label: "GPT-5.6 Terra" },
+      { id: "openai/gpt-5.6-luna", label: "GPT-5.6 Luna" },
       { id: "openai/gpt-5.5", label: "GPT-5.5" },
       { id: "openai/gpt-5.5-pro", label: "GPT-5.5 Pro" },
       { id: "openai/gpt-5.4", label: "GPT-5.4" },

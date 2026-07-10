@@ -179,17 +179,21 @@ def _single_writer_stages():
         {
             "order": 2,
             "name": "Vaihe 2 - Koko raportti (yksi kirjoittaja)",
-            # Fable 5 gave the strongest whole-report prose in testing. It now
-            # receives the researched enrichment brief instead of running the
-            # costly native web-search agent itself.
-            "model": "anthropic/claude-fable-5",
+            # 2026-07-10: switched from anthropic/claude-fable-5 to GPT-5.6 Sol
+            # (OpenAI's new flagship, released 2026-07-09) — Esa asked to trial
+            # it as writer. It receives the researched enrichment brief instead
+            # of running a costly native web-search agent itself. Swap back to
+            # anthropic/claude-fable-5 here (or via the admin model dropdown)
+            # if Sol's prose quality doesn't hold up.
+            "model": "openai/gpt-5.6-sol",
             "prompt_template": _load_prompt("singlewriter.txt"),
             "expects_json": True,
             "web_search": False,
             # Whole report (all sections + tables + charts) in one call. 96k, not
-            # 64k: Fable's hidden thinking tokens count toward the cap, and a
-            # 'length' truncation triggers a full-price re-run of the whole stage
-            # (~2x cost — the 2026-07-08 $6.96 writer call). Headroom is cheaper.
+            # 64k: hidden reasoning tokens (Fable's, and Sol's max-reasoning-effort
+            # mode) count toward the cap, and a 'length' truncation triggers a
+            # full-price re-run of the whole stage (~2x cost — the 2026-07-08
+            # $6.96 writer call). Headroom is cheaper.
             "max_tokens": 96000,
             "validator_code": _load_validator("stage6_final.py"),
             "input_mapping": {
