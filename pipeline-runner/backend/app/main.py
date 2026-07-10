@@ -369,8 +369,14 @@ _RATE_HITS: dict[tuple[str, str], list[float]] = {}
 
 # (limit, window_seconds) per bucket.
 _RATE_RULES = {
-    # search-as-you-type needs a per-minute cap, not per-hour
-    "search": (60, 60.0),
+    # search-as-you-type, and ALSO server-to-server: the client site proxies it
+    # through its own /api/search route, so every visitor of the marketing site
+    # shares one Vercel egress IP here too. 60/min was a site-wide ceiling that a
+    # handful of simultaneous visitors could exhaust — and the client swallows the
+    # 429 into an empty result list (CombinedDataSource catches and falls back to
+    # the bundled sample catalogue), so the visitor just doesn't find their
+    # company. No LLM cost sits behind this lookup, so keep it generous.
+    "search": (600, 60.0),
     # browser-submitted order intake: real per-visitor IPs
     "order": (5, 3600.0),
     # server-to-server, one shared Vercel IP for every customer. Idempotent on
