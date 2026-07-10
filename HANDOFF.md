@@ -1,5 +1,88 @@
 # Handoff — 2026-07-10 (read this first)
 
+## 2026-07-10 (cont. 2) — Kansisivu v3 + Esa traceability fixes + GPT-5.6 Sol trial + rate-limit conflation fix (LIVE)
+
+Continuation of the CEO test-session below (same day, commits `4227552`
+through `103385b`, 10:32→15:38). None of this was written up when it shipped —
+Railway confirmed live: active deployment commitHash = `103385b`, RUNNING.
+126 tests pass.
+
+- **Kansisivu v3** (`08d95b3`): new cover — dark band, meta grid, one hero
+  figure, 4-column scenario bar (pessimistic/conservative/expected/optimistic).
+  Hero flips from conservative base case to **scenario expected value**
+  (378 tEUR for Valuatum, was 256). "Realistinen perusskenaario" renamed to
+  **"konservatiivinen perusskenaario"** throughout the active single-writer
+  prompt/render/validator path (legacy 6-stage pipeline untouched, unused).
+  `stage6_final` validator now checks `cover.headline_value ==
+  expected_value_teur` (was `realistic_base_case_teur`). Reseeded + verified
+  live (prompt carries 14× "konservatiivinen", 0× "realistinen").
+- **Checkout retry bug fixed** (`103385b`) — root cause of the Turun Tislaamo
+  incident recurring: demo checkout's `stripe_session_id` substitute is
+  deterministic on (company, email), and `/api/public/checkout-generate` was
+  idempotent on that id — so a failed first attempt handed the SAME dead run
+  back on every retry, forever. Fixed: only reuse an existing order's run if
+  it didn't fail; `get_order_by_session` resolves to the newest row (a retried
+  session can leave >1 order row). New test
+  `test_public_checkout_generate_retries_after_failed_run`. **Does NOT fix
+  already-dead links** (e.g. the colleague's old `exp_637de3…&rid=8d49a301…`
+  link still points at its dead run forever) — only new company/email combos
+  benefit. Client site also fixed in parallel (nonce added to the demo
+  checkout call + `demoKey`, commit `55fdf46` in `Company_valuation_nettisivut`).
+- **Capital-loan sensitivity spelled out** (`4227552`) — Esa couldn't trace
+  the alt-equity figure; rule 25 now forces the subtraction to render inline
+  in report text instead of just stating the result.
+- **Deterministic EV→equity waterfall chart + scenario table** (`de9b5fa`) —
+  §9 gets a waterfall chart (`render._svg_waterfall`) built from the same
+  `dcf.bridge` numbers the equity-bridge table already shows; §11 gets a
+  Pessimistinen/Realistinen/Optimistinen comparison table
+  (`app/scenario_compare.py`) prepended ahead of the section's own prose.
+  Both are code-derived (no LLM, no invention risk), injected in
+  `assemble.py` the same way `sensitivity.py`'s heatmaps already are.
+- **§-cross-references now clickable** (`034c017`) — Esa's actual complaint:
+  a correctly-calculated figure (256 tEUR capital-loan case) had no way to
+  trace back to where it was derived. "osio N" mentions now render as
+  `<a href="#sec-N">` deep links to the section's existing anchor. New prompt
+  rule 41 requires every restated key figure to carry a "(ks. osio N)"
+  back-reference; rule 25's capital-loan line now points to osio 9 (DCF),
+  where the new waterfall lives.
+- **Single-writer switched to GPT-5.6 Sol** (`28f1b26`, `06e1e89`) — trial
+  swap from `anthropic/claude-fable-5` to OpenAI's Sol (released 2026-07-09)
+  as the report writer, at Esa's request. Sol/Terra/Luna added to
+  `modelPresets.ts` so any stage can switch to them from the admin dropdown.
+  `reasoning_effort=medium` set explicitly for the Sol writer stage (was
+  implicit default). Fable re-added to `modelPresets.ts` (it was only ever a
+  hardcoded `seed.py` default, so switching away silently dropped it off the
+  dropdown — swap back via the dropdown or `seed.py` if Sol's prose quality
+  doesn't hold up). **GPT-5.6 pricing note (corrected from an earlier wrong
+  assumption this session): Sol is $5/$30 per MTok — MORE expensive than
+  Sonnet 5's $3/$15 (intro $2/$10 through Aug 2026), which is the round-2
+  writer.** The round-1 Fable→Sol swap does NOT repeat the Fable→Sonnet
+  round-2 cost saving, because round-2's baseline was already Sonnet 5.
+- **Fixed a global 5-reports/hour ceiling** (`403b0f8`) — `/api/orders` is
+  called from the visitor's browser (real per-user IPs), but
+  `/api/public/checkout-generate` is called server-side by the client site's
+  `/kassa/valmis` Server Component, so every buyer arrives on the same Vercel
+  egress IP. Both shared one 5/hour per-IP limiter, which was silently a
+  **global** cap of 5 reports/hour site-wide — the 6th buyer got a 429 the
+  client swallowed into a generic "raportti toimitetaan sähköpostiisi".
+  Split into separate buckets (search 60/min, order 5/h, checkout 40/h); the
+  real money guard stays `VALU_DAILY_USD_CAP`. Also exposed
+  `paid_rounds_enabled` + `free_rounds_per_report` on `/api/expert/me` so the
+  UI stops offering a "buy an extra round" button that dead-ends in a 503
+  while Stripe is unconfigured.
+- **Raised the search rate limit** (`ca2d21a`) — same IP-conflation bug: the
+  client site proxies company search through its own `/api/search` route, so
+  60/min was also effectively site-wide, not per-visitor. A handful of
+  simultaneous visitors could exhaust it; the client silently falls back to
+  the bundled sample catalogue on a 429, so a visitor just quietly doesn't
+  find their company. No LLM cost sits behind this endpoint.
+
+**Not yet done:** none of the above have a dedicated live verification run
+beyond what the CEO's ordinary testing already exercised (the round-2/cover
+work was verified via the CEO's real runs per the section below; the
+waterfall/scenario-table/clickable-refs/Sol-swap have NOT been eyeballed on a
+real report yet — needs one round-1 generation, paid, needs go-ahead first).
+
 ## 2026-07-10 — CEO test-session fixes (round-2 preserve bug + unlimited rounds + error UX)
 
 CEO (Esa) tested overnight/morning; feedback triaged against prod data. Findings + fixes:
