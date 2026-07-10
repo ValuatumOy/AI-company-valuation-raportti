@@ -186,6 +186,17 @@ def _single_writer_stages():
             # anthropic/claude-fable-5 here (or via the admin model dropdown)
             # if Sol's prose quality doesn't hold up.
             "model": "openai/gpt-5.6-sol",
+            # Fable ran with no reasoning_effort set (Claude has no such param).
+            # Sol defaults to "medium" if omitted — set it explicitly so it's
+            # visible/swappable in the admin "thinking" dropdown. "low" is
+            # OpenAI's own guidance for deterministic JSON extraction, but this
+            # stage is closer to "hard reasoning, deep planning" (weighing
+            # scenarios, valuation judgment calls, financial-report authoring)
+            # than to templated extraction, so start at "medium", not "low".
+            # Try "high" if Sol's prose/judgment quality disappoints — avoid
+            # "xhigh" for now: its hidden reasoning tokens eat into the 96k
+            # max_tokens cap that already exists to avoid a truncation re-run.
+            "reasoning_effort": "medium",
             "prompt_template": _load_prompt("singlewriter.txt"),
             "expects_json": True,
             "web_search": False,
