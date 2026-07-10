@@ -188,7 +188,7 @@ def build_wacc_risk_caveat_blocks(input_data):
         text += (f". Lisäksi tavoitepääomarakenne D/(D+E) {_fmt_pct(tgt)} on "
                  "ristiriidassa negatiivisen oman pääoman kanssa (kiertokulkuoletus)")
     text += (". Todellinen tuottovaatimus voisi olla korkeampi, jolloin oman "
-             "pääoman arvo olisi perusskenaariota matalampi.")
+             "pääoman arvo olisi konservatiivista perusskenaariota matalampi.")
     return [{
         "type": "callout", "variant": "warning",
         "title": "Diskonttokoron ja luottoriskin suhde",

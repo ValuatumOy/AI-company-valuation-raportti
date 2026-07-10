@@ -188,7 +188,7 @@ def _inline(s):
 
 def _short(v):
     """Cover figure for display: clean + drop a trailing parenthetical the model
-    sometimes appends (e.g. '2 693 tEUR (realistinen base case)')."""
+    sometimes appends (e.g. '2 693 tEUR (konservatiivinen base case)')."""
     if v is None or str(v).strip() == "":
         return ""
     return re.sub(r"\s*\([^)]*\)\s*$", "", _clean(str(v))).strip()
@@ -257,24 +257,25 @@ def _scale_from_teur(teur):
 
 
 def _report_scale(report, derived):
-    """One headline unit for the cover's primary valuation figure.
-
-    Scenario expected value may be much larger than the base case; letting that
-    drive the cover unit makes the primary value look like a peer figure to the
-    scenario output. Keep the cover scale anchored to the realistic base case.
+    """One headline unit for the cover's primary valuation figure (the
+    scenario expected value — the cover's promoted headline). Anchoring to
+    that figure, not the wider scenario range, keeps the hero number from
+    reading in an awkward unit just because the optimistic scenario is much
+    larger.
     """
     cand = []
-    sc = report.get("_scenarios") or {}
-    v = _to_num(sc.get("realistic_base_case_teur"))
-    if v is not None:
-        cand.append(v)
     cover = report.get("cover") or {}
-    if cover.get("base_case_value") not in (None, ""):
+    if cover.get("headline_value") not in (None, ""):
+        v = _to_num(_short(cover.get("headline_value")))
+        if v is not None:
+            cand.append(v)
+    elif cover.get("base_case_value") not in (None, ""):
         v = _to_num(_short(cover.get("base_case_value")))
         if v is not None:
             cand.append(v)
-    elif cover.get("headline_value") not in (None, ""):
-        v = _to_num(_short(cover.get("headline_value")))
+    if not cand:
+        sc = report.get("_scenarios") or {}
+        v = _to_num(sc.get("expected_value_teur"))
         if v is not None:
             cand.append(v)
     return _scale_from_teur(max((abs(c) for c in cand), default=0))
@@ -1225,155 +1226,139 @@ def _footer():
 
 
 def _cover(report, derived):
-    """Cover v2 (CEO-approved mockup 2026-07-08): dark brand band, ONE hero
-    figure, a scenario range track with labelled markers, plain-language legend
-    rows, an edit-your-assumptions note, and the sign-off colophon."""
+    """Cover v3 (kansisivu design 1c, 2026-07-10): plain brand band, a
+    company/meta strip, ONE hero figure, a 4-column scenario bar chart
+    (pessimistic / conservative base / expected value / optimistic), a
+    plain-language explanation grid, and an edit-your-assumptions note.
+
+    The hero figure is the scenario expected value (`cover.headline_value`),
+    not the conservative base case — the conservative base case is shown
+    alongside it in the bar chart, not as a competing cover valuation."""
     cover = report.get("cover") or {}
     meta = report.get("meta") or {}
-    _, legal = _brand(report)
     scale = _report_scale(report, derived)
     div, unit_lab, dec = scale or (1.0, "tEUR", 0)
-    hv = cover.get("headline_value")
-    bcv = cover.get("base_case_value")  # realistic base case (DCF/EVA-based)
+    hv = cover.get("headline_value")  # scenario expected value — now the hero
+    bcv = cover.get("base_case_value")  # conservative base case (DCF/EVA-based)
     rng = derived.get("range")
     industry = _display_industry(meta)
+    conf = (report.get("confidence") or {}).get("level")
 
-    # Lead with one valuation: the realistic base case. Scenario expected value
-    # is a scenario-analysis output, not a competing cover valuation.
-    hero_val = bcv if bcv not in (None, "") else hv
-    hero_label = ("Oman pääoman arvo (realistinen perusskenaario)" if bcv not in (None, "")
+    hero_val = hv if hv not in (None, "") else bcv
+    hero_label = ("Oman pääoman arvo · skenaarioiden odotusarvo" if hv not in (None, "")
                   else (cover.get("headline_label") or "Arvonmäärityksen tulos"))
     base_num = _to_num(_short(bcv)) if bcv not in (None, "") else None
     exp_num = _to_num(_short(hv)) if hv not in (None, "") else None
 
-    zero_floor = base_num is not None and base_num <= 0
+    zero_floor = exp_num is not None and exp_num <= 0
     if zero_floor:
-        note = ("Realistinen perusskenaario ei tue positiivista omistaja-arvoa. "
+        note = ("Skenaarioiden odotusarvo ei tue positiivista omistaja-arvoa. "
                 "Mahdollinen arvo on optio- tai strategista arvoa — arvoa, joka "
                 "perustuu epävarman tulevaisuuden mahdollisuuden toteutumiseen, "
                 "ei nykyiseen kassavirtaan. Se kuvataan skenaarioissa eikä "
                 "esitetä yrityksen arvona.")
     else:
-        note = ("Arvio omistajille kuuluvasta arvosta, jos yhtiön kehitys jatkuu "
-                "toteutuneiden lukujen ja ennusteiden mukaisesti.")
+        note = ("Skenaarioiden todennäköisyyksillä painotettu keskiarvo omistajille "
+                "kuuluvasta arvosta. Konservatiivinen perusskenaario ja haarukan "
+                "ääripäät esitetään alla.")
         if base_num is not None and exp_num is not None:
             gap = max(1.0, 0.02 * abs(base_num))
             if exp_num > base_num + gap:
                 note += (" Skenaarioanalyysissä optimistinen polku nostaa "
-                         "odotusarvoa; yrityksen arvona esitetään realistinen "
-                         "perusskenaario.")
+                         "odotusarvoa konservatiivista perusskenaariota korkeammaksi.")
             elif exp_num < base_num - gap:
                 note += (" Skenaarioanalyysissä pessimistinen polku laskee "
-                         "odotusarvoa; yrityksen arvona esitetään realistinen "
-                         "perusskenaario.")
+                         "odotusarvoa konservatiivista perusskenaariota matalammaksi.")
 
-    # --- band -----------------------------------------------------------
-    # "parent" is the default for every non-consolidated run, not a signal that
-    # subsidiaries exist — so "emoyhtiö" reads as misleading for a standalone
-    # company. "yhtiötaso" (erillistilinpäätös) is correct in both cases.
-    level_fi = {"parent": "yhtiötaso", "consolidated": "konsernitaso",
-                "group": "konsernitaso"}.get(str(meta.get("level") or "").lower())
-    conf = (report.get("confidence") or {}).get("level")
-    band_meta_bits = [
-        f'Raportin päivä {_esc(meta.get("report_date"))}' if meta.get("report_date") else "",
-        (f'Luvut: {level_fi}, {_esc(unit_lab)}' if level_fi else f'Yksikkö: {_esc(unit_lab)}'),
-        f'Luottamustaso: {_esc(conf)}' if conf else "",
-    ]
-    band_meta = "".join(f"<div>{x}</div>" for x in band_meta_bits if x)
-    doctype_bits = [f'Y-tunnus {_esc(meta.get("y_tunnus"))}' if meta.get("y_tunnus") else "",
-                    _esc(industry)]
-    doctype = " · ".join(x for x in doctype_bits if x)
-
+    # --- band + meta ------------------------------------------------------
     band = (
-        '<div class="cv2-band">'
-        '<div>'
-        f'<div class="cv2-brand">{_esc(_brand(report)[0])} · Yritysanalyysi · AI</div>'
-        f'<h1>{_esc(meta.get("company_name"))}</h1>'
-        + (f'<div class="cv2-doctype">{doctype}</div>' if doctype else "")
-        + '</div>'
-        f'<div class="cv2-bandmeta">{band_meta}</div>'
+        '<div class="band">'
+        f'<div class="brand">{_esc(_brand(report)[0])} · Yritysanalyysi · AI</div>'
+        '<div class="kicker">Arvonmääritysraportti</div>'
+        '</div>'
+    )
+    meta_row = (
+        '<div class="meta">'
+        '<div><div class="lab">Yhtiö</div>'
+        f'<div class="co">{_esc(meta.get("company_name"))}</div>'
+        f'<div class="sub">{_esc(industry)}</div></div>'
+        '<div><div class="lab">Y-tunnus</div>'
+        f'<div class="val">{_esc(meta.get("y_tunnus"))}</div></div>'
+        '<div><div class="lab">Raportin päivä</div>'
+        f'<div class="val">{_esc(meta.get("report_date"))}</div></div>'
+        '<div><div class="lab">Luottamustaso</div>'
+        f'<div class="val">{_esc(conf)}</div></div>'
         '</div>'
     )
 
-    # --- hero -----------------------------------------------------------
+    # --- hero ---------------------------------------------------------
     hero = (
-        '<div class="cv2-hero">'
-        f'<div class="cap">{_esc(hero_label)}</div>'
-        f'<div class="val">{html.escape(_scaled_cover_str(hero_val, scale))}</div>'
-        f'<div class="sub">{_esc(note)}</div>'
+        '<div class="hero-lab">' + _esc(hero_label) + '</div>'
+        '<div class="hero-num">'
+        f'<span class="big">{html.escape(_scaled_cover_str(hero_val, scale))}</span>'
         '</div>'
+        f'<p class="hero-desc">{_esc(note)}</p>'
     )
 
-    # --- scenario range track + legend -----------------------------------
-    track_html = legend_html = ""
+    # --- 4-column scenario bar chart + explanation grid --------------------
+    chart_html = expl_html = ""
     lo = rng.get("low") if rng else None
     hi = rng.get("high") if rng else None
-    if lo is not None and hi is not None and hi > lo:
-        span = hi - lo
+    if (lo is not None and hi is not None and hi > lo
+            and base_num is not None and exp_num is not None):
 
-        def _pos(v):
-            return max(5.0, min(95.0, 5 + 90 * (v - lo) / span))
-
-        def _val_lab(v):
+        def _lab(v):
             return f"{_fmt(v / div, dec)} {unit_lab}"
 
-        marks = [(lo, "pess", "Pessimistinen skenaario"),
-                 (hi, "opti", "Optimistinen skenaario")]
-        if base_num is not None:
-            marks.append((base_num, "base", "Realistinen perusskenaario"))
-        if exp_num is not None and (base_num is None
-                                    or abs(exp_num - base_num) > 0.01 * max(1.0, abs(base_num))):
-            marks.append((exp_num, "odds", "Skenaarioiden odotusarvo"))
-        marks.sort(key=lambda m: m[0])
-        positions = [_pos(v) for v, _, _ in marks]
-        # Centered labels are wide; two dots closer than this (in % of track)
-        # collide horizontally. Fan the pair out: left label's text to the left
-        # of its dot, right label's text to the right. Far-apart marks stay centered.
-        CLOSE = 16.0
-        anchor = [""] * len(marks)
-        for i in range(1, len(marks)):
-            if positions[i] - positions[i - 1] < CLOSE:
-                anchor[i - 1] = " aleft"
-                anchor[i] = " aright"
-        mark_html = []
-        for i, (v, css, lab) in enumerate(marks):
-            row = "row1" if i % 2 == 0 else "row2"
-            mark_html.append(
-                f'<div class="cv2-mark {css}" style="left:{positions[i]:.1f}%">'
-                f'<div class="dot"></div>'
-                f'<div class="tag {row}{anchor[i]}"><b>{_esc(_val_lab(v))}</b>{_esc(lab)}</div></div>')
-        track_html = (
-            '<div class="cv2-range">'
-            '<div class="cv2-sect">Arvion haarukka skenaarioittain</div>'
-            f'<div class="cv2-track"><div class="cv2-fill"></div>{"".join(mark_html)}</div>'
+        max_val = max(hi, exp_num, base_num, lo, 1.0)
+
+        def _h(v):
+            return f"{max(0.3, min(100.0, 100 * v / max_val)):.1f}%" if v and v > 0 else "0.3%"
+
+        cols = [
+            (lo, "#C9CFC9", "", "Pessimistinen<br>skenaario"),
+            (base_num, "#8FB79D", "", "Konservatiivinen<br>perusskenaario"),
+            (exp_num, "#1B6B3F", ' style="color:#1B6B3F"',
+             '<span style="color:#1B6B3F;font-weight:600">Skenaarioiden<br>odotusarvo</span>'),
+            (hi, "#C9CFC9", "", "Optimistinen<br>skenaario"),
+        ]
+        col_html = "".join(
+            f'<div class="col"><div class="cval"{cval_style}>{_esc(_lab(v))}</div>'
+            f'<div class="bar" style="height:{_h(v)};background:{color}"></div></div>'
+            for v, color, cval_style, _lbl in cols)
+        label_html = "".join(f'<div>{lbl}</div>' for _v, _c, _s, lbl in cols)
+        chart_html = (
+            '<div style="margin-top:9mm">'
+            '<div class="section-lab">Arvion haarukka skenaarioittain</div>'
+            f'<div class="chart">{col_html}</div>'
+            f'<div class="chart-labels">{label_html}</div>'
             '</div>'
         )
-        legend_rows = [
-            ("var(--ink)", "Realistinen perusskenaario",
-             "Laskettu yhtiön toteutuneista luvuista ja ennusteista kassavirta- (DCF) "
-             "ja lisäarvomenetelmällä (EVA). Tämä on raportin pääluku."),
-            ("var(--lime)", "Skenaarioiden odotusarvo",
-             "Skenaarioiden todennäköisyyksillä painotettu keskiarvo. Todennäköisyydet "
-             "ovat muokattavia oletuksia, eivät ennuste."),
-            ("var(--red)", "Haarukan ääripäät",
-             "Pessimistinen ja optimistinen skenaario kuvaavat arvion ala- ja ylärajan; "
-             "oletukset ja perustelut skenaario-osiossa."),
-        ]
-        legend_html = '<div class="cv2-legend">' + "".join(
-            f'<div class="row"><span class="term"><span class="chip" '
-            f'style="background:{c}"></span>{_esc(t)}</span>'
-            f'<span class="expl">{_esc(e)}</span></div>' for c, t, e in legend_rows) + "</div>"
+        expl_html = (
+            '<div class="expl">'
+            '<div><h4>Konservatiivinen perusskenaario</h4>'
+            '<p>Laskettu yhtiön toteutuneista luvuista ja ennusteista kassavirta- (DCF) '
+            'ja lisäarvomenetelmällä (EVA).</p></div>'
+            '<div><h4>Skenaarioiden odotusarvo</h4>'
+            '<p>Skenaarioiden todennäköisyyksillä painotettu keskiarvo. Tämä on '
+            'raportin pääluku. Todennäköisyydet ovat muokattavia oletuksia, eivät '
+            'ennuste.</p></div>'
+            '<div><h4>Haarukan ääripäät</h4>'
+            '<p>Pessimistinen ja optimistinen skenaario kuvaavat arvion ala- ja '
+            'ylärajan; oletukset ja perustelut skenaario-osiossa.</p></div>'
+            '</div>'
+        )
 
-    foot = ('<div class="cv2-foot"><b>Voit muuttaa oletuksia.</b> Skenaarioiden '
+    foot = ('<div class="footnote"><p><b>Voit muuttaa oletuksia.</b> Skenaarioiden '
             'todennäköisyydet ja ennusteparametrit ovat muokattavissa Valuatumin '
             'järjestelmässä — muutokset päivittävät arvion, ja raportin voi tuottaa '
-            'uudelleen omilla odotuksilla.</div>')
+            'uudelleen omilla odotuksilla.</p></div>')
 
     return (
         '<section class="page cover">'
         + band
-        + '<div class="cv2-body">'
-        + hero + track_html + legend_html + foot
+        + '<div class="cbody">'
+        + meta_row + hero + chart_html + expl_html + foot
         + '</div></section>'
     )
 
@@ -1384,7 +1369,7 @@ def _snapshot(report, derived):
     dq = (report.get("data_quality") or {}).get("class")
     rng = derived.get("range")
     cards = [("Oman pääoman arvo (estimaatti)", cover.get("headline_value")),
-             ("Realistinen perusskenaario", cover.get("base_case_value"))]
+             ("Konservatiivinen perusskenaario", cover.get("base_case_value"))]
     if rng:
         cards.append(("Arvostusväli", f'{_fmt(rng["low"])}–{_fmt(rng["high"])} tEUR'))
     cards.append(("Arvion luottamustaso", conf.get("level") or "–"))
@@ -1594,7 +1579,7 @@ def _cover_guard(report, derived):
     text = _norm_ws(_strip_tags(_cover(report, derived)))
     scale = _report_scale(report, derived)
     missing = []
-    label = "base_case_value" if "base_case_value" in cover else "headline_value"
+    label = "headline_value" if "headline_value" in cover else "base_case_value"
     val = cover.get(label)
     if val is None or str(val).strip() == "":
         missing.append(f"{label} puuttuu/tyhjä")
@@ -1884,44 +1869,38 @@ a.secref{ color:var(--lime); text-decoration:none; border-bottom:1px dotted var(
 /* cover */
 .cover{ page:cover; padding:0; justify-content:flex-start; }
 @media print{ .cover{ min-height:297mm; } }
-.cv2-band{ background:var(--green); color:#F1F5F2; padding:16mm 22mm 12mm;
-  display:flex; justify-content:space-between; align-items:flex-end; gap:10mm; flex-wrap:wrap; }
-.cv2-brand{ font-size:8pt; letter-spacing:.16em; text-transform:uppercase; color:#9CB2A8; margin-bottom:9px; font-weight:700; }
-.cv2-band h1{ font-family:var(--head); font-size:26pt; font-weight:500; color:#F1F5F2; margin:0; line-height:1.05; }
-.cv2-doctype{ font-size:9.5pt; color:#9CB2A8; margin-top:5px; }
-.cv2-bandmeta{ text-align:right; font-size:8.5pt; color:#9CB2A8; line-height:1.7; }
-.cv2-body{ padding:12mm 22mm 14mm; flex:1 1 auto; display:flex; flex-direction:column; }
-.cv2-hero{ text-align:center; padding:10mm 0 2mm; }
-.cv2-hero .cap{ font-size:8.5pt; letter-spacing:.13em; text-transform:uppercase; color:var(--gray); font-weight:700; }
-.cv2-hero .val{ font-family:var(--head); font-size:40pt; color:var(--green); line-height:1.05; margin:5px 0 3px; font-variant-numeric:tabular-nums; }
-.cv2-hero .sub{ font-size:9pt; color:var(--gray); max-width:120mm; margin:4px auto 0; line-height:1.5; }
-.cv2-sect{ font-size:8pt; letter-spacing:.13em; text-transform:uppercase; color:var(--gray); font-weight:700;
-  border-top:1px solid var(--line); padding-top:14px; }
-.cv2-range{ margin-top:12mm; }
-.cv2-track{ position:relative; height:5px; background:var(--green-soft); border-radius:3px; margin:11mm 6mm 24mm; }
-.cv2-fill{ position:absolute; inset:0; border-radius:3px; opacity:.35;
-  background:linear-gradient(90deg, var(--red), var(--lime) 45%, var(--green)); }
-.cv2-mark{ position:absolute; top:50%; transform:translate(-50%,-50%); }
-.cv2-mark .dot{ width:11px; height:11px; border-radius:50%; border:2.5px solid #fff; box-shadow:0 0 0 1px var(--line-strong); }
-.cv2-mark.base .dot{ width:15px; height:15px; background:var(--green); }
-.cv2-mark.pess .dot{ background:var(--red); }
-.cv2-mark.opti .dot{ background:var(--lime-deep); }
-.cv2-mark.odds .dot{ background:var(--lime); }
-.cv2-mark .tag{ position:absolute; left:50%; transform:translateX(-50%); white-space:nowrap; text-align:center;
-  font-size:7.6pt; color:var(--gray); line-height:1.35; }
-.cv2-mark .tag b{ display:block; color:var(--green); font-family:var(--head); font-size:9.5pt; font-variant-numeric:tabular-nums; }
-.cv2-mark .tag.row1{ top:14px; } .cv2-mark .tag.row2{ top:46px; }
-.cv2-mark .tag.aleft{ left:auto; right:50%; transform:none; text-align:right; padding-right:11px; }
-.cv2-mark .tag.aright{ left:50%; transform:none; text-align:left; padding-left:11px; }
-.cv2-legend{ border-top:1px solid var(--line); margin-top:4mm; }
-.cv2-legend .row{ display:grid; grid-template-columns:52mm 1fr; gap:6mm; padding:8px 0;
-  border-bottom:1px solid var(--line); align-items:baseline; }
-.cv2-legend .term{ display:flex; align-items:baseline; gap:7px; font-size:9pt; color:var(--green); font-weight:700; }
-.cv2-legend .term .chip{ width:8px; height:8px; border-radius:50%; flex:none; position:relative; top:-1px; }
-.cv2-legend .expl{ font-size:8.5pt; color:var(--gray); line-height:1.45; }
-.cv2-foot{ margin-top:6mm; font-size:8.2pt; color:var(--gray); border-top:1px solid var(--line); padding-top:10px; line-height:1.5; }
-.cv2-foot b{ color:var(--ink); }
-
+.cover .band{ background:#12321F; color:#EAF0EA; padding:9mm 15mm;
+  display:flex; justify-content:space-between; align-items:center; }
+.cover .band .brand{ font-size:8pt; letter-spacing:.22em; font-weight:700; }
+.cover .band .kicker{ font-size:7.6pt; letter-spacing:.1em; color:#9CB6A4; }
+.cover .cbody{ padding:11mm 15mm 0; flex:1 1 auto; display:flex; flex-direction:column; }
+.cover .meta{ display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:6mm;
+  padding-bottom:6mm; border-bottom:1.5px solid #12321F; }
+.cover .meta .lab{ font-size:7pt; letter-spacing:.08em; color:#7C837C; text-transform:uppercase; }
+.cover .meta .co{ font-size:14pt; font-weight:800; margin-top:2px; letter-spacing:-.01em; color:#1C201C; }
+.cover .meta .sub{ font-size:7.6pt; color:#7C837C; margin-top:2px; }
+.cover .meta .val{ font-size:9.5pt; font-weight:600; margin-top:4px; color:#1C201C; }
+.cover .hero-lab{ font-size:8pt; letter-spacing:.1em; font-weight:600; color:#1B6B3F;
+  text-transform:uppercase; margin-top:9mm; }
+.cover .hero-num{ display:flex; align-items:baseline; gap:8px; margin-top:3px; font-family:var(--head); }
+.cover .hero-num .big{ font-size:52pt; line-height:.85; letter-spacing:-.01em; color:#1C201C;
+  font-variant-numeric:tabular-nums; }
+.cover .hero-desc{ margin:6mm 0 0; max-width:150mm; font-size:9pt; line-height:1.55; color:#4C524C; }
+.cover .section-lab{ font-size:8pt; letter-spacing:.1em; font-weight:600; color:#7C837C;
+  text-transform:uppercase; margin-bottom:5mm; }
+.cover .chart{ display:grid; grid-template-columns:repeat(4,1fr); gap:6mm; align-items:end; height:34mm; }
+.cover .chart .col{ display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+.cover .chart .cval{ font-family:var(--head); font-size:11pt; line-height:1; margin-bottom:3px; color:#1C201C;
+  font-variant-numeric:tabular-nums; }
+.cover .chart .bar{ border-radius:2px 2px 0 0; }
+.cover .chart-labels{ display:grid; grid-template-columns:repeat(4,1fr); gap:6mm; margin-top:3px;
+  padding-top:3px; border-top:1px solid #E3E7E3; }
+.cover .chart-labels div{ font-size:7.4pt; color:#7C837C; line-height:1.3; }
+.cover .expl{ margin-top:7mm; display:grid; grid-template-columns:1fr 1fr 1fr; gap:6mm; }
+.cover .expl h4{ font-size:7.8pt; font-weight:700; margin:0 0 2px; color:#1C201C; }
+.cover .expl p{ font-size:7.4pt; line-height:1.45; color:#5C625C; margin:0; }
+.cover .footnote{ margin-top:auto; padding:6mm 0 4mm; }
+.cover .footnote p{ font-size:7pt; line-height:1.5; color:#7C837C; margin:0; max-width:150mm; }
 /* scenario panels */
 .scen{ border:1px solid var(--line-strong); border-top:3px solid var(--green); padding:11px 13px; margin:11px 0; page-break-inside:avoid; }
 .scen-optimistinen{ border-top-color:var(--lime); } .scen-pessimistinen{ border-top-color:var(--red); }

@@ -1,8 +1,8 @@
 # Vaihe 6 – Tiivistelmä + kokoaja FINAL CONSISTENCY VALIDATOR.
 # Runs on the stage-6 wrapper output. Confirms the cover carries one intact
-# primary valuation figure: the realistic base case. Scenario expected value is
-# validated in stage 4 and discussed in the scenario section; it must not become
-# a competing cover headline.
+# primary valuation figure: the scenario expected value (2026-07-10: promoted
+# to the cover headline). The conservative base case is still required on the
+# cover, but only as the secondary/comparison figure — see render.py's _cover.
 import re
 
 # Numbers may use any space as a thousands separator: ASCII, NBSP (U+00A0),
@@ -188,13 +188,14 @@ def validate(output: dict, context: dict) -> dict:
 
     scenarios = (context or {}).get("scenarios", {}) or {}
     rbc = _first_num(scenarios.get("realistic_base_case_teur"))
+    evt = _first_num(scenarios.get("expected_value_teur"))
 
-    # --- 2. cover headline_value, if present, is also the base case ----------
-    if hv is not None and rbc is not None:
-        chk("cover headline_value == scenarios.realistic_base_case_teur (±1 tEUR)",
-            abs(hv - rbc) <= 1.0, f"cover {hv} vs realistic base {rbc}")
+    # --- 2. cover headline_value, if present, is the scenario expected value -
+    if hv is not None and evt is not None:
+        chk("cover headline_value == scenarios.expected_value_teur (±1 tEUR)",
+            abs(hv - evt) <= 1.0, f"cover {hv} vs expected value {evt}")
     else:
-        chk("cover headline_value == realistic base case", True,
+        chk("cover headline_value == scenarios.expected_value_teur", True,
             "skipped: value not available")
 
     # --- 3. cover base_case_value == scenarios.realistic_base_case_teur ------

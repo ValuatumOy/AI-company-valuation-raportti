@@ -94,7 +94,7 @@ def _wacc_growth_matrix(fcff, disc, cum, equity_gt, wacc_base, bridge_adj):
     return {
         "type": "chart", "chart_id": "wacc_growth_sensitivity",
         "title": "Herkkyys: WACC x pitkän aikavälin kasvu (oman pääoman arvo, tEUR) "
-                 "— likimääräinen malli, kalibroitu perusskenaarion lukuihin",
+                 "— likimääräinen malli, kalibroitu konservatiivisen perusskenaarion lukuihin",
         "chart_type": "heatmap_or_matrix", "unit": "tEUR",
         "x_axis": [_fmt_pct(g) for g in growth_values],
         "series": series, "status": "available",
@@ -168,14 +168,14 @@ def build_terminal_margin_range_blocks(input_data):
             "unit": "tEUR",
             "columns": ["Terminaali-EBIT-%", "Oman pääoman arvo"],
             "rows": [
-                [f"{_fmt_pct(base_margin)} (perusskenaario)", _fmt_teur(equity_gt)],
+                [f"{_fmt_pct(base_margin)} (konservatiivinen perusskenaario)", _fmt_teur(equity_gt)],
                 [f"{_fmt_pct(alt_margin)} (paras toteutunut)", _fmt_teur(alt_equity)],
             ],
         },
         {
             "type": "paragraph",
             "text": (
-                f"Perusskenaario olettaa terminaalivuoden EBIT-marginaaliksi "
+                f"Konservatiivinen perusskenaario olettaa terminaalivuoden EBIT-marginaaliksi "
                 f"{_fmt_pct(base_margin)}. Jos terminaalimarginaali jää yhtiön "
                 f"parhaaseen toteutuneeseen tasoon {_fmt_pct(alt_margin)}, DCF:n "
                 f"oman pääoman arvo on likimäärin {_fmt_teur(alt_equity)} — arvon "

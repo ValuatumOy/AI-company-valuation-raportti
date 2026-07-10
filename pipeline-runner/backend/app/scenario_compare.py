@@ -8,8 +8,8 @@ scenario one at a time; this reads the same structured numbers and lays them
 side by side so a reader can compare without flipping between paragraphs.
 """
 
-_ORDER = ["pessimistinen", "realistinen", "optimistinen"]
-_LABELS = {"pessimistinen": "Pessimistinen", "realistinen": "Realistinen", "optimistinen": "Optimistinen"}
+_ORDER = ["pessimistinen", "konservatiivinen", "optimistinen"]
+_LABELS = {"pessimistinen": "Pessimistinen", "konservatiivinen": "Konservatiivinen", "optimistinen": "Optimistinen"}
 
 
 def _is_num(x):

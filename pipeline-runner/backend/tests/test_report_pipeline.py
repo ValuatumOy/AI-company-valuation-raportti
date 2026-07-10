@@ -51,12 +51,20 @@ def _report():
 
 
 # --------------------------------------------------------------- cover guard
-def test_cover_shows_single_primary_value_not_scenario_expected_value():
-    html = render._cover(_report(), render._derive(_report()))
+def test_cover_shows_scenario_expected_value_as_primary():
+    # 2026-07-10: the cover headline flipped from the conservative base case
+    # to the scenario expected value (kansisivu design 1c) — the base case is
+    # still shown, but as a secondary bar in the scenario chart, not the hero.
+    rep = _report()
+    rep["machine_readable"]["scenarios"] = [
+        {"name": "Pessimistinen", "value_teur": 0, "probability_pct": 20},
+        {"name": "Konservatiivinen", "value_teur": 1000, "probability_pct": 55},
+        {"name": "Optimistinen", "value_teur": 4200, "probability_pct": 25},
+    ]
+    html = render._cover(rep, render._derive(rep))
     text = render._norm_ws(render._strip_tags(html))
+    assert "1 598 tEUR" in text
     assert "1 000 tEUR" in text
-    assert "1 598 tEUR" not in text
-    assert "Skenaarioilla painotettu odotusarvo" not in text
 
 
 def test_cover_guard_passes_on_intact_cover():
@@ -67,7 +75,7 @@ def test_cover_guard_rejects_per_glyph_corruption(monkeypatch):
     orig = render._cover
     monkeypatch.setattr(
         render, "_cover",
-        lambda r, d: orig(r, d).replace("1 000 tEUR", "1 0 0 0 t E U R"),
+        lambda r, d: orig(r, d).replace("1 598 tEUR", "1 5 9 8 t E U R"),
     )
     with pytest.raises(render.CoverGuardError):
         render._cover_guard(_report(), render._derive(_report()))
@@ -779,16 +787,19 @@ def test_stage4_validator_allows_zero_value_scenario_with_collapsing_ebit():
 def test_stage6_validator_passes_nbsp_formatted_cover():
     # Finnish thousands separators may be NBSP (U+00A0) / narrow NBSP (U+202F).
     ctx = {"scenarios": {"expected_value_teur": 1598, "realistic_base_case_teur": 1000}}
-    out = {"cover": {"headline_value": "1 000 tEUR", "base_case_value": "1 000 tEUR"},
+    out = {"cover": {"headline_value": "1 598 tEUR", "base_case_value": "1 000 tEUR"},
            "machine_readable": {"expected_value": 1598, "base": 1000},
            "sections": [_DISCLAIMER_SEC]}
     r = validators.run_validator(_v("stage6_final.py"), out, ctx)
     assert r["passed"], r
 
 
-def test_stage6_validator_requires_primary_base_case_cover_value():
+def test_stage6_validator_requires_expected_value_as_cover_headline():
+    # 2026-07-10: the cover headline is now the scenario expected value, not
+    # the conservative base case — the base case is still mandatory on the
+    # cover, but as the secondary figure.
     ctx = {"scenarios": {"expected_value_teur": 1400, "realistic_base_case_teur": 1000}}
-    good = {"cover": {"headline_value": "1 000 tEUR", "base_case_value": "1 000 tEUR"},
+    good = {"cover": {"headline_value": "1 400 tEUR", "base_case_value": "1 000 tEUR"},
             "machine_readable": {"expected_value": 1400, "base": 1000},
             "sections": [{"id": "1", "blocks": [
                 {"type": "paragraph", "text": "Odotusarvo 1 400 tEUR ja base case 1 000 tEUR."}]}]}
@@ -798,7 +809,7 @@ def test_stage6_validator_requires_primary_base_case_cover_value():
     missing["cover"].pop("base_case_value")
     assert not validators.run_validator(_v("stage6_final.py"), missing, ctx)["passed"]
     wrong_headline = json.loads(json.dumps(good))
-    wrong_headline["cover"]["headline_value"] = "1 400 tEUR"
+    wrong_headline["cover"]["headline_value"] = "1 000 tEUR"  # base case, not expected value
     assert not validators.run_validator(_v("stage6_final.py"), wrong_headline, ctx)["passed"]
 
 
@@ -1168,7 +1179,7 @@ def test_blocks_tolerate_missing_and_null_fields():
 
 def test_cover_guard_rejects_blank_figure():
     rep = _report()
-    rep["cover"]["base_case_value"] = ""
+    rep["cover"]["headline_value"] = ""
     with pytest.raises(render.CoverGuardError):
         render._cover_guard(rep, render._derive(rep))
 
@@ -2262,21 +2273,22 @@ def test_table_prose_columns_align_left_numeric_right():
 
 
 def test_cover_range_track_from_machine_readable_scenarios():
-    """Single-writer reports have no _scenarios sidecar — the cover's range
-    track must build from machine_readable.scenarios (Athlos 2026-07-08)."""
+    """Single-writer reports have no _scenarios sidecar — the cover's scenario
+    bar chart must build from machine_readable.scenarios (Athlos 2026-07-08)."""
     rep = _golden()
     rep.pop("_scenarios", None)
     rep["machine_readable"] = {"scenarios": [
         {"name": "Pessimistinen", "owner_value_teur": 0, "probability_pct": 35},
-        {"name": "Realistinen", "owner_value_teur": 669, "probability_pct": 40},
+        {"name": "Konservatiivinen", "owner_value_teur": 669, "probability_pct": 40},
         {"name": "Optimistinen", "owner_value_teur": 10850, "probability_pct": 25}]}
     rep["expected_value"] = {"value": 2980, "unit": "tEUR"}
     rep["cover"] = {"headline_label": "Skenaarioiden odotusarvo",
                     "headline_value": "2 980 tEUR", "base_case_value": "669 tEUR"}
     h = render.render_html(rep)
-    assert "cv2-track" in h                      # track rendered
-    assert "Skenaarioiden odotusarvo" in h       # expected-value marker
-    assert "Optimistinen skenaario" in h
+    text = render._norm_ws(render._strip_tags(h))
+    assert 'class="chart"' in h                  # scenario bar chart rendered
+    assert "Skenaarioiden odotusarvo" in text    # expected-value marker (now the hero)
+    assert "Optimistinen skenaario" in text
 
 
 def test_dcf_detail_waterfall_steps_match_bridge_ground_truth():
@@ -2312,7 +2324,7 @@ def test_svg_waterfall_empty_without_numeric_steps():
 def _scenarios_machine_readable():
     return {"scenarios": [
         {"name": "Pessimistinen", "value_teur": 0, "probability_pct": 35},
-        {"name": "Realistinen (perusskenaario)", "value_teur": 256, "probability_pct": 40},
+        {"name": "Konservatiivinen (perusskenaario)", "value_teur": 256, "probability_pct": 40},
         {"name": "Optimistinen", "value_teur": 1104, "probability_pct": 25},
     ]}
 
@@ -2322,7 +2334,7 @@ def test_scenario_comparison_columns_ordered_pessimistic_to_optimistic():
     blocks = scenario_compare.build_scenario_comparison_block(report)
     assert len(blocks) == 1
     table = blocks[0]
-    assert table["columns"] == ["Tunnusluku", "Pessimistinen", "Realistinen", "Optimistinen"]
+    assert table["columns"] == ["Tunnusluku", "Pessimistinen", "Konservatiivinen", "Optimistinen"]
     value_row = next(r for r in table["rows"] if r[0] == "Arvo (tEUR)")
     assert value_row == ["Arvo (tEUR)", "0", "256", "1 104"]
     prob_row = next(r for r in table["rows"] if r[0] == "Todennäköisyys (%)")
@@ -2344,7 +2356,7 @@ def test_scenario_comparison_prefers_scenarios_sidecar_over_machine_readable():
 
 def test_scenario_comparison_empty_with_fewer_than_two_scenarios():
     assert scenario_compare.build_scenario_comparison_block({}) == []
-    one = {"machine_readable": {"scenarios": [{"name": "Realistinen", "value_teur": 669}]}}
+    one = {"machine_readable": {"scenarios": [{"name": "Konservatiivinen", "value_teur": 669}]}}
     assert scenario_compare.build_scenario_comparison_block(one) == []
 
 
