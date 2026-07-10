@@ -846,13 +846,21 @@ def _scenario_values(report):
 
 def _scenario_num(s):
     """The prompt never pinned the scenario-item schema, so the model's key name
-    drifts per generation (value_teur, owner_value_teur, owner_value seen in
-    real runs — the last silently blanked the whole cover chart on 2026-07-10).
-    Accept every observed spelling."""
+    drifts per generation (value_teur, owner_value_teur, owner_value AND
+    equity_value all seen in real runs — two new spellings in one 2026-07-10
+    batch silently blanked the cover chart). Known keys first, then any numeric
+    *value* key that isn't a probability/weight/contribution."""
     for k in ("value_teur", "owner_value_teur", "owner_value", "value"):
         v = _to_num(s.get(k))
         if v is not None:
             return v
+    for k in sorted(s):
+        kl = k.lower()
+        if "value" in kl and "prob" not in kl and "contribution" not in kl \
+                and "weight" not in kl:
+            v = _to_num(s.get(k))
+            if v is not None:
+                return v
     return None
 
 

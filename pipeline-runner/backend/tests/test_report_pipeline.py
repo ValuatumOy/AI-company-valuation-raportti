@@ -2333,9 +2333,14 @@ def test_cover_chart_survives_scenario_key_name_drift():
     rep = _golden()
     rep.pop("_scenarios", None)
     rep["machine_readable"] = {"scenarios": [
-        {"name": "Pessimistinen", "owner_value": 0, "probability_pct": 35},
-        {"name": "Konservatiivinen", "owner_value": 0, "probability_pct": 40},
-        {"name": "Optimistinen", "owner_value": 1718, "probability_pct": 25}]}
+        # both drifted spellings from the real 2026-07-10 batch, plus the
+        # contribution key that must NOT be mistaken for the value
+        {"name": "Pessimistinen", "owner_value": 0, "probability_pct": 35,
+         "contribution": 0},
+        {"name": "Konservatiivinen", "equity_value": 0, "probability_pct": 40,
+         "contribution": 0},
+        {"name": "Optimistinen", "equity_value": 1718, "probability_pct": 25,
+         "contribution": 429.5}]}
     rep["expected_value"] = {"value": 430, "unit": "tEUR"}
     rep["cover"] = {"headline_label": "Skenaarioiden odotusarvo",
                     "headline_value": "430 tEUR", "base_case_value": "0 tEUR"}
