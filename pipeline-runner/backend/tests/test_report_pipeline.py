@@ -2846,3 +2846,82 @@ def test_assemble_injects_optimistic_waterfall_after_scenario_compare():
     sec11b = next(s for s in rep2["sections"] if str(s["id"]) == "11")
     assert sum(1 for b in sec11b["blocks"] if isinstance(b, dict)
                and b.get("table_id") == "deterministic_optimistic_waterfall") == 1
+
+
+def _checkout_env(monkeypatch):
+    from app import main, seed
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+
+    async def fake_search(q):
+        return [{"fid": 184362, "company_name": "Valuatum Oy", "company_code": "184362",
+                 "industry_text": "Software", "industry_code": "62.100",
+                 "industry_id": 1, "industry_tree": None, "analyst_name": "Profinder"}]
+
+    monkeypatch.setattr(main.valuatum, "search_company", fake_search)
+    return main
+
+
+def test_checkout_generate_requires_paid_stripe_session_when_configured(monkeypatch):
+    """Audit C3: the unauthenticated endpoint trusted the client-sent session id.
+    With Stripe configured, a fabricated or unpaid session must be rejected with
+    402 before any key is minted or run started."""
+    from starlette.testclient import TestClient
+    main = _checkout_env(monkeypatch)
+    monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "sk_test_x")
+
+    async def unpaid(session_id):
+        return {"payment_status": "unpaid"}
+
+    monkeypatch.setattr(main, "_stripe_get_checkout_session", unpaid)
+    c = TestClient(main.app)
+    body = {"business_id": "1612398-8", "company_name": "X Oy",
+            "email": "a@b.fi", "user_input": "",
+            "stripe_session_id": "cs_test_fabricated"}
+    r = c.post("/api/public/checkout-generate", json=body)
+    assert r.status_code == 402
+
+    async def paid(session_id):
+        return {"payment_status": "paid"}
+
+    monkeypatch.setattr(main, "_stripe_get_checkout_session", paid)
+    r2 = c.post("/api/public/checkout-generate", json=body)
+    assert r2.status_code == 200 and r2.json().get("run_id")
+
+
+def test_checkout_generate_demo_mode_skips_stripe_verification(monkeypatch):
+    from starlette.testclient import TestClient
+    main = _checkout_env(monkeypatch)
+    monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "")
+    c = TestClient(main.app)
+    r = c.post("/api/public/checkout-generate", json={
+        "business_id": "1612398-8", "company_name": "X Oy", "email": "d@e.fi",
+        "user_input": "", "stripe_session_id": "demo:x:y"})
+    assert r.status_code == 200 and r.json().get("run_id")
+
+
+def test_get_stream_is_read_only_progress(monkeypatch):
+    """Audit C4: GET /stream used to call runner.run_stages() directly — a plain
+    GET re-executed the paid pipeline. It must now only report stored progress."""
+    from starlette.testclient import TestClient
+    main = _checkout_env(monkeypatch)
+    monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "")
+
+    def boom(*a, **k):
+        raise AssertionError("GET /stream must not execute stages")
+
+    monkeypatch.setattr(main.runner, "run_stages", boom)
+    c = TestClient(main.app)
+    r = c.post("/api/public/checkout-generate", json={
+        "business_id": "1612398-8", "company_name": "X Oy", "email": "s@e.fi",
+        "user_input": "", "stripe_session_id": "demo:stream:test"})
+    rid = r.json()["run_id"]
+    from app import store
+    store.set_run_status(rid, "ok")  # terminal -> stream ends after one snapshot
+    resp = c.get(f"/api/runs/{rid}/stream",
+                 headers={"Authorization": "Bearer admintok"})
+    assert resp.status_code == 200
+    assert '"step": "progress"' in resp.text or '"step":"progress"' in resp.text
+    run = store.get_run(rid)
+    assert run["status"] == "ok"  # not flipped back to running by the GET

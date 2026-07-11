@@ -512,22 +512,38 @@ def _run_with_params(rid):
     return store.get_run(rid)
 
 
-async def _stream(rid, only=None, from_order=None):
-    run = _run_with_params(rid)
-    if not run:
-        raise HTTPException(404, "run not found")
-    p = store.get_pipeline(run["pipeline_id"])
-    store.set_run_status(rid, "running")
-    async for event in runner.run_stages(
-        run, p["stages"], only=only, from_order=from_order
-    ):
-        yield {"data": json.dumps(event, ensure_ascii=False)}
+async def _stream_progress(rid):
+    """READ-ONLY progress stream over the persisted run state. This used to call
+    runner.run_stages() directly, which meant a plain GET re-executed the whole
+    paid pipeline (bypassing the _RUN_TASKS dedup and credit consumption) — a
+    finished report could be re-run for free just by opening its stream URL.
+    Execution now happens only via POST /start's background task."""
+    terminal = {"ok", "error", "validation_failed"}
+    last = None
+    while True:
+        run = store.get_run(rid)
+        if not run:
+            yield {"data": json.dumps({"step": "error", "message": "run not found"})}
+            return
+        snapshot = {
+            "step": "progress",
+            "status": run.get("status"),
+            "stages": [{"order": r.get("order"), "name": r.get("name"),
+                        "status": r.get("status")} for r in run.get("results") or []],
+        }
+        s = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+        if s != last:
+            last = s
+            yield {"data": s}
+        if run.get("status") in terminal:
+            return
+        await asyncio.sleep(2)
 
 
 @app.get("/api/runs/{rid}/stream")
 async def stream_run(rid: str, request: Request):
     _require_run_access(rid, request)
-    return EventSourceResponse(_stream(rid))
+    return EventSourceResponse(_stream_progress(rid))
 
 
 # ---- background runner ------------------------------------------------------
@@ -558,7 +574,16 @@ async def _drive_run(rid: str, only=None, from_order=None):
         try:
             final_run = store.get_run(rid)
             if final_run and final_run.get("status") == "ok":
-                await email_delivery.send_report_ready(rid)
+                readiness = store.report_readiness(rid)
+                if readiness["ready"]:
+                    result = await email_delivery.send_report_ready(rid)
+                    if isinstance(result, dict) and not result.get("sent", True):
+                        print(f"report email for {rid} not sent: {result}", flush=True)
+                else:
+                    # Delivering a report that failed its hard checks to a paying
+                    # client is worse than a late email — hold it and log why.
+                    print(f"report email for {rid} HELD, readiness issues: "
+                          f"{readiness['issues']}", flush=True)
         except Exception as e:
             print(f"report email delivery failed for {rid}: {e}", flush=True)
         _RUN_TASKS.pop(rid, None)
@@ -708,14 +733,28 @@ async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
     return {"run_id": new_rid, "parent_run_id": rid}
 
 
+async def _stream_execute(rid, only=None, from_order=None):
+    """Execute stages and stream events. Admin-only POST rerun endpoints —
+    the public GET /stream must never reach this (it re-ran paid pipelines)."""
+    run = _run_with_params(rid)
+    if not run:
+        raise HTTPException(404, "run not found")
+    p = store.get_pipeline(run["pipeline_id"])
+    store.set_run_status(rid, "running")
+    async for event in runner.run_stages(
+        run, p["stages"], only=only, from_order=from_order
+    ):
+        yield {"data": json.dumps(event, ensure_ascii=False)}
+
+
 @app.post("/api/runs/{rid}/stages/{order}/rerun")
 async def rerun_stage(rid: str, order: int):
-    return EventSourceResponse(_stream(rid, only=order))
+    return EventSourceResponse(_stream_execute(rid, only=order))
 
 
 @app.post("/api/runs/{rid}/stages/{order}/rerun-from")
 async def rerun_from(rid: str, order: int):
-    return EventSourceResponse(_stream(rid, from_order=order))
+    return EventSourceResponse(_stream_execute(rid, from_order=order))
 
 
 @app.get("/api/costs")
@@ -939,6 +978,9 @@ def _pick_checkout_candidate(candidates: list[dict]) -> dict | None:
     return candidates[0]
 
 
+_CHECKOUT_LOCKS: dict[str, asyncio.Lock] = {}
+
+
 @app.post("/api/public/checkout-generate")
 async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
     """Public, unauthenticated: called by the client site's Stripe success page
@@ -956,43 +998,59 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
         return {"ok": True}
     if not _rate_ok("checkout", _client_ip(request)):
         raise HTTPException(429, "liian monta tilausta — yritä myöhemmin uudelleen")
-    existing = store.get_order_by_session(body.stripe_session_id)
-    if existing:
-        existing_run = store.get_run(existing.get("run_id") or "")
-        if not existing_run or existing_run.get("status") != "error":
-            return {"run_id": existing.get("run_id"), "key": existing.get("access_key")}
-    _check_not_paused()
-    try:
-        candidates = await valuatum.search_company(body.business_id)
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, e.response.text[:500])
-    except RuntimeError as e:
-        raise HTTPException(500, str(e))
-    candidate = _pick_checkout_candidate(candidates)
-    if not candidate:
-        raise HTTPException(
-            404, f"Yritystä ({body.business_id}) ei löytynyt Valuatumista."
+    # With Stripe configured, the claimed session must be a real PAID checkout
+    # session — the endpoint is unauthenticated, so without this check anyone
+    # could start a paid pipeline with a made-up session id. Demo mode (no
+    # Stripe key) deliberately skips this: the whole flow is a free demo then.
+    if STRIPE_SECRET_KEY:
+        try:
+            session = await _stripe_get_checkout_session(body.stripe_session_id)
+        except httpx.HTTPStatusError:
+            raise HTTPException(402, "Maksua ei voitu vahvistaa.")
+        if session.get("payment_status") != "paid":
+            raise HTTPException(402, "Maksua ei voitu vahvistaa.")
+    # Serialize per session id: two identical requests racing past the
+    # check-then-insert used to be able to start two paid runs.
+    # ponytail: in-process lock — single-instance deploy; a DB claim if we scale out.
+    lock = _CHECKOUT_LOCKS.setdefault(body.stripe_session_id[:128], asyncio.Lock())
+    async with lock:
+        existing = store.get_order_by_session(body.stripe_session_id)
+        if existing:
+            existing_run = store.get_run(existing.get("run_id") or "")
+            if not existing_run or existing_run.get("status") != "error":
+                return {"run_id": existing.get("run_id"), "key": existing.get("access_key")}
+        _check_not_paused()
+        try:
+            candidates = await valuatum.search_company(body.business_id)
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(e.response.status_code, e.response.text[:500])
+        except RuntimeError as e:
+            raise HTTPException(500, str(e))
+        candidate = _pick_checkout_candidate(candidates)
+        if not candidate:
+            raise HTTPException(
+                404, f"Yritystä ({body.business_id}) ei löytynyt Valuatumista."
+            )
+        key_row = store.create_access_key(
+            f"Tilaus: {body.company_name} ({body.stripe_session_id[:12]})",
+            generations_limit=1,
         )
-    key_row = store.create_access_key(
-        f"Tilaus: {body.company_name} ({body.stripe_session_id[:12]})",
-        generations_limit=1,
-    )
-    key = key_row["key"]
-    # Consume the one paid-for generation now — this call IS that generation,
-    # it doesn't go through /api/expert/generate's own consume_generation.
-    store.consume_generation(key)
-    rid = _create_generation_run(
-        fid=candidate["fid"], company_name=candidate.get("company_name") or body.company_name,
-        company_code=candidate.get("company_code"), industry_text=candidate.get("industry_text"),
-        industry_code=candidate.get("industry_code"), industry_id=candidate.get("industry_id"),
-        industry_tree=candidate.get("industry_tree"), delivery_email=body.email,
-        user_input=body.user_input, access_key=key,
-    )
-    store.create_paid_order(
-        body.company_name, body.email, body.user_input, body.stripe_session_id,
-        candidate["fid"], key, rid,
-    )
-    return {"run_id": rid, "key": key}
+        key = key_row["key"]
+        # Consume the one paid-for generation now — this call IS that generation,
+        # it doesn't go through /api/expert/generate's own consume_generation.
+        store.consume_generation(key)
+        rid = _create_generation_run(
+            fid=candidate["fid"], company_name=candidate.get("company_name") or body.company_name,
+            company_code=candidate.get("company_code"), industry_text=candidate.get("industry_text"),
+            industry_code=candidate.get("industry_code"), industry_id=candidate.get("industry_id"),
+            industry_tree=candidate.get("industry_tree"), delivery_email=body.email,
+            user_input=body.user_input, access_key=key,
+        )
+        store.create_paid_order(
+            body.company_name, body.email, body.user_input, body.stripe_session_id,
+            candidate["fid"], key, rid,
+        )
+        return {"run_id": rid, "key": key}
 
 
 @app.delete("/api/runs/{rid}")
