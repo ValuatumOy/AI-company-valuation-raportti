@@ -1,5 +1,40 @@
 # Handoff — 2026-07-11 (read this first)
 
+## 2026-07-11 — Esa's feedback triage: 3 fixes shipped (0bcf0b2, LIVE + reseeded, verified on Esa's Valuatum run)
+
+Esa reviewed his 10.7 Valuatum report (RID `71e41a6c68dd481e9300f64b82cf0bb6`).
+Main point: the AI report is fine — the weak spot is the Valuatum SYSTEM's own
+deterministic forecasts (Valuatum Oy: 421 tEUR 2025 actual → engine forecasts
+decline 359→285 until 2030, an artifact of the 2023 one-off revenue bump of
+~110 tEUR from the matured Finnair hybrid loan). Shipped fixes:
+
+- **Headcount if-rule** (his item 6): `headcount_efficiency` now corrects
+  reported headcount when it's >2× the personnel-cost-implied value
+  (|costs|/50 tEUR), rescales the engine per-person ratios, adds a callout
+  naming the corrected years. Valuatum 2017–18: 60 → 5, ratios now ~81 200
+  €/person. Verified on live rerender.
+- **Sparse-year gap markers** (item 4): `render._insert_year_gap_cols` puts a
+  visible "…" column between non-consecutive year columns (2026e | … | 2030e
+  | … | 2035e). Applies to all tables incl. old reports on rerender.
+- **"Ei hajauta riskiä" phrasing dropped** (item 1): prompt rule 13 + stage-D
+  bullet rewritten to plain language, phrase banned. Reseeded (updated 7
+  stages), marker verified live. New runs only.
+- 136 tests pass.
+
+Answered from data (no code): scenario probabilities are prompt-pinned profile
+defaults — 12 recent ok runs: pessimistic ALWAYS 35 %, profile
+volatile-growth (35/40/25) 9×, turnaround (35/50/15) 3×; the stable-profitable
+profile (20/60/20) has never fired. EVA/DCF backsolve = audit C2, on the P0
+list, not forgotten.
+
+**Big open feature (Esa's main ask): user-feedback loop into the Valuatum
+system's "change estimates" channel** — user tells the AI why the base
+forecast is wrong ("2023 was a one-off, growth resumes 2026"), AI produces
+revised estimate series, pushes them through the same channel consensus/trunk
+AI estimates already use, modeldata re-exported, report rerun. This repo's
+valuatum_kit is read-only today — needs the change-estimates API details from
+Esa/Valuatum team before we can build. Design question, not started.
+
 ## 2026-07-11 — SaaShop review fixes shipped (commits 5180987 + cc493a2, LIVE + reseeded, verified)
 
 Full page-by-page review of the SaaShop PDF (one of the 4 external-tester
