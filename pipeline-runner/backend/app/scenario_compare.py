@@ -58,14 +58,16 @@ def build_scenario_comparison_block(report):
     def _val(s):
         # Model key-name drift: value_teur / owner_value_teur / owner_value /
         # equity_value all seen in real runs — same logic as render._scenario_num.
-        for key in ("value_teur", "owner_value_teur", "owner_value", "value"):
+        for key in ("value_teur", "owner_value_teur", "owner_value",
+                    "equity_value", "equity_value_teur", "value"):
             v = s.get(key)
             if _is_num(v):
                 return v
+        # Never grab an enterprise-value field — same rule as render._scenario_num.
         for key in sorted(s):
             kl = key.lower()
             if ("value" in kl and "prob" not in kl and "contribution" not in kl
-                    and "weight" not in kl):
+                    and "weight" not in kl and "enterprise" not in kl):
                 v = s.get(key)
                 if _is_num(v):
                     return v

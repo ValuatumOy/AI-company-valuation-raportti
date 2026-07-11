@@ -547,15 +547,30 @@ def test_headcount_corrected_from_personnel_costs_when_reported_implausible():
     }
     blocks = headcount_efficiency.build_headcount_efficiency_blocks(data)
     table = blocks[0]
-    # 258 / 50 = 5.16 -> 5; 2025 stays as reported (299/50 ≈ 6 > 5/2)
-    assert next(r for r in table["rows"] if r[0] == "Henkilöstö") == ["Henkilöstö", "5", "5"]
+    # the reported source figure stays visible unchanged...
+    assert next(r for r in table["rows"] if r[0] == "Henkilöstö") == ["Henkilöstö", "60", "5"]
+    # ...and the implied value is a separate estimate row (258 / 50 = 5.16 -> 5;
+    # 2025 stays as reported so its cell is blank)
+    est = next(r for r in table["rows"] if r[0].startswith("Henkilöstö (arvio"))
+    assert est[1:] == ["5", ""]
     rev = next(r for r in table["rows"] if r[0] == "Liikevaihto / henkilö")
     # 406/60 tEUR rescaled by 60/5 -> 406/5 = 81.2 tEUR = 81 200 €
     assert rev == ["Liikevaihto / henkilö", "81 200", "84 200"]
-    # EBIT/person derived locally from the corrected headcount
+    # EBIT/person derived locally from the implied headcount
     assert next(r for r in table["rows"] if r[0] == "Liiketulos / henkilö")[1] == "10 000"
     note = next(b for b in blocks if b.get("type") == "callout")
     assert "2017" in note["text"] and "2025" not in note["text"]
+
+
+def test_scenario_value_fallback_prefers_equity_over_enterprise_value():
+    """Audit caveat on the 2f06ba2 generic fallback: a scenario item carrying
+    both equity_value and enterprise_value must resolve to the equity value —
+    EV includes debt and would overstate the owner value on the cover."""
+    s = {"name": "Optimistinen", "enterprise_value": 900, "equity_value": 500,
+         "probability_pct": 25}
+    assert render._scenario_num(s) == 500
+    # even without the known alias, the generic fallback must skip EV fields
+    assert render._scenario_num({"enterprise_value": 900}) is None
 
 
 def test_render_table_inserts_gap_marker_between_sparse_year_columns():

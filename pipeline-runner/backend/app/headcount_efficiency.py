@@ -92,9 +92,10 @@ def build_headcount_efficiency_blocks(input_data):
     corrected = _implied_headcounts(hc, _align(_get_list(inc, "personnel_costs"), n))
     # Engine per_employee ratios were computed with the reported headcount, so
     # a corrected year rescales them by reported/implied instead of needing
-    # the underlying source values.
+    # the underlying source values. The reported source figure itself stays
+    # visible; the implied value is shown as a separate estimate row.
     scale = {i: hc[i] / corrected[i] for i in corrected}
-    hc = [corrected.get(i, v) for i, v in enumerate(hc)]
+    hc_eff = [corrected.get(i, v) for i, v in enumerate(hc)]
 
     # Even after the personnel-cost cross-check some years stay implausible
     # (SaaShop 2018: 30 employees against 2 tEUR revenue -> 67 EUR
@@ -103,8 +104,8 @@ def build_headcount_efficiency_blocks(input_data):
     # stays visible so the reader still sees the suspect source figure.
     net_sales = _align(_get_list(inc, "net_sales"), n)
     bad = {i for i in range(n)
-           if _is_num(net_sales[i]) and _is_num(hc[i]) and hc[i] > 0
-           and net_sales[i] / hc[i] < 1.0}
+           if _is_num(net_sales[i]) and _is_num(hc_eff[i]) and hc_eff[i] > 0
+           and net_sales[i] / hc_eff[i] < 1.0}
 
     def _masked(values):
         return [None if i in bad else v for i, v in enumerate(values)]
@@ -117,6 +118,11 @@ def build_headcount_efficiency_blocks(input_data):
     hc_row = _row("Henkilöstö", hc)
     if hc_row:
         rows.append(hc_row)
+    if corrected:
+        est_row = _row("Henkilöstö (arvio henkilöstökuluista)",
+                       [corrected.get(i) for i in range(n)])
+        if est_row:
+            rows.append(est_row)
     for label, key in (
         ("Liikevaihto / henkilö", "net_sales"),
         ("Jalostusarvo / henkilö", "value_added"),
@@ -128,7 +134,7 @@ def build_headcount_efficiency_blocks(input_data):
             rows.append(r)
 
     ebit_row = _row("Liiketulos / henkilö",
-                    _masked(_ebit_per_employee(_align(_get_list(inc, "ebit"), n), hc)))
+                    _masked(_ebit_per_employee(_align(_get_list(inc, "ebit"), n), hc_eff)))
     if ebit_row:
         rows.append(ebit_row)
 
@@ -156,9 +162,10 @@ def build_headcount_efficiency_blocks(input_data):
             "title": "Henkilöstömäärä korjattu",
             "text": (
                 f"Lähdedatan ilmoittama henkilöstömäärä vuosilta {yrs} on "
-                "epäuskottava suhteessa henkilöstökuluihin. Taulukossa on "
-                "käytetty henkilöstökuluista johdettua arviota "
-                f"(noin {_fmt_num(COST_PER_HEAD_TEUR)} tEUR/henkilö)."
+                "epäuskottava suhteessa henkilöstökuluihin. Ilmoitettu määrä "
+                "näytetään sellaisenaan; henkilöä kohden lasketut tunnusluvut "
+                "näiltä vuosilta perustuvat henkilöstökuluista johdettuun "
+                f"arvioon (noin {_fmt_num(COST_PER_HEAD_TEUR)} tEUR/henkilö)."
             ),
         })
     return blocks

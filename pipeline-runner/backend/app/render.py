@@ -876,14 +876,17 @@ def _scenario_num(s):
     equity_value all seen in real runs — two new spellings in one 2026-07-10
     batch silently blanked the cover chart). Known keys first, then any numeric
     *value* key that isn't a probability/weight/contribution."""
-    for k in ("value_teur", "owner_value_teur", "owner_value", "value"):
+    for k in ("value_teur", "owner_value_teur", "owner_value", "equity_value",
+              "equity_value_teur", "value"):
         v = _to_num(s.get(k))
         if v is not None:
             return v
+    # Generic fallback must never grab an enterprise-value field — EV includes
+    # debt and would overstate the owner value on the cover.
     for k in sorted(s):
         kl = k.lower()
         if "value" in kl and "prob" not in kl and "contribution" not in kl \
-                and "weight" not in kl:
+                and "weight" not in kl and "enterprise" not in kl:
             v = _to_num(s.get(k))
             if v is not None:
                 return v
