@@ -1,5 +1,55 @@
 # Handoff — 2026-07-11 (read this first)
 
+## 2026-07-11 — Roadmap steps 3–7 executed (6e2b77a…b8497d8, LIVE + reseeded, all 5 delivered RIDs verified)
+
+Executed the reconciled cross-agent roadmap end to end. Backend HEAD b8497d8
+deployed + reseeded (7 stages); client 40590ef pushed (Vercel). 152 tests.
+
+- **Step 3 — fixtures + shadow validation (6e2b77a):** real SaaShop/Virnex/
+  AWAKE/Valuatum extracts locked in tests/fixtures/runs/ with end-to-end
+  characterization tests. stage6_final now validates the ACTIVE
+  machine_readable.scenarios schema (count/names/values/prob-sum/EV math/
+  cover==EV + ported zero-fundamental guard) in SHADOW mode — named in the
+  validator report, never blocking. report_qa gained post-assemble scenario
+  math + cover-vs-anchor checks (valuation_equivalence stamps
+  _valuation_anchor_teur); catches AWAKE's 762-vs-1144, no SaaShop
+  floor false positive.
+- **Step 4a — EVA honesty (6e2b77a):** terminal EVA never backsolved; missing
+  components shown as "ei saatavilla lähdedatassa", raw engine EVA shown,
+  DCF divergence surfaced in a warning callout. SaaShop's fabricated
+  +3 891 tEUR is gone from the live rerender.
+- **Step 4b — deterministic optimistic waterfall (9233773):**
+  app/scenario_waterfall.py computes (CV_n − net_debt_n)/(1+wacc)^n (+optional
+  dilution, floor) from pinned machine_readable.optimistic_assumptions;
+  assemble overrides scenario value/contributions/EV/cover and injects a
+  derivation table into §11. Old runs without the field untouched. Prompt's
+  flawed chain replaced with the time-consistent bridge (single financing
+  representation). Applies to NEW runs (writers must emit the assumptions).
+- **Step 5 — delivery gating (f67aa01 backend, 40590ef client):** email sent
+  only when report_readiness ready (held + logged otherwise, Resend failure
+  logged); client dropped force=1 (all 5 delivered RIDs verified ready:true
+  first — links keep working) and surfaces 409 readiness issues.
+- **Step 5b — payment protection (f67aa01):** GET /stream is now a READ-ONLY
+  progress stream (it used to re-execute the paid pipeline); admin rerun
+  endpoints keep executing via _stream_execute. checkout-generate verifies
+  payment_status=paid from Stripe when STRIPE_SECRET_KEY is set (demo mode
+  unchanged) + per-session lock closes the double-run race.
+- **Step 6 — semantics (b8497d8):** section 7 scoring table surfaced into §8
+  ("Menetelmävalinnan pisteytys", survives re-assemble); cover hero is now the
+  conservative base value, expected value labeled "AI:n oletuksilla,
+  käyttäjän vahvistamaton" with a downside/upside bridge; "raportin pääluku"
+  gone. NOTE: this reverses the 08d95b3 hero choice (expected→base) per the
+  reconciled list — flag to Esa.
+- **Verified live (free rerenders, no force):** all 5 RIDs (4 testers +
+  Esa's Valuatum) ready:true, cover chart intact, hero=base, scoring visible,
+  no 3 891, honest EVA rows, PDF 200/application/pdf.
+
+NOT done (deliberate): pessimistic recovery/downside-waterfall (waiting Esa's
+spec); flipping shadow checks to blocking (dress-rehearsal first); Stripe
+webhook/VAT/import persistence on the client site (own work item, before
+Stripe live); H3–H9 backlog items (cost reservation, round-cap depth, expiry,
+Profinder merge, enrichment source validator, editor password).
+
 ## 2026-07-11 — Stabilization pair shipped (fc4af74, LIVE, verified) — roadmap step 2 done
 
 Per the reconciled cross-agent status list (audit follow-up), the two small
