@@ -527,6 +527,52 @@ def test_headcount_efficiency_returns_empty_without_headcount():
         {"headcount": {"years": [2023], "values": [None]}}) == []
 
 
+def test_headcount_corrected_from_personnel_costs_when_reported_implausible():
+    """Valuatum 2017–18: source headcount 60 against ~260 tEUR personnel costs
+    (~5 real people). When implied headcount (|personnel costs| / 50 tEUR) is
+    under half the reported figure, the table uses the implied value and
+    rescales the engine per-person ratios accordingly."""
+    data = {
+        "headcount": {"years": [2017, 2025], "values": [60, 5]},
+        "actuals": {
+            "years": [2017, 2025],
+            "income_statement": {
+                "ebit": [50.0, 40.0],
+                "net_sales": [406.0, 421.0],
+                "personnel_costs": [-258.0, -299.0],
+            },
+            # engine ratios computed with the wrong reported headcount (÷60)
+            "per_employee": {"net_sales": [406.0 / 60, 421.0 / 5]},
+        },
+    }
+    blocks = headcount_efficiency.build_headcount_efficiency_blocks(data)
+    table = blocks[0]
+    # 258 / 50 = 5.16 -> 5; 2025 stays as reported (299/50 ≈ 6 > 5/2)
+    assert next(r for r in table["rows"] if r[0] == "Henkilöstö") == ["Henkilöstö", "5", "5"]
+    rev = next(r for r in table["rows"] if r[0] == "Liikevaihto / henkilö")
+    # 406/60 tEUR rescaled by 60/5 -> 406/5 = 81.2 tEUR = 81 200 €
+    assert rev == ["Liikevaihto / henkilö", "81 200", "84 200"]
+    # EBIT/person derived locally from the corrected headcount
+    assert next(r for r in table["rows"] if r[0] == "Liiketulos / henkilö")[1] == "10 000"
+    note = next(b for b in blocks if b.get("type") == "callout")
+    assert "2017" in note["text"] and "2025" not in note["text"]
+
+
+def test_render_table_inserts_gap_marker_between_sparse_year_columns():
+    """Esa's item 4: 'Ennusteen avainvuodet' shows 2026e | 2030e | 2035e as if
+    consecutive — a visible … column must mark the skipped years."""
+    html = render._render_table(
+        ["Mittari", "2026e", "2030e", "2035e"],
+        [["Liikevaihto", "359", "285", "328"]],
+    )
+    assert html.count("<th>…</th>") + html.count('<th style="text-align:left">…</th>') == 2
+    assert "…" in html
+    # contiguous years stay untouched
+    html2 = render._render_table(
+        ["Mittari", "2024", "2025"], [["Liikevaihto", "416", "421"]])
+    assert "…" not in html2
+
+
 def test_headcount_ratios_blanked_for_data_error_years():
     """SaaShop 2018: source headcount 30 against 2 tEUR revenue -> 67 EUR
     revenue/person. Per-person ratios for such a year are data-error noise and

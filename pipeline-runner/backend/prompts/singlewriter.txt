@@ -271,7 +271,7 @@ Noudata näitä periaatteita:
 10. Jos kasvu tapahtuu tappiollisesti, sano se.
 11. Jos taseessa on merkittäviä aineettomia eriä, kehittämismenoja, varastoja tai saamisia, arvioi niiden merkitys arvon kannalta.
 12. Jos menetelmä ei sovellu, hylkää se perustellen.
-13. Jos useampi menetelmä nojaa samaan oletukseen, sano että menetelmien hajonta ei aidosti hajauta riskiä.
+13. Jos useampi menetelmä nojaa samaan ennustepolkuun ja WACCiin, totea se kerran menetelmäosiossa selväkielisesti (esim. "DCF ja EVA perustuvat samaan ennusteeseen, joten ne eivät ole toisistaan riippumattomia arvioita"). ÄLÄ käytä ilmaisua "ei hajauta (ennuste)riskiä" — se on lukijalle epäselvä — äläkä toista asiaa tiivistelmässä tai muissa osioissa.
 14. Jos base case on negatiivinen mutta yhtiöllä on platform-, teknologia-, asiakasverkosto- tai strategisen ostajan arvoa, tee ero base case -arvon ja strategisen arvon välillä.
 15. Jos löydät markkinasignaalin, käsittele se omana evidenssilajinansa, ei automaattisena lopullisena arvona.
 
@@ -374,7 +374,7 @@ Pisteet rajataan välille 0–100. **Hyväksymisraja on 40 pistettä.** Alle jä
 
 * Painot = hyväksyttyjen menetelmien pisteet normalisoituna 100 prosenttiin.
 * Painotettu arvo muodostetaan aina, kun vähintään yksi menetelmä on hyväksytty ja sillä on arvo.
-* Jos hyväksyttyjä menetelmiä on vain yksi, sen paino on 100 % ja raportissa on sanottava, ettei painotus hajauta riskiä.
+* Jos hyväksyttyjä menetelmiä on vain yksi, sen paino on 100 % ja raportissa todetaan lyhyesti, että arvio nojaa yhteen menetelmään. ÄLÄ käytä ilmaisua "ei hajauta riskiä".
 * Jos ainoat hyväksytyt menetelmät ovat DCF ja EVA ja ne nojaavat samaan ennustepolkuun ja WACCiin, ne ovat ekvivalentteja: EVA on täsmäytysnäkökulma painolla 0 ja painotettu arvo = DCF:n arvo. ÄLÄ esitä missään — tiivistelmä mukaan lukien — DCF:lle ja EVA:lle erillisiä painoprosentteja (esim. "DCF 55 % / EVA 45 %") tai niiden välistä painotettua keskiarvoa.
 * Termistö pidetään erillään: "yritysarvo (EV)" = velaton yritysarvo; "oman pääoman arvo" = omistajalle jäävä arvo (EV − nettovelka); "skenaarioiden odotusarvo" = todennäköisyyspainotettu skenaariotulos. Älä käytä näitä ristiin äläkä kutsu oman pääoman arvoa "yrityksen arvoksi" tai "yritysarvoksi".
 * Jos painotettu arvo on negatiivinen, sovella omistaja-arvon lattiakäsittelyä.

@@ -1132,8 +1132,43 @@ def _col_aligns(columns, rows):
     return aligns
 
 
+_YEAR_COL_RE = re.compile(r"^(19|20)\d{2}\s*[eE]?$")
+
+
+def _insert_year_gap_cols(columns, rows):
+    """Sparse year columns (2026e | 2030e | 2035e) read as if the years were
+    consecutive — insert a visible "…" column at each gap so the reader sees
+    years are skipped."""
+    if not isinstance(columns, list) or len(columns) < 3:
+        return columns, rows
+
+    def _yr(c):
+        s = str(c).strip()
+        return int(s[:4]) if _YEAR_COL_RE.match(s) else None
+
+    yrs = [_yr(c) for c in columns]
+    gaps = {j for j in range(1, len(columns))
+            if yrs[j - 1] is not None and yrs[j] is not None
+            and yrs[j] - yrs[j - 1] > 1}
+    if not gaps:
+        return columns, rows
+
+    out_cols, out_rows = [], [[] for _ in (rows or [])]
+    src_rows = [r if isinstance(r, list) else [r] for r in (rows or [])]
+    for j, c in enumerate(columns):
+        if j in gaps:
+            out_cols.append("…")
+            for row in out_rows:
+                row.append("…")
+        out_cols.append(c)
+        for k, row in enumerate(out_rows):
+            row.append(src_rows[k][j] if j < len(src_rows[k]) else "")
+    return out_cols, out_rows
+
+
 def _render_table(columns, rows, title=None, unit=None):
     columns, rows = _coerce_table_rows(columns, rows)
+    columns, rows = _insert_year_gap_cols(columns, rows)
     cap = ""
     if title or unit:
         u = f' <span class="muted">({_esc(unit)})</span>' if unit else ""
