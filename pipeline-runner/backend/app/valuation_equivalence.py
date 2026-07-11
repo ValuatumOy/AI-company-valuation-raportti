@@ -182,6 +182,8 @@ def _method_rows(value):
 def _is_old_weight_table(block):
     if not isinstance(block, dict) or block.get("type") != "table":
         return False
+    if block.get("_from_section7"):  # surfaced scoring table must survive re-assemble
+        return False
     cols = [str(c).lower() for c in block.get("columns") or []]
     return "menetelmä" in " ".join(cols) and ("paino" in " ".join(cols) or "kontribuutio" in " ".join(cols))
 
@@ -189,12 +191,16 @@ def _is_old_weight_table(block):
 def _is_old_method_chart(block):
     if not isinstance(block, dict) or block.get("type") != "chart":
         return False
+    if block.get("_from_section7"):
+        return False
     txt = (str(block.get("title") or "") + " " + str(block.get("chart_id") or "")).lower()
     return "menetelm" in txt or "method" in txt
 
 
 def _is_old_method_paragraph(block):
     if not isinstance(block, dict) or block.get("type") != "paragraph":
+        return False
+    if block.get("_from_section7"):
         return False
     txt = str(block.get("text") or "").lower()
     mentions_methods = "dcf" in txt and "eva" in txt

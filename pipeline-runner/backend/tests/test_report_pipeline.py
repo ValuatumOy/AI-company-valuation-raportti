@@ -2925,3 +2925,47 @@ def test_get_stream_is_read_only_progress(monkeypatch):
     assert '"step": "progress"' in resp.text or '"step":"progress"' in resp.text
     run = store.get_run(rid)
     assert run["status"] == "ok"  # not flipped back to running by the GET
+
+
+def test_method_scoring_surfaced_from_hidden_section7():
+    """Audit H1: the visible ARVONMÄÄRITYS section cited a scoring table that
+    lived in section 7, which the renderer drops — the reader could never see
+    it. The blocks must move into section 8 and survive re-assembly."""
+    fx = _json.load(open(_os.path.join(_FIXTURE_DIR, "virnex.json")))
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": fx["input_data"]},
+        {"order": 2, "status": "ok", "parsed_json": fx["writer_output"]},
+    ]}
+    rep = assemble.assemble(run)
+    assert not any(str(s.get("id")) == "7" for s in rep["sections"])
+    sec8 = next(s for s in rep["sections"] if str(s["id"]) == "8")
+    scoring = [b for b in sec8["blocks"] if isinstance(b, dict) and b.get("_from_section7")]
+    assert any(b.get("type") == "table" and "pisteytys" in str(b.get("title", "")).lower()
+               for b in scoring)
+    html = render.render_html(rep)
+    assert "Menetelmävalinnan pisteytys" in html
+    # survives a re-assemble of the assembled output (normalize_section8 strips
+    # method/weight tables — the surfaced one is tagged and must stay)
+    rep2 = assemble.assemble({"results": [
+        {"order": 0, "status": "ok", "parsed_json": fx["input_data"]},
+        {"order": 2, "status": "ok", "parsed_json": rep}]})
+    sec8b = next(s for s in rep2["sections"] if str(s["id"]) == "8")
+    tables = [b for b in sec8b["blocks"] if isinstance(b, dict) and b.get("_from_section7")
+              and b.get("type") == "table"]
+    assert len(tables) == 1
+
+
+def test_cover_hierarchy_base_value_primary_expected_labeled_unconfirmed():
+    fx = _json.load(open(_os.path.join(_FIXTURE_DIR, "virnex.json")))
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": fx["input_data"]},
+        {"order": 2, "status": "ok", "parsed_json": fx["writer_output"]},
+    ]}
+    html = render.render_html(assemble.assemble(run))
+    assert "konservatiivinen perusskenaario" in \
+        html.split('class="hero-lab"')[1][:120].lower()
+    assert "käyttäjän vahvistamaton" in html
+    assert "raportin pääluku" not in html.lower()
+    # downside/upside bridge names both scenario effects
+    assert "pessimistisen skenaarion vaikutus" in html
+    assert "optimistisen skenaarion vaikutus" in html

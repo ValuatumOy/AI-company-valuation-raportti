@@ -236,6 +236,35 @@ def _inject_optimistic_waterfall_blocks(sections, wf_result):
     return sections
 
 
+def _surface_method_scoring(sections):
+    """The writer's internal section 7 (VALUAATIOPOLUN VALINTA) carries the
+    method-scoring table, but the renderer's SECTION_ORDER hides section 7 —
+    so the visible valuation section referenced a scoring the reader never saw.
+    Move its blocks to the end of section 8 under a heading. Idempotent."""
+    s7 = next((s for s in sections
+               if isinstance(s, dict) and str(s.get("id")) == "7"), None)
+    if s7 is None:
+        return sections
+    sections.remove(s7)
+    blocks = [b for b in (s7.get("blocks") or []) if isinstance(b, dict)]
+    if not blocks:
+        return sections
+    moved = [{"type": "heading", "text": "Menetelmävalinnan pisteytys",
+              "_from_section7": True}]
+    for b in blocks:
+        nb = dict(b)
+        nb["_from_section7"] = True
+        moved.append(nb)
+    for sec in sections:
+        if not (isinstance(sec, dict) and str(sec.get("id")) == "8"):
+            continue
+        current = [b for b in (sec.get("blocks") or [])
+                   if not (isinstance(b, dict) and b.get("_from_section7"))]
+        sec["blocks"] = current + moved
+        break
+    return sections
+
+
 def _inject_headcount_efficiency_blocks(sections, input_data):
     """Append the deterministic per-employee ratio table to section 5 — computed
     in code (see app/headcount_efficiency.py), never by the LLM."""
@@ -296,4 +325,7 @@ def assemble(run):
     if wf is not None:
         _inject_optimistic_waterfall_blocks(sections, wf)
     valuation_equivalence.normalize_report(wrapper, outputs.get(0))
+    # AFTER normalize: section 8's cleanup strips method/weight tables, and the
+    # surfaced scoring table must survive it.
+    _surface_method_scoring(sections)
     return wrapper

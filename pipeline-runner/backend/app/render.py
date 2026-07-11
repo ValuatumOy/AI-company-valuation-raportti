@@ -1322,37 +1322,61 @@ def _cover(report, derived):
     meta = report.get("meta") or {}
     scale = _report_scale(report, derived)
     div, unit_lab, dec = scale or (1.0, "tEUR", 0)
-    hv = cover.get("headline_value")  # scenario expected value — now the hero
+    hv = cover.get("headline_value")  # scenario expected value (AI-weighted)
     bcv = cover.get("base_case_value")  # conservative base case (DCF/EVA-based)
     rng = derived.get("range")
     industry = _display_industry(meta)
     conf = (report.get("confidence") or {}).get("level")
 
-    hero_val = hv if hv not in (None, "") else bcv
-    hero_label = ("Oman pääoman arvo · skenaarioiden odotusarvo" if hv not in (None, "")
+    # Cover hierarchy (2026-07-11): the forecast-based DCF base value is the
+    # hero. The expected value depends on AI-authored market/probability
+    # assumptions the user has NOT confirmed, so it rides along explicitly
+    # labeled as an unconfirmed risk-weighted figure — not as "the" value.
+    hero_val = bcv if bcv not in (None, "") else hv
+    hero_label = ("Oman pääoman arvo · konservatiivinen perusskenaario"
+                  if bcv not in (None, "")
                   else (cover.get("headline_label") or "Arvonmäärityksen tulos"))
     base_num = _to_num(_short(bcv)) if bcv not in (None, "") else None
     exp_num = _to_num(_short(hv)) if hv not in (None, "") else None
 
-    zero_floor = exp_num is not None and exp_num <= 0
+    zero_floor = base_num is not None and base_num <= 0
     if zero_floor:
-        note = ("Skenaarioiden odotusarvo ei tue positiivista omistaja-arvoa. "
-                "Mahdollinen arvo on optio- tai strategista arvoa — arvoa, joka "
-                "perustuu epävarman tulevaisuuden mahdollisuuden toteutumiseen, "
-                "ei nykyiseen kassavirtaan. Se kuvataan skenaarioissa eikä "
-                "esitetä yrityksen arvona.")
+        note = ("Konservatiivinen perusskenaario ei tue positiivista "
+                "omistaja-arvoa. Mahdollinen arvo on optio- tai strategista "
+                "arvoa — arvoa, joka perustuu epävarman tulevaisuuden "
+                "mahdollisuuden toteutumiseen, ei nykyiseen kassavirtaan. Se "
+                "kuvataan skenaarioissa eikä esitetä yrityksen arvona.")
     else:
-        note = ("Skenaarioiden todennäköisyyksillä painotettu keskiarvo omistajille "
-                "kuuluvasta arvosta. Konservatiivinen perusskenaario ja haarukan "
-                "ääripäät esitetään alla.")
-        if base_num is not None and exp_num is not None:
-            gap = max(1.0, 0.02 * abs(base_num))
-            if exp_num > base_num + gap:
-                note += (" Skenaarioanalyysissä optimistinen polku nostaa "
-                         "odotusarvoa konservatiivista perusskenaariota korkeammaksi.")
-            elif exp_num < base_num - gap:
-                note += (" Skenaarioanalyysissä pessimistinen polku laskee "
-                         "odotusarvoa konservatiivista perusskenaariota matalammaksi.")
+        note = ("Laskettu yhtiön toteutuneista luvuista ja toimitetusta "
+                "ennusteesta kassavirtamenetelmällä (DCF). Skenaarioiden "
+                "riskipainotettu odotusarvo ja haarukan ääripäät esitetään alla.")
+    # downside/upside bridge: show WHY the expected value differs from the base
+    bridge_html = ""
+    scen = _scenario_values(report)
+    if (base_num is not None and exp_num is not None and scen
+            and all(s.get("value") is not None and s.get("prob") is not None
+                    for s in scen) and len(scen) == 3):
+        pess = next((s for s in scen if "pessimis" in s["name"].lower()), None)
+        opt = next((s for s in scen if "optimis" in s["name"].lower()), None)
+        if pess and opt:
+            down = pess["prob"] / 100.0 * (pess["value"] - base_num)
+            up = opt["prob"] / 100.0 * (opt["value"] - base_num)
+            bridge_html = (
+                '<p class="hero-desc" style="margin-top:2mm">'
+                f'Riskipainotettu skenaarioarvo <b>{_esc(_scaled_cover_str(hv, scale))}</b> '
+                '(AI:n oletuksilla, käyttäjän vahvistamaton): perusskenaario '
+                f'{_fmt(base_num / div, dec)} {unit_lab} '
+                f'{"−" if down <= 0 else "+"} {_fmt(abs(down) / div, dec)} {unit_lab} '
+                'pessimistisen skenaarion vaikutus '
+                f'{"+" if up >= 0 else "−"} {_fmt(abs(up) / div, dec)} {unit_lab} '
+                'optimistisen skenaarion vaikutus.</p>'
+            )
+    if not bridge_html and hv not in (None, "") and base_num is not None:
+        bridge_html = (
+            '<p class="hero-desc" style="margin-top:2mm">'
+            f'Riskipainotettu skenaarioarvo <b>{_esc(_scaled_cover_str(hv, scale))}</b> '
+            '(AI:n oletuksilla, käyttäjän vahvistamaton).</p>'
+        )
 
     # --- band + meta ------------------------------------------------------
     band = (
@@ -1382,6 +1406,7 @@ def _cover(report, derived):
         f'<span class="big">{html.escape(_scaled_cover_str(hero_val, scale))}</span>'
         '</div>'
         f'<p class="hero-desc">{_esc(note)}</p>'
+        + bridge_html
     )
 
     # --- 4-column scenario bar chart + explanation grid --------------------
@@ -1424,9 +1449,9 @@ def _cover(report, derived):
             '<p>Laskettu yhtiön toteutuneista luvuista ja ennusteista kassavirta- (DCF) '
             'ja lisäarvomenetelmällä (EVA).</p></div>'
             '<div><h4>Skenaarioiden odotusarvo</h4>'
-            '<p>Skenaarioiden todennäköisyyksillä painotettu keskiarvo. Tämä on '
-            'raportin pääluku. Todennäköisyydet ovat muokattavia oletuksia, eivät '
-            'ennuste.</p></div>'
+            '<p>Skenaarioiden todennäköisyyksillä painotettu keskiarvo. Perustuu '
+            'AI:n muodostamiin, käyttäjän vahvistamattomiin oletuksiin — '
+            'todennäköisyydet ovat muokattavia oletuksia, eivät ennuste.</p></div>'
             '<div><h4>Haarukan ääripäät</h4>'
             '<p>Pessimistinen ja optimistinen skenaario kuvaavat arvion ala- ja '
             'ylärajan; oletukset ja perustelut skenaario-osiossa.</p></div>'
@@ -1452,8 +1477,8 @@ def _snapshot(report, derived):
     conf = report.get("confidence") or {}
     dq = (report.get("data_quality") or {}).get("class")
     rng = derived.get("range")
-    cards = [("Oman pääoman arvo (estimaatti)", cover.get("headline_value")),
-             ("Konservatiivinen perusskenaario", cover.get("base_case_value"))]
+    cards = [("Konservatiivinen perusskenaario", cover.get("base_case_value")),
+             ("Riskipainotettu skenaarioarvo (vahvistamaton)", cover.get("headline_value"))]
     if rng:
         cards.append(("Arvostusväli", f'{_fmt(rng["low"])}–{_fmt(rng["high"])} tEUR'))
     cards.append(("Arvion luottamustaso", conf.get("level") or "–"))
