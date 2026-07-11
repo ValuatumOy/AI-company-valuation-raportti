@@ -91,6 +91,13 @@ def _wacc_growth_matrix(fcff, disc, cum, equity_gt, wacc_base, bridge_adj):
             row.append(round(equity))
         series.append({"name": f"WACC {_fmt_pct(w)}", "values": row})
 
+    # A deeply negative base case floors nearly every cell to 0 (SaaShop: 24 of
+    # 25 cells) — an all-zero grid carries no sensitivity information and reads
+    # as a rendering error, so suppress the matrix entirely.
+    cells = [v for s in series for v in s["values"] if _is_num(v)]
+    if cells and sum(1 for v in cells if v == 0) / len(cells) > 0.8:
+        return None
+
     return {
         "type": "chart", "chart_id": "wacc_growth_sensitivity",
         "title": "Herkkyys: WACC x pitkän aikavälin kasvu (oman pääoman arvo, tEUR) "

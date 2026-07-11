@@ -48,10 +48,29 @@ def _normalize_query(query: str) -> tuple[str, str]:
     return "name", query.strip()
 
 
+def _finnish_industry(company: dict) -> str | None:
+    """/rest/company's industryText is English ("47.400 Retail sale of...")
+    but its industryTree carries fi names at every level — a Finnish report
+    cover should show the Finnish label. Walk to the deepest node (the tree is
+    a single path down to the company's own NACE class) and take its fi name.
+    ponytail: children[0] assumes single-path; falls back to English if not."""
+    node = company.get("industryTree")
+    while isinstance(node, dict):
+        children = node.get("children")
+        if not (isinstance(children, list) and children and isinstance(children[0], dict)):
+            break
+        node = children[0]
+    if isinstance(node, dict):
+        name = node.get("name") or {}
+        if isinstance(name, dict) and name.get("fi"):
+            return str(name["fi"])
+    return None
+
+
 def _industry_metadata(company: dict | None) -> dict:
     company = company or {}
     return {
-        "industry_text": company.get("industryText"),
+        "industry_text": _finnish_industry(company) or company.get("industryText"),
         "industry_code": company.get("industryCode"),
         "industry_id": company.get("industryId"),
         "industry_tree": company.get("industryTree"),

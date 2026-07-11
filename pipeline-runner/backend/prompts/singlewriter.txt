@@ -68,6 +68,8 @@ Jokaisessa pääosiossa vastaa vähintään näihin kysymyksiin:
 
 41. Lukujen jäljitettävyys: kun toistat osiossa jo muualla lasketun avainluvun (oman pääoman arvo, yritysarvo (EV), konservatiivinen perusskenaario tms.) — esim. sensitiviteettinä, esimerkkinä tai vertailuna — liitä samaan virkkeeseen tai kappaleen loppuun tekstiviite muotoa "(ks. osio N)", jossa N on sen osion SISÄINEN id (ei näyttönumero — renderöijä muuntaa sen automaattisesti oikeaksi sivunumeroksi ja klikattavaksi linkiksi), jossa luku alun perin lasketaan/esitetään auki. Esimerkki: pääomalainojen tulkintaerosta puhuttaessa (osio 8) oman pääoman arvo on ensin laskettu auki osiossa 9 (yritysarvosta oman pääoman arvoon -kaavio ja -taulukko) — viittaa siis sinne: "...oman pääoman arvo olisi noin 10 tEUR (ks. osio 9, jossa laskelma esitetään auki)". Lukijan on aina voitava palata yhdellä klikkauksella kohtaan, jossa luku ensin näytettiin — älä koskaan toista lukua ilman tätä viitettä.
 
+42. Marginaaliprosentit mikroliikevaihtovuosilta: kun vuoden liikevaihto on alle 50 tEUR (esim. perustamisvuosi), EBITDA-%, EBIT-% ja muut marginaaliprosentit ovat matemaattista kohinaa (esim. "−700,0 %" 2 tEUR:n liikevaihdolla) — näytä niiden solussa viiva "–" ja jätä prosentti mainitsematta myös leipätekstissä. Absoluuttiset euromäärät (EBITDA, EBIT, nettotulos) näytetään normaalisti myös näiltä vuosilta.
+
 # OSAKEYHTIÖN OMISTAJA-ARVON LATTIA JA OPTIOARVO
 
 Tämä kohta on ehdoton.

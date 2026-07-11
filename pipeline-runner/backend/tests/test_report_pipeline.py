@@ -527,6 +527,68 @@ def test_headcount_efficiency_returns_empty_without_headcount():
         {"headcount": {"years": [2023], "values": [None]}}) == []
 
 
+def test_headcount_ratios_blanked_for_data_error_years():
+    """SaaShop 2018: source headcount 30 against 2 tEUR revenue -> 67 EUR
+    revenue/person. Per-person ratios for such a year are data-error noise and
+    must render blank; the raw headcount stays visible."""
+    data = {
+        "headcount": {"years": [2018, 2024], "values": [30, 16]},
+        "actuals": {
+            "years": [2018, 2024],
+            "income_statement": {"ebit": [-14.0, -561.0],
+                                 "net_sales": [2.0, 3364.0]},
+            "per_employee": {"net_sales": [0.067, 210.25]},
+        },
+    }
+    table = headcount_efficiency.build_headcount_efficiency_blocks(data)[0]
+    assert next(r for r in table["rows"] if r[0] == "Henkilöstö") == ["Henkilöstö", "30", "16"]
+    rev = next(r for r in table["rows"] if r[0] == "Liikevaihto / henkilö")
+    assert rev == ["Liikevaihto / henkilö", "", "210 250"]
+    ebit = next(r for r in table["rows"] if r[0] == "Liiketulos / henkilö")
+    assert ebit[1] == "" and ebit[2] != ""
+
+
+def test_clean_replaces_floor_anglicisms_and_title_case_normalizes():
+    assert "floor" not in render._clean(
+        "Floorattu skenaariohaarukka on 0–1 718 tEUR ennen flooria, "
+        "ja arvo esitetään floorattuna floor-käsittelyn jälkeen.").lower()
+    assert render._clean("ennen flooria") == "ennen lattiaa"
+    assert render._clean("Floorattu arvo") == "Lattiaan nostettu arvo"
+    assert render._title_case("Mitkä tekijät liikuttaisivat arviota") == \
+        "MITKÄ TEKIJÄT LIIKUTTAISIVAT ARVIOTA"
+
+
+def test_wacc_matrix_suppressed_when_flooring_zeroes_everything():
+    """SaaShop: base equity so negative that 24/25 heatmap cells floored to 0 —
+    an all-zero grid carries no information and must be suppressed."""
+    fcff, disc, cum = [100.0, 100.0, 100.0], [91.0, 83.0, 75.0], [2000.0]
+    assert sensitivity._wacc_growth_matrix(fcff, disc, cum, 0.0, 10.0, -1e9) is None
+    healthy = sensitivity._wacc_growth_matrix(fcff, disc, cum, 0.0, 10.0, 0.0)
+    assert healthy is not None and healthy["chart_id"] == "wacc_growth_sensitivity"
+
+
+def test_search_industry_prefers_finnish_tree_name():
+    company = {
+        "industryText": "11.01 Distilling, rectifying and blending of spirits",
+        "industryTree": {
+            "nace": "11", "name": {"default": "11 Manufacture of beverages",
+                                   "fi": "11 Juomien valmistus"},
+            "children": [{
+                "nace": "1101",
+                "name": {"default": "11.01 Distilling",
+                         "fi": "11.01 Alkoholijuomien tislaus"},
+                "children": [],
+            }],
+        },
+    }
+    from app import valuatum
+    meta = valuatum._industry_metadata(company)
+    assert meta["industry_text"] == "11.01 Alkoholijuomien tislaus"
+    # no tree -> English fallback unchanged
+    assert valuatum._industry_metadata(
+        {"industryText": "47.400 Retail sale"})["industry_text"] == "47.400 Retail sale"
+
+
 def test_assemble_injects_headcount_efficiency_into_section_5():
     run = {"results": [
         {"order": 0, "status": "ok", "parsed_json": _headcount_input_data()},
@@ -1318,7 +1380,8 @@ def test_disclaimer_injected_when_section_16_missing():
     rep = _golden()
     rep["sections"] = [s for s in rep["sections"] if str(s.get("id")) != "16"]
     h = render.render_html(rep)
-    assert "Vastuuvapaus" in h
+    # section titles display uppercased (_title_case) since 2026-07-11
+    assert "VASTUUVAPAUS" in h
     assert "Valuatum Oy ei vastaa" in h
 
 

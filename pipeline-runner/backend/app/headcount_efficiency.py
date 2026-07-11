@@ -66,6 +66,20 @@ def build_headcount_efficiency_blocks(input_data):
     inc = actuals.get("income_statement") or {}
     per_emp = actuals.get("per_employee") or {}
 
+    # Source headcount is sometimes plain wrong for a year (SaaShop 2018:
+    # 30 employees against 2 tEUR revenue -> 67 EUR revenue/person, an
+    # impossible figure the prose then has to disclaim). Under 1 tEUR of
+    # revenue per person no real company operates — blank that year's
+    # per-person ratios; the headcount row itself stays visible so the
+    # reader still sees the suspect source figure.
+    net_sales = _align(_get_list(inc, "net_sales"), n)
+    bad = {i for i in range(n)
+           if _is_num(net_sales[i]) and _is_num(hc[i]) and hc[i] > 0
+           and net_sales[i] / hc[i] < 1.0}
+
+    def _masked(values):
+        return [None if i in bad else v for i, v in enumerate(values)]
+
     rows = []
     hc_row = _row("Henkilöstö", hc)
     if hc_row:
@@ -76,15 +90,17 @@ def build_headcount_efficiency_blocks(input_data):
         ("Henkilökulut / henkilö", "personnel_costs"),
         ("Käyttökate / henkilö", "ebitda"),
     ):
-        r = _row(label, _to_eur(_align(_get_list(per_emp, key), n)))
+        r = _row(label, _masked(_to_eur(_align(_get_list(per_emp, key), n))))
         if r:
             rows.append(r)
 
-    ebit_row = _row("Liiketulos / henkilö", _ebit_per_employee(_align(_get_list(inc, "ebit"), n), hc))
+    ebit_row = _row("Liiketulos / henkilö",
+                    _masked(_ebit_per_employee(_align(_get_list(inc, "ebit"), n), hc)))
     if ebit_row:
         rows.append(ebit_row)
 
-    net_row = _row("Nettotulos / henkilö", _to_eur(_align(_get_list(per_emp, "net_earnings"), n)))
+    net_row = _row("Nettotulos / henkilö",
+                   _masked(_to_eur(_align(_get_list(per_emp, "net_earnings"), n))))
     if net_row:
         rows.append(net_row)
 

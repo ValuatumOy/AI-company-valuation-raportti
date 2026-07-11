@@ -117,6 +117,32 @@ def _flat_text(v):
 
 _CITE_TAG = re.compile(r"</?cite\b[^>]*>", re.I)
 
+# Prompt rule 35 bans the "floorattu" anglicism family, but the writer keeps
+# emitting it (SaaShop 2026-07-10: "ennen flooria", "Floorattu skenaario-
+# haarukka", "ennen floor-käsittelyä"). Deterministic replacement here fixes
+# stored reports on re-render instead of hoping the model obeys.
+_FLOOR_MAP = {
+    "floorattuna": "lattiaan nostettuna",
+    "floorattua": "lattiaan nostettua",
+    "flooratun": "lattiaan nostetun",
+    "floorattava": "lattiaan nostettava",
+    "floorattu": "lattiaan nostettu",
+    "floorataan": "nostetaan lattiaan",
+    "flooria": "lattiaa",
+    "floorin": "lattian",
+    "flooraus": "lattiaan nosto",
+}
+_FLOOR_WORD_RE = re.compile(r"\bfloor(?:a\w*|ia|in)\b", re.I)
+_FLOOR_KASITTELY_RE = re.compile(r"\bfloor-(käsittely\w*)", re.I)
+
+
+def _defloor(s):
+    def repl(m):
+        w = m.group(0)
+        out = _FLOOR_MAP.get(w.lower(), "lattiaan nostettu")
+        return out[0].upper() + out[1:] if w[0].isupper() else out
+    return _FLOOR_KASITTELY_RE.sub(r"lattia\1", _FLOOR_WORD_RE.sub(repl, s))
+
 
 def _clean(s):
     """Strip leaked pipeline tokens; the reader must never see [input_data]."""
@@ -133,7 +159,7 @@ def _clean(s):
     s = _ENRICH_TOK.sub("julkinen lähde", s)
     for pat, repl in _SCHEMA_TOKENS:
         s = pat.sub(repl, s)
-    return s
+    return _defloor(s)
 
 
 def _esc(s):
@@ -1460,13 +1486,20 @@ def _mandate(report):
     )
 
 
+def _title_case(title):
+    """Numbered section titles render in caps by design; the model occasionally
+    emits one in sentence case (SaaShop §13 'Mitkä tekijät liikuttaisivat
+    arviota' among 15 all-caps siblings). Normalize at display time."""
+    return _flat_text(title).upper()
+
+
 def _toc(report, sections):
     # Display numbers are sequential (1..N) regardless of the internal
     # section `id` — SECTION_ORDER has no "7" by design, and showing that raw
     # id would make the ToC jump 6→8 for no reason a reader can see.
     rows = "".join(
         f'<a class="toc-row" href="#sec-{i}"><span class="tn">{i}</span>'
-        f'<span class="tt">{_esc(s.get("title"))}</span></a>'
+        f'<span class="tt">{_esc(_title_case(s.get("title")))}</span></a>'
         for i, s in enumerate(sections, start=1))
     return (
         '<section class="page">'
@@ -1541,7 +1574,7 @@ def _section(report, sec, derived=None, display_no=None):
         f'{_header(report)}'
         '<div class="pbody">'
         f'<div class="sec-head"><span class="sec-num">{_esc(num)}</span>'
-        f'<div class="sh-t"><h2>{_esc(sec.get("title"))}</h2></div></div>'
+        f'<div class="sh-t"><h2>{_esc(_title_case(sec.get("title")))}</h2></div></div>'
         '<div class="sec-rule"></div>'
         f'{blocks}</div>{_footer()}</section>'
     )
@@ -1820,7 +1853,7 @@ h4.blk{ font-size:8pt; font-weight:700; color:var(--gray); text-transform:upperc
 .mcard{ border:1px solid var(--line-strong); border-top:3px solid var(--green); padding:9px 11px; min-height:22mm; }
 .mcard.accent{ border-top-color:var(--lime); }
 .mcard .mval{ font-family:var(--head); font-weight:700; font-size:13pt; color:var(--green); line-height:1.08;
-  font-variant-numeric:tabular-nums lining-nums; letter-spacing:0; overflow-wrap:anywhere; }
+  font-variant-numeric:tabular-nums lining-nums; letter-spacing:0; overflow-wrap:break-word; }
 .mcard .mval.long{ font-family:var(--sans); font-size:9.4pt; line-height:1.22; font-weight:700; color:var(--green); }
 .mcard .mlabel{ font-size:7.8pt; color:var(--gray); margin-top:5px; line-height:1.25; }
 .rangebar{ width:100%; }
