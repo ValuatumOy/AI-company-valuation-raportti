@@ -2759,3 +2759,90 @@ def test_report_qa_flags_cover_vs_assembled_anchor_conflict():
             assert hits and "1143.6" in hits[0], w
         else:
             assert not hits, (company, hits)
+
+
+def test_optimistic_waterfall_overrides_scenario_value_expected_value_and_cover():
+    """Virnex-shaped: the writer's broken bridge said 2 814 tEUR (undiscounted
+    future debt + double-counted deficits). The deterministic time-consistent
+    calc gives (10 148 − 3 023) / 1.0947^5 ≈ 4 532 tEUR and must override the
+    scenario value, contributions, expected value and cover headline."""
+    from app import scenario_waterfall
+    input_data = {"actuals": {"years": [2024, 2025]},
+                  "valuation_engine": {"wacc_parameters": {"wacc_pct": 9.47},
+                                       "dcf": {}}}
+    wrapper = {
+        "cover": {"headline_value": "1 592 tEUR", "base_case_value": "2 340 tEUR"},
+        "expected_value": {"value": 1592.1, "unit": "tEUR", "calculation": "old"},
+        "machine_readable": {
+            "scenarios": [
+                {"name": "Pessimistinen", "value_teur": 0, "probability_pct": 35,
+                 "contribution": 0},
+                {"name": "Konservatiivinen", "value_teur": 2340, "probability_pct": 50,
+                 "contribution": 1170},
+                {"name": "Optimistinen", "owner_value": 2814, "probability_pct": 15,
+                 "contribution": 422},
+            ],
+            "optimistic_assumptions": {
+                "realization_year": 2030,
+                "continuing_value_teur": 10148.0,
+                "net_debt_realization_year_teur": 3023.0,
+                "dilution_pct": None,
+            },
+        },
+    }
+    result = scenario_waterfall.apply(wrapper, input_data)
+    assert result is not None
+    opt = wrapper["machine_readable"]["scenarios"][2]
+    assert "owner_value" not in opt  # stale drifted key removed
+    assert abs(opt["value_teur"] - 4532.2) < 0.5
+    assert abs(opt["contribution"] - 679.8) < 0.5
+    ev = wrapper["expected_value"]["value"]
+    assert abs(ev - (0.5 * 2340 + 0.15 * opt["value_teur"])) < 0.5
+    assert wrapper["cover"]["headline_value"].endswith("tEUR")
+    assert "1 850" in wrapper["cover"]["headline_value"]
+
+
+def test_optimistic_waterfall_skips_when_assumptions_missing_or_implausible():
+    from app import scenario_waterfall
+    input_data = {"actuals": {"years": [2025]},
+                  "valuation_engine": {"wacc_parameters": {"wacc_pct": 9.0}}}
+    base = {"machine_readable": {"scenarios": [
+        {"name": "Optimistinen", "value_teur": 100, "probability_pct": 100}]}}
+    assert scenario_waterfall.apply(dict(base), input_data) is None  # no assumptions
+    bad = {"machine_readable": {
+        "scenarios": [{"name": "Optimistinen", "value_teur": 100, "probability_pct": 100}],
+        "optimistic_assumptions": {"realization_year": 2080,  # n > 15 -> implausible
+                                   "continuing_value_teur": 1000,
+                                   "net_debt_realization_year_teur": 0}}}
+    assert scenario_waterfall.apply(bad, input_data) is None
+
+
+def test_assemble_injects_optimistic_waterfall_after_scenario_compare():
+    fx = _json.load(open(_os.path.join(_FIXTURE_DIR, "virnex.json")))
+    w = _json.loads(_json.dumps(fx["writer_output"]))  # deep copy
+    w["machine_readable"]["optimistic_assumptions"] = {
+        "realization_year": 2030, "continuing_value_teur": 10148.0,
+        "net_debt_realization_year_teur": 3023.0, "dilution_pct": None,
+    }
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": fx["input_data"]},
+        {"order": 2, "status": "ok", "parsed_json": w},
+    ]}
+    rep = assemble.assemble(run)
+    sec11 = next(s for s in rep["sections"] if str(s["id"]) == "11")
+    ids = [b.get("table_id") for b in sec11["blocks"] if isinstance(b, dict)]
+    assert "deterministic_optimistic_waterfall" in ids
+    assert ids.index("deterministic_optimistic_waterfall") == \
+        ids.index("deterministic_scenario_comparison") + 1
+    # comparison table + cover show the deterministic figure, not 2 814
+    flat = str(sec11["blocks"][0]["rows"])
+    assert "2 814" not in flat
+    html = render.render_html(rep)
+    assert "Arvion haarukka skenaarioittain" in html
+    # idempotent on re-assemble of the assembled output
+    rep2 = assemble.assemble({"results": [
+        {"order": 0, "status": "ok", "parsed_json": fx["input_data"]},
+        {"order": 2, "status": "ok", "parsed_json": rep}]})
+    sec11b = next(s for s in rep2["sections"] if str(s["id"]) == "11")
+    assert sum(1 for b in sec11b["blocks"] if isinstance(b, dict)
+               and b.get("table_id") == "deterministic_optimistic_waterfall") == 1

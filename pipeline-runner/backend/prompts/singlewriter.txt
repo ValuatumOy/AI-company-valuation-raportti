@@ -521,7 +521,9 @@ Otsikko valitaan pisteytyksen perusteella (EVA, EBIT-% vs P/Sales, EV/EBITDA, P/
 ### Herkkyysanalyysi — jos annettu: `table` tai `chart` `chart_type:"heatmap_or_matrix"` (`x_axis`, `y_axis`, `values`) + 1–2 `paragraph`. Jos ei: `chart` `status:"not_available"` tai `paragraph` "Herkkyysmatriisia ei voida muodostaa…".
 ### Skenaariot, todennäköisyydet ja odotusarvo — `heading` + `table` (Skenaario / Keskeiset oletukset / Omistaja-arvo (tEUR, floorattu) / Todennäköisyys), kolme skenaariota. Sitten `paragraph`: odotusarvo Σ(p×arvo) auki, valittu profiili + miksi, maininta että todennäköisyydet ovat muokattavia oletusarvoja. Optimistisen oletukset `table` (Oletus / Arvo / Lähde), jokainen markkinaluku lähteellä tai "käyttäjän muokattava oletus". Erittele `paragraph`-lohkoissa: mitä onnistuminen vaatii + riskipolku. Jos base case negatiivinen mutta odotusarvo positiivinen → sano että arvo syntyy käänneoptiosta.
 - BASE CASEN KURI: konservatiivinen skenaario nojaa toteutuneeseen tilinpäätöshistoriaan ja ennusteeseen — tasainen historia pysyy tasaisena. Käännekohdat ja uudet linjat nostavat vain optimistista skenaariota ja sen todennäköisyyttä, eivät base casea, ellei niistä ole jo toteutunutta liikevaihtonäyttöä.
-- OPTIMISTISEN ARVON LÄPINÄKYVÄ KETJU: kun optimistinen skenaario nojaa uuteen liiketoimintalinjaan tai laajentuneeseen markkinaan, johda arvo NÄKYVÄNÄ ketjuna, ei pyöreänä kertoimena: markkinan koko (`enrichment.business_lines[].optimistic_market_teur`/SAM) → markkinaosuus-% (`optimistic_share_pct`) → optimistinen liikevaihto/v → tavoiteltava EBIT-% → tulos → NOPLAT (tulos × (1 − vero)) → jatkuvan arvon arvo toteutumisvuonna n (NOPLAT / WACC) → diskonttaa nykyhetkeen jakamalla luvulla (1 + WACC)^n → vähennä toteutumisvuoden n ENNUSTETTU nettovelka (älä käytä viimeisintä toteutunutta nettovelkaa, jos ennuste kasvattaa velkaa) sekä ennustejakson välivuosien negatiivisten vapaiden kassavirtojen kattamiseen tarvittava rahoitus → erittele tai vähennä mahdollinen osakeannin laimennusvaikutus → optimistinen omistaja-arvo. ÄLÄ esitä optimistista arvoa diskonttaamattomana ikuisuusarvona. Näytä jokainen näistä (markkinaosuus×koko, EBIT-%, toteutumisvuosi n, jatkuvan arvon arvo, diskonttaustekijä, ennustettu nettovelka vuonna n, välivuosien rahoitustarve, laimennus) omana rivinään optimistisen oletukset -taulukossa, kukin lähteellä tai "käyttäjän muokattava oletus". Jos `enrichment.structural_inflections` sisältää markkinaa laajentavan käännekohdan (poistunut rajoite, eksogeeninen murros), optimistinen SAA käyttää laajentunutta markkinaa lähtökohtana — nimeä käännekohta oletuksissa. Miljoonaluokan optimistinen arvo on sallittu vain kun tämä markkinaosuus×koko-ketju on näkyvä ja merkitty; ilman ketjua se hylätään.
+- OPTIMISTISEN ARVON LÄPINÄKYVÄ KETJU: kun optimistinen skenaario nojaa uuteen liiketoimintalinjaan tai laajentuneeseen markkinaan, johda arvo NÄKYVÄNÄ ketjuna, ei pyöreänä kertoimena: markkinan koko (`enrichment.business_lines[].optimistic_market_teur`/SAM) → markkinaosuus-% (`optimistic_share_pct`) → optimistinen liikevaihto/v → tavoiteltava EBIT-% → tulos → NOPLAT (tulos × (1 − vero)) → jatkuvan arvon arvo toteutumisvuonna n (NOPLAT / WACC). Näytä jokainen näistä omana rivinään optimistisen oletukset -taulukossa, kukin lähteellä tai "käyttäjän muokattava oletus".
+- AIKAJOHDONMUKAINEN ARVOSTUSSILTA (EHDOTON): oman pääoman arvo muodostetaan TOTEUTUMISVUONNA ja diskontataan kokonaisuutena: (jatkuvan arvon arvo vuonna n − vuoden n ENNUSTETTU nettovelka) / (1 + WACC)^n, ja vasta sen jälkeen vähennetään mahdollinen laimennusvaikutus prosenttina. ÄLÄ KOSKAAN vähennä diskonttaamatonta tulevaisuuden velkaa nykyarvosta, ÄLÄKÄ vähennä välivuosien negatiivisten kassavirtojen rahoitustarvetta erikseen — vuoden n nettovelka sisältää jo sen rahoituksen, joten erillinen vähennys laskisi saman rahoitusvaikutuksen kahdesti. Yksi rahoitusrepresentaatio: joko velka vuonna n TAI erilliset omistajien pääomapanokset laimennuksena, ei molempia. ÄLÄ esitä optimistista arvoa diskonttaamattomana ikuisuusarvona.
+- KONEELLINEN LASKENTA: täytä `machine_readable.optimistic_assumptions` (skeema alla). Raportin koostaja LASKEE optimistisen omistaja-arvon deterministisesti näistä kentistä ja korvaa sillä skenaarioarvon, kontribuutiot ja odotusarvon — joten proosan ja oletustaulukon on käytettävä täsmälleen samoja lukuja. Jos `enrichment.structural_inflections` sisältää markkinaa laajentavan käännekohdan (poistunut rajoite, eksogeeninen murros), optimistinen SAA käyttää laajentunutta markkinaa lähtökohtana — nimeä käännekohta oletuksissa. Miljoonaluokan optimistinen arvo on sallittu vain kun markkinaosuus×koko-ketju on näkyvä ja merkitty; ilman ketjua se hylätään.
 
 ## 12. ARVON AJURIT
 
@@ -630,6 +632,13 @@ Vastaus on yksi JSON-objekti. Ei tekstiä ennen tai jälkeen, ei koodiaitoja.
       { "name": "Konservatiivinen", "value_teur": null, "probability_pct": null },
       { "name": "Optimistinen", "value_teur": null, "probability_pct": null }
     ],
+    "optimistic_assumptions": {
+      "realization_year": null,
+      "continuing_value_teur": null,
+      "net_debt_realization_year_teur": null,
+      "dilution_pct": null,
+      "wacc_pct": null
+    },
     "market_signals": [],
     "value_drivers": {"positive": [], "negative": []},
     "value_improvement_actions": []
@@ -640,6 +649,8 @@ Vastaus on yksi JSON-objekti. Ei tekstiä ennen tai jälkeen, ei koodiaitoja.
 `sections` sisältää osiot 1–16 samassa järjestyksessä kuin RAPORTIN RAKENNE -osiossa. KANSI ei ole `sections`-osio. `machine_readable` kokoaa keskeiset koneluettavat arvot — niiden on vastattava `sections`-sisältöä (kova sääntö 21).
 
 `machine_readable.scenarios` on TÄSMÄLLEEN yllä olevan muotoinen: kolme objektia, joissa avaimet `name`, `value_teur` (skenaarion flooriin nostettu omistaja-arvo tuhansina euroina, numero — EI merkkijono, EI muita avainnimiä kuten `owner_value`) ja `probability_pct` (numero). Kansisivun skenaariokaavio rakennetaan suoraan näistä kentistä — väärä avainnimi tai puuttuva arvo tarkoittaa, että kaavio jää pois raportista.
+
+`machine_readable.optimistic_assumptions` täytetään aina, kun optimistinen skenaario on muodostettu: `realization_year` (vuosi, jona jatkuva arvo muodostuu), `continuing_value_teur` (jatkuvan arvon arvo toteutumisvuonna, nimellinen, EI diskontattu), `net_debt_realization_year_teur` (toteutumisvuoden ENNUSTETTU nettovelka; negatiivinen = nettokassa), `dilution_pct` (laimennus prosentteina tai null) ja `wacc_pct` (käytetty diskonttokorko). Koostaja laskee optimistisen arvon deterministisesti näistä. Jos optimistista skenaariota ei voitu rakentaa markkinaketjulla, jätä kentät null.
 
 ## Lohkotyypit (`blocks`-listan alkiot)
 

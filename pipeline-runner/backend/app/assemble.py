@@ -7,7 +7,8 @@ arrays from every stage into one list sorted by the canonical section order
 1,2,3,4,5,6,8,9,10,11,12,13,14,15,16 (there is no section 7), and returns the
 final report object that feeds the renderer.
 """
-from . import dcf_detail, headcount_efficiency, scenario_compare, sensitivity, valuation_equivalence
+from . import (dcf_detail, headcount_efficiency, scenario_compare,
+               scenario_waterfall, sensitivity, valuation_equivalence)
 from .runner import SECTION_ORDER
 
 _WRAPPER_MARKERS = ("report_type", "cover", "machine_readable", "meta")
@@ -213,6 +214,28 @@ def _inject_scenario_comparison_block(sections, wrapper):
     return sections
 
 
+def _inject_optimistic_waterfall_blocks(sections, wf_result):
+    """Insert the deterministic optimistic-value derivation right after the
+    scenario comparison table in section 11. Idempotent."""
+    blocks = scenario_waterfall.derivation_blocks(wf_result)
+    for sec in sections:
+        if not (isinstance(sec, dict) and str(sec.get("id")) == _SENSITIVITY_SECTION_ID):
+            continue
+        current = [b for b in (sec.get("blocks") or [])
+                   if not (isinstance(b, dict)
+                           and b.get("table_id") == "deterministic_optimistic_waterfall")]
+        # the paragraph travels with its table — strip a previously injected copy
+        current = [b for b in current
+                   if not (isinstance(b, dict) and b.get("type") == "paragraph"
+                           and "laskettu deterministisesti yllä" in str(b.get("text", "")))]
+        pos = next((i + 1 for i, b in enumerate(current)
+                    if isinstance(b, dict)
+                    and b.get("table_id") == "deterministic_scenario_comparison"), 0)
+        sec["blocks"] = current[:pos] + blocks + current[pos:]
+        break
+    return sections
+
+
 def _inject_headcount_efficiency_blocks(sections, input_data):
     """Append the deterministic per-employee ratio table to section 5 — computed
     in code (see app/headcount_efficiency.py), never by the LLM."""
@@ -266,6 +289,11 @@ def assemble(run):
     s4 = outputs.get(4)
     if isinstance(s4, dict):
         wrapper.setdefault("_scenarios", s4)
+    # Deterministic optimistic value BEFORE the comparison table + cover derive
+    # from the scenarios, so they all show the recomputed figure.
+    wf = scenario_waterfall.apply(wrapper, outputs.get(0))
     _inject_scenario_comparison_block(sections, wrapper)
+    if wf is not None:
+        _inject_optimistic_waterfall_blocks(sections, wf)
     valuation_equivalence.normalize_report(wrapper, outputs.get(0))
     return wrapper
