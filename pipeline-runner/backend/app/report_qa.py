@@ -160,11 +160,64 @@ def _prose_number_reconciliation(rep, limit=12):
     return out
 
 
+def _scenario_value(s):
+    """Same alias policy as render._scenario_num (kept in sync by tests)."""
+    for k in ("value_teur", "owner_value_teur", "owner_value", "equity_value",
+              "equity_value_teur", "value"):
+        v = _num(s.get(k))
+        if v is not None:
+            return v
+    for k in sorted(s):
+        kl = k.lower()
+        if ("value" in kl and "prob" not in kl and "contribution" not in kl
+                and "weight" not in kl and "enterprise" not in kl):
+            v = _num(s.get(k))
+            if v is not None:
+                return v
+    return None
+
+
+def _scenario_and_anchor_consistency(rep):
+    """Post-assemble consistency on what the client actually receives: scenario
+    math, cover vs expected value, and cover vs the deterministic DCF/EVA anchor
+    stamped by valuation_equivalence (the AWAKE.AI 762-vs-1144 class)."""
+    out = []
+    mr = (rep or {}).get("machine_readable") or {}
+    sc = mr.get("scenarios")
+    cover = (rep or {}).get("cover") or {}
+    if isinstance(sc, list) and len(sc) == 3 and all(isinstance(s, dict) for s in sc):
+        vals = [_scenario_value(s) for s in sc]
+        probs = [_num(s.get("probability_pct")) for s in sc]
+        if None not in vals and None not in probs:
+            if abs(sum(probs) - 100.0) > 1.0:
+                out.append(f"skenaarioiden todennäköisyydet summautuvat {sum(probs)} %")
+            calc = sum(p * v for p, v in zip(probs, vals)) / 100.0
+            ev_obj = (rep or {}).get("expected_value")
+            ev = _num(ev_obj.get("value") if isinstance(ev_obj, dict) else ev_obj)
+            if ev is not None and abs(calc - ev) > max(1.0, 0.005 * abs(ev)):
+                out.append(f"odotusarvo {ev} ei täsmää skenaarioista laskettuun {round(calc, 1)}")
+            hv = _num(cover.get("headline_value"))
+            if ev is not None and hv is not None and abs(hv - ev) > max(1.0, 0.005 * abs(ev)):
+                out.append(f"kannen headline_value {round(hv, 1)} != odotusarvo {round(ev, 1)}")
+    elif sc is not None:
+        out.append("machine_readable.scenarios ei ole 3 objektin lista")
+    anchor = _num((rep or {}).get("_valuation_anchor_teur"))
+    bcv = _num(cover.get("base_case_value"))
+    if anchor is not None and bcv is not None:
+        floored = max(anchor, 0.0)  # cover shows the owner-value floor, not raw negative
+        if abs(bcv - floored) > max(1.0, 0.01 * abs(floored)):
+            out.append(
+                f"kannen perusarvo {round(bcv, 1)} tEUR poikkeaa kokoonpanon "
+                f"DCF/EVA-ankkurista {round(floored, 1)} tEUR — luvut ovat ristiriidassa")
+    return out
+
+
 def warnings(rep):
     """Non-blocking QA warnings over the assembled report. Never raises."""
     try:
         return (_duplicate_blocks(rep)
                 + _sensitivity_calibration(rep)
+                + _scenario_and_anchor_consistency(rep)
                 + _prose_number_reconciliation(rep))
     except Exception as e:  # QA must never break report delivery
         return [f"report_qa-tarkistus epäonnistui: {e}"]

@@ -120,11 +120,98 @@ def _source_mark_issues(output):
     return issues
 
 
+def _scenario_value(s):
+    """Tolerant scenario-value reader — same alias policy as render._scenario_num
+    (kept in sync by tests): known keys first, then any numeric *value* key that
+    isn't a probability/weight/contribution/enterprise field."""
+    for k in ("value_teur", "owner_value_teur", "owner_value", "equity_value",
+              "equity_value_teur", "value"):
+        v = _first_num(s.get(k))
+        if v is not None:
+            return v
+    for k in sorted(s):
+        kl = k.lower()
+        if ("value" in kl and "prob" not in kl and "contribution" not in kl
+                and "weight" not in kl and "enterprise" not in kl):
+            v = _first_num(s.get(k))
+            if v is not None:
+                return v
+    return None
+
+
+def _active_scenario_issues(output, context):
+    """machine_readable.scenarios schema + consistency on the ACTIVE single-writer
+    output (the legacy context['scenarios'] checks below only fire for the dead
+    6-stage pipeline). SHADOW MODE: reported as advisory issues, never blocking —
+    promote to hard gates only after dress-rehearsal on real runs."""
+    issues = []
+    mr = output.get("machine_readable") or {}
+    sc = mr.get("scenarios")
+    if not isinstance(sc, list) or not sc:
+        return ["machine_readable.scenarios puuttuu tai ei ole lista"]
+    if len(sc) != 3:
+        issues.append(f"skenaarioita {len(sc)}, pitää olla 3")
+    names = " ".join(str((s or {}).get("name", "")).lower() for s in sc)
+    for want in ("pessimis", "konservatiiv", "optimis"):
+        if want not in names and not (want == "konservatiiv" and "realis" in names):
+            issues.append(f"skenaarion nimi puuttuu: {want}*")
+    vals, probs = [], []
+    for s in sc:
+        if not isinstance(s, dict):
+            issues.append("skenaarioerä ei ole objekti")
+            continue
+        v = _scenario_value(s)
+        p = _first_num(s.get("probability_pct"))
+        if v is None:
+            issues.append(f"{s.get('name')}: arvoa ei voitu lukea")
+        else:
+            if v < 0:
+                issues.append(f"{s.get('name')}: negatiivinen omistaja-arvo {v} (lattia on 0)")
+            vals.append(v)
+        if p is None:
+            issues.append(f"{s.get('name')}: probability_pct puuttuu")
+        else:
+            probs.append(p)
+    if len(probs) == 3 and abs(sum(probs) - 100.0) > 1.0:
+        issues.append(f"todennäköisyydet summautuvat {sum(probs)} % (pitää olla 100 %)")
+    # expected value = sum p*v
+    ev_obj = output.get("expected_value")
+    ev = _first_num(ev_obj.get("value") if isinstance(ev_obj, dict) else ev_obj)
+    if ev is None:
+        ev = _first_num(mr.get("expected_value"))
+    if ev is not None and len(vals) == 3 and len(probs) == 3:
+        calc = sum(p * v for p, v in zip(probs, (
+            _scenario_value(s) for s in sc))) / 100.0
+        if abs(calc - ev) > max(1.0, 0.005 * abs(ev)):
+            issues.append(f"odotusarvo {ev} ei täsmää laskettuun {round(calc, 1)}")
+        hv = _first_num((output.get("cover") or {}).get("headline_value"))
+        if hv is not None and abs(hv - ev) > max(1.0, 0.005 * abs(ev)):
+            issues.append(f"kannen headline_value {hv} != odotusarvo {ev}")
+    # ported zero-fundamental guard (dead stage4_scenarios.py) — pessimistic 0
+    # with an all-positive forecast EBIT path deserves a flag, not silence
+    pess = next((s for s in sc if isinstance(s, dict)
+                 and "pessimis" in str(s.get("name", "")).lower()), None)
+    if pess is not None and (_scenario_value(pess) or 0) == 0:
+        fc_ebit = (((context or {}).get("input_data") or {})
+                   .get("forecast") or {}).get("ebit") or []
+        nums = [x for x in fc_ebit if isinstance(x, (int, float))]
+        if nums and all(x > 0 for x in nums):
+            issues.append(
+                "pessimistinen skenaario on 0, vaikka ennusteen EBIT on "
+                "positiivinen joka vuosi — perustele tai laske downside-arvo")
+    return issues
+
+
 def validate(output: dict, context: dict) -> dict:
     checks = []
 
     def chk(name, ok, detail=""):
         checks.append({"name": name, "passed": bool(ok), "detail": detail})
+
+    scen_issues = _active_scenario_issues(output, context)
+    chk("machine_readable.scenarios schema + consistency (shadow, non-blocking)",
+        True,
+        ("; ".join(scen_issues[:12])) if scen_issues else "ok")
 
     mr = output.get("machine_readable") or {}
     chk("machine_readable present", bool(mr),

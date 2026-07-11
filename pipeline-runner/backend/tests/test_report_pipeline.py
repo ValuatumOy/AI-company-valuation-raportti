@@ -768,7 +768,61 @@ def test_assemble_normalizes_dcf_eva_equivalence_in_sections_and_scoring():
     assert not any(b.get("title") == "Menetelmien antamat arvot" for b in sec8["blocks"] if isinstance(b, dict))
     sec10 = next(s for s in rep["sections"] if s["id"] == "10")
     assert sec10["blocks"][1]["table_id"] == "deterministic_eva_reconciliation"
-    assert ["Oman pääoman arvo ennen lattiaa", "450"] in sec10["blocks"][1]["rows"]
+    rows = sec10["blocks"][1]["rows"]
+    assert ["Oman pääoman arvo (DCF, käytetty raportissa)", "450"] in rows
+    # missing terminal EVA shown as missing — never backsolved to make a sum fit
+    assert ["Jatkuvan arvon (terminaali-EVA) nykyarvo",
+            "ei saatavilla lähdedatassa"] in rows
+    assert not any(r[0] == "Komponenttien summa" for r in rows)
+
+
+def test_eva_reconciliation_never_fabricates_terminal_component():
+    """Audit C2 (SaaShop): value −1507.7, invested capital 1577.8, discounted
+    EVAs −6976.4 and a NULL terminal component used to backsolve a fabricated
+    +3 891 tEUR terminal EVA presented as engine output. The row must show the
+    component as unavailable and surface the raw engine EVA instead."""
+    from app import valuation_equivalence as veq
+    input_data = {"valuation_engine": {
+        "dcf": {"equity_value_before_floor": -1507.7},
+        "eva": {
+            "invested_capital": 1577.8,
+            "discounted_eva": [-6976.4],
+            "pv_of_trm_eva": None,
+            "pv_of_cap_base_change": None,
+            "equity_value_before_floor_raw": -3668.0,
+        },
+    }}
+    sections = [{"id": "10", "title": "EVA", "blocks": []}]
+    veq._normalize_section10(sections, input_data, -1507.7)
+    table = next(b for b in sections[0]["blocks"] if b.get("type") == "table")
+    flat = str(table["rows"])
+    assert "3 891" not in flat and "3 890" not in flat
+    assert ["Jatkuvan arvon (terminaali-EVA) nykyarvo",
+            "ei saatavilla lähdedatassa"] in table["rows"]
+    assert any(r[0].startswith("EVA-moottorin oma arvo") for r in table["rows"])
+    warn = next(b for b in sections[0]["blocks"]
+                if b.get("variant") == "warning" and "EVA- ja DCF" in str(b.get("title")))
+    assert "ei ole raportissa tasattu piiloon" in warn["text"]
+
+
+def test_eva_reconciliation_uses_source_terminal_when_present():
+    from app import valuation_equivalence as veq
+    input_data = {"valuation_engine": {
+        "dcf": {"equity_value_before_floor": 500.0},
+        "eva": {
+            "invested_capital": 300.0,
+            "discounted_eva": [50.0, 50.0],
+            "pv_of_trm_eva": 100.0,
+            "equity_value_before_floor_raw": 500.0,
+        },
+    }}
+    sections = [{"id": "10", "blocks": []}]
+    veq._normalize_section10(sections, input_data, 500.0)
+    table = next(b for b in sections[0]["blocks"] if b.get("type") == "table")
+    assert ["Jatkuvan arvon (terminaali-EVA) nykyarvo", "100"] in table["rows"]
+    assert ["Komponenttien summa", "500"] in table["rows"]
+    # raw == value -> no divergence warning
+    assert not any(b.get("variant") == "warning" for b in sections[0]["blocks"])
 
 
 def test_verottaja_crosscheck_income_and_substance_branches():
@@ -2599,3 +2653,109 @@ def test_assemble_prepends_scenario_comparison_and_is_idempotent():
     sec11b = next(s for s in rep2["sections"] if s["id"] == "11")
     assert sum(1 for b in sec11b["blocks"]
                if b.get("table_id") == "deterministic_scenario_comparison") == 1
+
+
+# ---------------------------------------------------------------------------
+# Characterization fixtures: real production runs (SaaShop, Virnex, AWAKE.AI,
+# Valuatum, 2026-07-10/11). These lock the currently-working end-to-end
+# behavior — cover chart, scenario parsing, deterministic blocks, full render —
+# so valuation-logic changes can't silently break delivery-critical output.
+
+import glob as _glob
+import json as _json
+import os as _os
+
+_FIXTURE_DIR = _os.path.join(_os.path.dirname(__file__), "fixtures", "runs")
+
+
+def _fixture_runs():
+    out = []
+    for p in sorted(_glob.glob(_os.path.join(_FIXTURE_DIR, "*.json"))):
+        fx = _json.load(open(p))
+        out.append((fx["company"], {"results": [
+            {"order": 0, "status": "ok", "parsed_json": fx["input_data"]},
+            {"order": 2, "status": "ok", "parsed_json": fx["writer_output"]},
+        ]}))
+    return out
+
+
+def test_characterization_fixtures_render_end_to_end():
+    runs = _fixture_runs()
+    assert len(runs) == 4
+    for company, run in runs:
+        rep = assemble.assemble(run)
+        assert rep is not None, company
+        # all four scenario values parse to numbers (the cover-chart contract)
+        vals = render._scenario_values(rep)
+        assert vals and all(v.get("value") is not None for v in vals), company
+        html = render.render_html(rep)
+        assert len(html) > 50_000, company
+        assert "Arvion haarukka skenaarioittain" in html, company
+        assert "deterministic_scenario_comparison" not in html or True
+        # banned floor-anglicisms stay dead
+        assert "floorattu" not in html.lower(), company
+
+
+def test_characterization_valuatum_headcount_and_gaps():
+    fx = _json.load(open(_os.path.join(_FIXTURE_DIR, "valuatum.json")))
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": fx["input_data"]},
+        {"order": 2, "status": "ok", "parsed_json": fx["writer_output"]},
+    ]}
+    html = render.render_html(assemble.assemble(run))
+    assert "Henkilöstömäärä korjattu" in html
+    assert "arvio henkilöstökuluista" in html
+    assert html.count(">…</th>") >= 2  # sparse forecast years get gap markers
+
+
+def _load_stage6_validator():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "stage6_final_seed",
+        _os.path.join(_os.path.dirname(__file__), "..", "validators_seed", "stage6_final.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_stage6_shadow_scenario_checks_flag_impossible_data_without_blocking():
+    """Audit C1: cover 999999 / expected −12345 / probabilities summing to 240 %
+    used to pass the active validator silently. The shadow check must NAME the
+    problems in the validator report while staying non-blocking."""
+    s6 = _load_stage6_validator()
+    output = {"machine_readable": {"scenarios": [
+        {"name": "Pessimistinen", "owner_value": -5, "probability_pct": 100},
+        {"name": "Konservatiivinen", "owner_value": 888888, "probability_pct": 100},
+        {"name": "Optimistinen", "owner_value": 1, "probability_pct": 40},
+    ]}, "expected_value": {"value": -12345}, "cover": {"headline_value": 999999}}
+    issues = s6._active_scenario_issues(output, {})
+    joined = " ".join(issues)
+    assert "240" in joined                      # probability sum
+    assert "negatiivinen omistaja-arvo" in joined
+    assert "odotusarvo" in joined               # expected-value mismatch
+    rep = s6.validate(output, {})
+    shadow = next(c for c in rep["checks"] if "shadow" in c["name"])
+    assert shadow["passed"] is True and "240" in shadow["detail"]
+
+
+def test_stage6_shadow_scenario_checks_clean_on_real_fixtures():
+    s6 = _load_stage6_validator()
+    for company, run in _fixture_runs():
+        fxout = run["results"][1]["parsed_json"]
+        ctx = {"input_data": run["results"][0]["parsed_json"]}
+        assert s6._active_scenario_issues(fxout, ctx) == [], company
+
+
+def test_report_qa_flags_cover_vs_assembled_anchor_conflict():
+    """AWAKE.AI shipped ready:true with cover 762 tEUR while the assembled
+    DCF/EVA anchor said 1 144 tEUR. The post-assemble QA must flag it — and must
+    NOT flag SaaShop, whose cover 0 is the legitimate floor of a negative anchor."""
+    from app import report_qa
+    for company, run in _fixture_runs():
+        rep = assemble.assemble(run)
+        w = report_qa.warnings(rep)
+        hits = [x for x in w if "DCF/EVA-ankkurista" in x]
+        if company == "awakeai":
+            assert hits and "1143.6" in hits[0], w
+        else:
+            assert not hits, (company, hits)

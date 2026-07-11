@@ -266,30 +266,63 @@ def _normalize_section10(sections, input_data, value):
     eva = ((input_data or {}).get("valuation_engine") or {}).get("eva") or {}
     ic = eva.get("invested_capital")
     pv_exp = _sum_nums(eva.get("discounted_eva"))
-    pv_term = value - (ic if _is_num(ic) else 0) - pv_exp
+    pv_term = eva.get("pv_of_trm_eva")
+    cap_change = eva.get("pv_of_cap_base_change")
+    raw = eva.get("equity_value_before_floor_raw")
+
+    # Every row comes from a source field as-is. A missing component is shown
+    # as missing — NEVER backsolved as `value − ic − pv_exp` so the sum "adds
+    # up": that fabricated a +3 891 tEUR terminal EVA on a real report and
+    # presented it as engine output.
     rows = []
     if _is_num(ic):
         rows.append(["Investoitu pääoma", _fmt_num(ic)])
     rows.append(["PV, diskontatut EVA:t (ennustejakso)", _fmt_num(pv_exp)])
-    rows.append(["Jatkuvan arvon (terminaali-EVA) nykyarvo", _fmt_num(pv_term)])
-    rows.append(["Oman pääoman arvo ennen lattiaa", _fmt_num(value)])
-    blocks = [
-        {
-            "type": "paragraph",
+    rows.append(["Jatkuvan arvon (terminaali-EVA) nykyarvo",
+                 _fmt_num(pv_term) if _is_num(pv_term) else "ei saatavilla lähdedatassa"])
+    if _is_num(cap_change):
+        rows.append(["Pääomapohjan muutoksen nykyarvo", _fmt_num(cap_change)])
+    complete = _is_num(ic) and _is_num(pv_term)
+    if complete:
+        total = ic + pv_exp + pv_term + (cap_change if _is_num(cap_change) else 0)
+        rows.append(["Komponenttien summa", _fmt_num(total)])
+    if _is_num(raw):
+        rows.append(["EVA-moottorin oma arvo ennen normalisointia", _fmt_num(raw)])
+    rows.append(["Oman pääoman arvo (DCF, käytetty raportissa)", _fmt_num(value)])
+
+    if complete:
+        intro = (
+            "EVA rakentaa oman pääoman arvon eri suunnasta kuin DCF: yhtiöön jo "
+            "sitoutunut pääoma (investoitu pääoma) plus tulevien EVA-erien "
+            "nykyarvo (ennustejakso ja terminaali). Alla olevat erät ovat "
+            "laskentamoottorin tuottamia sellaisenaan."
+        )
+    else:
+        intro = (
+            "EVA-erittelyn kaikkia komponentteja ei ole saatavilla lähdedatassa "
+            "(terminaali-EVA:n nykyarvo puuttuu), joten täsmäytyssummaa ei "
+            "esitetä. Raportin arvostus perustuu DCF-menetelmään; EVA on tässä "
+            "raportissa DCF:n rinnakkaisnäkymä, ei itsenäinen menetelmäarvo."
+        )
+    diff_note = None
+    if _is_num(raw) and abs(raw - value) > max(1.0, 0.01 * abs(value)):
+        diff_note = {
+            "type": "callout",
+            "variant": "warning",
+            "title": "EVA- ja DCF-mallin ero",
             "text": (
-                "EVA-menetelmä päätyy samaan oman pääoman arvoon kuin DCF, mutta "
-                "rakentaa sen eri suunnasta: yhtiöön jo sitoutunut pääoma "
-                "(investoitu pääoma) plus tulevien EVA-erien nykyarvo "
-                "(ennustejakso ja terminaali) antaa suoraan saman oman pääoman "
-                "arvon kuin DCF:n vapaiden kassavirtojen nykyarvo. Toisin sanoen "
-                "Investoitu pääoma + PV(EVA) = oman pääoman arvo. Alla oleva "
-                "täsmäytys osoittaa, että summa päätyy samaan arvoon."
+                f"EVA-moottorin oma arvo ({_fmt_num(raw)} tEUR) poikkeaa DCF:n "
+                f"oman pääoman arvosta ({_fmt_num(value)} tEUR). Ero kertoo "
+                "mallien välisestä erosta lähdedatassa — se ei ole raportissa "
+                "tasattu piiloon."
             ),
-        },
+        }
+    blocks = [
+        {"type": "paragraph", "text": intro},
         {
             "type": "table",
             "table_id": "deterministic_eva_reconciliation",
-            "title": "EVA-täsmäytys oman pääoman arvoon",
+            "title": "EVA-erittely" if not complete else "EVA-täsmäytys oman pääoman arvoon",
             "unit": "tEUR",
             "columns": ["Erä", "Arvo"],
             "rows": rows,
@@ -303,10 +336,12 @@ def _normalize_section10(sections, input_data, value):
                 "kuin sen tuottovaatimus (ROIC vs WACC). Positiivinen EVA "
                 "tarkoittaa, että yhtiö luo arvoa vuoden aikana, negatiivinen että "
                 "se tuhoaa sitä. Tämä arvonluontinäkymä ei näy pelkästä "
-                "kassavirtaluvusta, vaikka lopputulos on sama."
+                "kassavirtaluvusta."
             ),
         },
     ]
+    if diff_note:
+        blocks.append(diff_note)
     for sec in sections:
         if isinstance(sec, dict) and str(sec.get("id")) == "10":
             sec["blocks"] = blocks
@@ -323,4 +358,8 @@ def normalize_report(report, input_data):
     sections = report.get("sections") or []
     _normalize_section8(sections, input_data, value)
     _normalize_section10(sections, input_data, value)
+    # Underscore = renderer/QA-only. The post-assemble QA compares the cover
+    # figures against this anchor (the AWAKE.AI case: cover 762 vs assembled
+    # DCF/EVA anchor 1 144 shipped with ready:true and nothing noticed).
+    report["_valuation_anchor_teur"] = value
     return report
