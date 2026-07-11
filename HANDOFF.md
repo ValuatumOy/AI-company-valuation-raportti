@@ -1,4 +1,35 @@
-# Handoff — 2026-07-10 (read this first)
+# Handoff — 2026-07-11 (read this first)
+
+## 2026-07-11 — SaaShop review fixes shipped (commits 5180987 + cc493a2, LIVE + reseeded, verified)
+
+Full page-by-page review of the SaaShop PDF (one of the 4 external-tester
+reports) surfaced 8 issues beyond the cover-chart bug; all deterministic ones
+are now fixed and verified on the live re-render (floors=0, §13 uppercased,
+zero-sea heatmap gone, cover chart intact on all 4 reports):
+
+- **Inverted sensitivity blocks on deep-loss companies** (`5180987`):
+  Revenue×EBIT-% heatmap claimed "worse margin → MORE value" (sign flip in
+  the linear proxy when base EV < 0) and the alt terminal-margin table showed
+  "−9,3 % → 0 tEUR" next to "0,8 % → −1 508 tEUR". Both now suppressed when
+  the base is non-positive.
+- **`cc493a2` (six fixes):** (1) `render._defloor` in `_clean` — the
+  "floorattu/flooria/floor-käsittely" anglicism family (banned by rule 35,
+  emitted anyway) now deterministically replaced with "lattiaan nostettu"
+  forms, case-preserving. (2) Section titles uppercased at display time
+  (`_title_case`) — model wrote §13 in sentence case. (3) `.mcard` value
+  wraps at word boundaries ("rahoituskierro/s" break). (4) WACC×growth
+  heatmap suppressed when >80 % of cells floor to 0 (SaaShop: 24/25).
+  (5) Henkilöstötehokkuus per-person ratios blanked for years with revenue
+  < 1 tEUR/person (SaaShop 2018: hc 30 vs 2 tEUR revenue = 67 €/person data
+  error); raw headcount stays visible. (6) Company search prefers Finnish
+  industry name from `industryTree` over English `industryText` (new runs).
+- **Prompt rule 42** (reseeded, verified live): margin-% cells show "–" for
+  years with revenue < 50 tEUR (was "−700,0 %" on a 2 tEUR founding year).
+- 134 tests pass. NOT fixed (model-side, needs new runs to judge): 2016–2017
+  all-dash columns in §5, pessimistic-scenario-always-0 (deferred, waiting
+  Esa's spec — see cont. 3 below and the memory note).
+- PDF page-14 `" "` artifact could not be reproduced in the HTML source —
+  likely a PDF-extraction artifact, not report content.
 
 ## 2026-07-10 (cont. 3) — 🚨 Cover chart vanished on 4 externally-tested reports; FIXED (commits 26713a3 + 2f06ba2, LIVE + reseeded)
 
