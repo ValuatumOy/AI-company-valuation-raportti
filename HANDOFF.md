@@ -1,5 +1,29 @@
 # Handoff — 2026-07-11 (read this first)
 
+## 2026-07-11 — Stabilization pair shipped (fc4af74, LIVE, verified) — roadmap step 2 done
+
+Per the reconciled cross-agent status list (audit follow-up), the two small
+stabilization fixes are live and verified on free rerenders of the Valuatum
+(71e41a6c…) and SaaShop (4922abf3…) runs:
+
+- **equity_value alias hardening:** `render._scenario_num` +
+  `scenario_compare._val` know equity_value/equity_value_teur explicitly and
+  the generic `*value*` fallback now skips enterprise-value keys — a scenario
+  item carrying both can no longer resolve to the debt-inclusive EV figure.
+- **Reported headcount kept visible:** the source figure stays in the
+  Henkilöstötehokkuus table unchanged; the personnel-cost-implied value is a
+  separate "Henkilöstö (arvio henkilöstökuluista)" row. Ratios still use the
+  implied value for flagged years. (Reverses the replace-behavior of 0bcf0b2
+  per the shared decision, keeps its correction effect.)
+- 137 tests pass. No prompt change, no reseed needed.
+
+Next per the agreed order (no back-and-forth): step 3 — lock SaaShop/Virnex/
+AWAKE data extracts as characterization fixtures, then build the
+machine_readable.scenarios validator + post-assemble check in shadow mode
+(warn, don't block). Then deterministic optimistic-scenario waterfall + EVA
+(P0), then delivery gating, then report semantics. All verified via free
+rerenders before any paid run (needs explicit approval).
+
 ## 2026-07-11 — Esa's feedback triage: 3 fixes shipped (0bcf0b2, LIVE + reseeded, verified on Esa's Valuatum run)
 
 Esa reviewed his 10.7 Valuatum report (RID `71e41a6c68dd481e9300f64b82cf0bb6`).
