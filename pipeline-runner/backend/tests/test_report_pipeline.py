@@ -2293,15 +2293,17 @@ def test_company_search_endpoint_is_expert_reachable(monkeypatch):
     assert r.json()[0]["fid"] == 184362
 
 
-def test_email_delivery_sends_pdf_attachment_with_resend(monkeypatch, tmp_path):
+def test_email_delivery_sends_pdf_attachment_with_ses(monkeypatch, tmp_path):
     import asyncio
+    from email import policy
+    from email.parser import BytesParser
     from app import email_delivery
 
     pdf = tmp_path / "report.pdf"
     pdf.write_bytes(b"%PDF-1.4 test")
-    calls = {}
 
-    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("REPORT_EMAIL_ENABLED", "1")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
     monkeypatch.setenv("REPORT_EMAIL_FROM", "Valuatum <reports@example.com>")
     monkeypatch.setattr(email_delivery.store, "get_run", lambda rid: {
         "id": rid,
@@ -2311,40 +2313,68 @@ def test_email_delivery_sends_pdf_attachment_with_resend(monkeypatch, tmp_path):
     monkeypatch.setattr(email_delivery.store, "final_report_json", lambda rid: {
         "meta": {"company_name": "Valuatum Oy"},
     })
-    monkeypatch.setattr(email_delivery.report, "generate_pdf", lambda rid, report_json: str(pdf))
+    monkeypatch.setattr(email_delivery.report, "generate_pdf",
+                        lambda rid, report_json: str(pdf))
 
-    class FakeResponse:
-        status_code = 200
-        text = '{"id":"email_123"}'
+    calls = {}
 
-        def json(self):
-            return {"id": "email_123"}
+    def fake_send(**kwargs):
+        calls.update(kwargs)
+        return {"MessageId": "ses_message_123"}
 
-    class FakeClient:
-        def __init__(self, *a, **k):
-            pass
+    async def inline_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
 
-        async def __aenter__(self):
-            return self
+    monkeypatch.setattr(email_delivery.asyncio, "to_thread", inline_to_thread)
+    monkeypatch.setattr(email_delivery, "_send_with_ses", fake_send)
 
-        async def __aexit__(self, *a):
-            return False
-
-        async def post(self, url, headers=None, json=None):
-            calls["url"] = url
-            calls["headers"] = headers
-            calls["json"] = json
-            return FakeResponse()
-
-    monkeypatch.setattr(email_delivery.httpx, "AsyncClient", FakeClient)
     out = asyncio.run(email_delivery.send_report_ready("run123"))
 
-    assert out == {"sent": True, "provider": "resend", "id": "email_123"}
-    assert calls["url"] == email_delivery.RESEND_URL
-    assert calls["headers"]["Authorization"] == "Bearer re_test"
-    assert calls["json"]["to"] == ["owner@testi.fi"]
-    assert calls["json"]["attachments"][0]["filename"].endswith(".pdf")
-    assert calls["json"]["attachments"][0]["content"]
+    assert out == {"sent": True, "provider": "ses", "id": "ses_message_123"}
+    assert calls["region"] == "eu-west-1"
+    assert calls["sender"] == "Valuatum <reports@example.com>"
+    assert calls["recipient"] == "owner@testi.fi"
+    parsed = BytesParser(policy=policy.default).parsebytes(calls["raw_message"])
+    attachments = list(parsed.iter_attachments())
+    assert len(attachments) == 1
+    assert attachments[0].get_content_type() == "application/pdf"
+    assert attachments[0].get_payload(decode=True) == b"%PDF-1.4 test"
+
+
+def test_email_delivery_configures_transient_ses_retries(monkeypatch):
+    from app import email_delivery
+
+    calls = {}
+
+    class FakeSesClient:
+        def send_email(self, **kwargs):
+            calls["send_email"] = kwargs
+            return {"MessageId": "ses_message_123"}
+
+    def fake_client(service_name, **kwargs):
+        calls["service_name"] = service_name
+        calls.update(kwargs)
+        return FakeSesClient()
+
+    monkeypatch.setattr(email_delivery.boto3, "client", fake_client)
+
+    result = email_delivery._send_with_ses(
+        region="eu-west-1",
+        sender="reports@example.com",
+        recipient="owner@example.com",
+        raw_message=b"test message",
+        run_id="run123",
+    )
+
+    assert result == {"MessageId": "ses_message_123"}
+    assert calls["service_name"] == "sesv2"
+    assert calls["region_name"] == "eu-west-1"
+    assert calls["config"].connect_timeout == 10
+    assert calls["config"].read_timeout == 30
+    assert calls["config"].retries == {
+        "total_max_attempts": 3,
+        "mode": "standard",
+    }
 
 
 @pytest.mark.skipif(not render.pdf_available(), reason="no local Chromium")
