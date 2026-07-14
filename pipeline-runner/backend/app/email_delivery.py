@@ -1,21 +1,33 @@
 """Email finished valuation reports.
 
-Currently wired for Resend's REST API. It is inert until RESEND_API_KEY and a
-sender address are configured, so deploying this code cannot send surprise
-emails by itself.
+Currently wired for Amazon SES (API v2) via boto3. It is inert until an AWS
+region and a sender address are configured, so deploying this code cannot send
+surprise emails by itself. Boto3 resolves credentials through its normal
+provider chain (environment, session token, profile, or compute role).
 """
 import asyncio
-import base64
 import html
 import os
 import re
+from email import policy
+from email.message import EmailMessage
 from pathlib import Path
 
-import httpx
+import boto3
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 
 from . import report, store
 
-RESEND_URL = "https://api.resend.com/emails"
+SES_CONFIG = Config(
+    connect_timeout=10,
+    read_timeout=30,
+    # Prefer a possible duplicate over silently losing a finished report. Most
+    # retries are safe (connect failures, throttling, transient 5xx), but a read
+    # timeout can be ambiguous: SES may have accepted the previous attempt even
+    # though its response never reached us.
+    retries={"total_max_attempts": 3, "mode": "standard"},
+)
 
 
 def _truthy_env(name: str, default: str = "1") -> bool:
@@ -37,7 +49,15 @@ def _recipient(run: dict) -> str | None:
 
 
 def _sender() -> str | None:
-    return (os.getenv("REPORT_EMAIL_FROM") or os.getenv("RESEND_FROM") or "").strip() or None
+    return (os.getenv("REPORT_EMAIL_FROM") or "").strip() or None
+
+
+def _aws_region() -> str | None:
+    return (
+        os.getenv("AWS_REGION")
+        or os.getenv("AWS_DEFAULT_REGION")
+        or ""
+    ).strip() or None
 
 
 def _report_link(rid: str, run: dict) -> str | None:
@@ -53,11 +73,32 @@ def _report_link(rid: str, run: dict) -> str | None:
     return f"{site}/testi?key={key}&rid={rid}"
 
 
+def _send_with_ses(
+    *,
+    region: str,
+    sender: str,
+    recipient: str,
+    raw_message: bytes,
+    run_id: str,
+) -> dict:
+    client = boto3.client(
+        "sesv2",
+        region_name=region,
+        config=SES_CONFIG,
+    )
+    return client.send_email(
+        FromEmailAddress=sender,
+        Destination={"ToAddresses": [recipient]},
+        Content={"Raw": {"Data": raw_message}},
+        EmailTags=[{"Name": "run_id", "Value": run_id[:32]}],
+    )
+
+
 async def send_report_ready(rid: str) -> dict:
     """Send the finished run's report to params.delivery_email when configured.
 
     Returns a small status dict for tests/logging. Raises only on unexpected
-    local errors; provider HTTP errors are returned as sent=False.
+    local errors; provider errors are returned as sent=False.
     """
     run = store.get_run(rid)
     if not run:
@@ -67,10 +108,10 @@ async def send_report_ready(rid: str) -> dict:
         return {"sent": False, "reason": "no-recipient"}
     if not _truthy_env("REPORT_EMAIL_ENABLED", "1"):
         return {"sent": False, "reason": "disabled"}
-    api_key = (os.getenv("RESEND_API_KEY") or "").strip()
+    region = _aws_region()
     sender = _sender()
-    if not api_key:
-        return {"sent": False, "reason": "missing-resend-api-key"}
+    if not region:
+        return {"sent": False, "reason": "missing-aws-region"}
     if not sender:
         return {"sent": False, "reason": "missing-sender"}
 
@@ -82,16 +123,17 @@ async def send_report_ready(rid: str) -> dict:
     company = meta.get("company_name") or "yritys"
     version = _report_version(run)
     safe = _safe_filename(f"{company}-{version}")
-    attachments = []
 
     try:
         pdf_path = await asyncio.to_thread(report.generate_pdf, rid, report_json)
-        content = base64.b64encode(Path(pdf_path).read_bytes()).decode("ascii")
-        attachments.append({"filename": f"{safe}.pdf", "content": content})
+        attachment_data = Path(pdf_path).read_bytes()
+        attachment_name = f"{safe}.pdf"
+        attachment_type = ("application", "pdf")
     except Exception:
         html_path = await asyncio.to_thread(report.generate_html, rid, report_json)
-        content = base64.b64encode(Path(html_path).read_bytes()).decode("ascii")
-        attachments.append({"filename": f"{safe}.html", "content": content})
+        attachment_data = Path(html_path).read_bytes()
+        attachment_name = f"{safe}.html"
+        attachment_type = ("text", "html")
 
     link = _report_link(rid, run)
 
@@ -113,27 +155,56 @@ async def send_report_ready(rid: str) -> dict:
         f"Hei,\n\n{company} -arvonmaaritysraportin {version} on valmis. "
         f"Raportti on taman viestin liitteena.{link_text}\n\nYstavallisin terveisin,\nValuatum"
     )
-    payload = {
-        "from": sender,
-        "to": [to],
-        "subject": subject,
-        "html": html_body,
-        "text": text_body,
-        "attachments": attachments,
-        "tags": [{"name": "run_id", "value": rid[:32]}],
-    }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            RESEND_URL,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-        )
-    if resp.status_code >= 400:
-        return {"sent": False, "reason": "provider-error", "status_code": resp.status_code,
-                "detail": resp.text[:500]}
+    message = EmailMessage(policy=policy.SMTP)
+    message["From"] = sender
+    message["To"] = to
+    message["Subject"] = subject
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
+    message.add_attachment(
+        attachment_data,
+        maintype=attachment_type[0],
+        subtype=attachment_type[1],
+        filename=attachment_name,
+    )
+
     try:
-        data = resp.json()
-    except Exception:
-        data = {}
-    return {"sent": True, "provider": "resend", "id": data.get("id")}
+        response = await asyncio.to_thread(
+            _send_with_ses,
+            region=region,
+            sender=sender,
+            recipient=to,
+            raw_message=message.as_bytes(),
+            run_id=rid,
+        )
+    except NoCredentialsError:
+        return {
+            "sent": False,
+            "reason": "missing-aws-credentials",
+            "detail": "AWS credentials were not available",
+        }
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        return {
+            "sent": False,
+            "reason": "provider-error",
+            "status_code": (
+                exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            ),
+            "code": error.get("Code"),
+            "detail": str(error.get("Message") or "")[:500],
+        }
+    except BotoCoreError as exc:
+        return {
+            "sent": False,
+            "reason": "provider-error",
+            "status_code": None,
+            "detail": type(exc).__name__,
+        }
+
+    return {
+        "sent": True,
+        "provider": "ses",
+        "id": response.get("MessageId"),
+    }

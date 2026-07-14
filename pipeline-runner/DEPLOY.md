@@ -40,12 +40,52 @@ Supabase provides the Postgres database; Vercel serves the static UI.
    ALLOWED_ORIGINS         = https://<your-vercel-app>.vercel.app
    ```
    Railway injects `PORT` automatically; the container honors it.
+
+   Finished-report email delivery (Amazon SES) adds these variables:
+   ```
+   REPORT_EMAIL_ENABLED    = 1        # set 0 for an immediate delivery kill switch
+   REPORT_EMAIL_FROM       = Valuatum <reports@yourdomain.com>
+   CLIENT_SITE_URL         = https://<your-vercel-app>.vercel.app
+   AWS_REGION              = eu-north-1
+   AWS_ACCESS_KEY_ID       = ...
+   AWS_SECRET_ACCESS_KEY   = ...
+   AWS_SESSION_TOKEN       = ...      # temporary credentials only; omit otherwise
+   ```
+   Keep AWS credentials server-side only — never expose them through Vercel or a
+   `VITE_` variable. See **SES prerequisites** below before enabling delivery.
 4. Service → **Settings** → **Generate Domain**. That URL (e.g.
    `https://valu-pipeline.up.railway.app`) is your backend.
 5. Check `…/api/health` → `{"ok":true,"auth":true}`.
 
 `APP_TOKEN` is the shared password the whole team uses. Keep it secret — anyone
 with it can spend the OpenRouter/Valuatum tokens. Rotate by changing the var.
+
+### SES prerequisites (report email)
+
+Finished reports are delivered through Amazon SES. Before setting
+`REPORT_EMAIL_ENABLED=1`:
+
+1. Set the correct SES region and use it for `AWS_REGION`.
+2. Use a From address under the verified domain for `REPORT_EMAIL_FROM`.
+3. Create a least-privilege IAM.
+4. Store its credentials only in service variables.
+
+Suggested minimum IAM policy (correct the ARN for your real account and region;
+do not broaden permissions without explaining why the identity-scoped policy is
+insufficient):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ses:SendEmail",
+      "Resource": "arn:aws:ses:REGION:ACCOUNT_ID:identity/example.com"
+    }
+  ]
+}
+```
 
 ## 3. Frontend — Vercel
 
