@@ -19,6 +19,8 @@ from pathlib import Path
 
 import httpx
 
+from . import estimate_trigger
+
 KIT = Path(__file__).resolve().parent.parent / "valuatum_kit"
 FETCH = KIT / "fetch_modeldata.py"
 EXPORT = KIT / "export_modeldata_json.py"
@@ -256,6 +258,10 @@ async def export_stream(
     base = tmp / "base.json"
     complete = tmp / "complete.json"
     try:
+        if estimate_trigger.is_configured():
+            yield {"step": "estimates", "label": "Generating estimates"}
+            await estimate_trigger.trigger_and_wait(fid)
+
         # 1. modeldata → base JSON
         yield {"step": "fetch", "label": "Fetching modeldata"}
         cmd = [

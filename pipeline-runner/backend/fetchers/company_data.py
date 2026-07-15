@@ -22,6 +22,7 @@ async def fetch_company_data(identifier: str, params: dict) -> dict:
         )
     company_name = params.get("company_name") or f"Yhtiö {fid}"
     data = None
+    warnings = []
     async for ev in valuatum.export_stream(
         company_name=company_name,
         fid=fid,
@@ -37,6 +38,9 @@ async def fetch_company_data(identifier: str, params: dict) -> dict:
             raise RuntimeError(ev.get("message") or "Valuatum-haku epäonnistui")
         if ev.get("step") == "ready":
             data = ev.get("json")
+            warnings = list(ev.get("warnings") or [])
     if data is None:
         raise RuntimeError("Valuatum-haku ei tuottanut dataa (ei 'ready'-tapahtumaa)")
+    if warnings:
+        data["fetch_warnings"] = warnings
     return data
