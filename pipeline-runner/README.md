@@ -63,9 +63,11 @@ VALU_MCP_PROFINDER_URL=...      # suositeltu (täydet actualsit + credit risk)
 ```
 
 Kun `VALU_ESTIMATE_GENERATION_URL` on asetettu, backend generoi ennusteet aina
-ennen modeldata-hakua ja odottaa jobin valmistumista. Generointivirhe tai viiden
-minuutin aikakatkaisu pysäyttää Stage 0:n ennen maksullisia LLM-vaiheita. URL:n
-puuttuminen ohittaa askeleen paikallista kehitystä ja hätäpalautusta varten.
+ennen modeldata-hakua, odottaa jobin valmistumista ja hakee modeldatan samasta
+REST-ympäristöstä. Generointivirhe tai viiden minuutin aikakatkaisu pysäyttää
+Stage 0:n ennen maksullisia LLM-vaiheita. URL:n puuttuminen ohittaa askeleen ja
+säilyttää tuotannon modeldata-oletuksen paikallista kehitystä ja hätäpalautusta
+varten.
 
 - Oletukset `actuals=5`, `estimates=10` (Advanced-osiossa muutettavissa).
 - Peruskäytössä company_code johdetaan modeldata-vastauksen y-tunnuksesta.

@@ -6,6 +6,7 @@ import pytest
 
 from app import estimate_trigger, runner, valuatum
 from fetchers import company_data
+from valuatum_kit import fetch_modeldata
 
 
 def _run(coro):
@@ -133,6 +134,20 @@ def test_trigger_is_noop_when_url_is_unset(monkeypatch):
     monkeypatch.delenv("VALUATUM_TOKEN", raising=False)
     assert estimate_trigger.is_configured() is False
     _run(estimate_trigger.trigger_and_wait(42))
+
+
+def test_modeldata_uses_estimate_generation_environment(monkeypatch):
+    monkeypatch.setenv(
+        "VALU_ESTIMATE_GENERATION_URL", "https://profindertest.valuatum.com/rest/"
+    )
+    assert fetch_modeldata.modeldata_url() == (
+        "https://profindertest.valuatum.com/rest/modeldata"
+    )
+
+
+def test_modeldata_keeps_production_default_when_generation_is_disabled(monkeypatch):
+    monkeypatch.delenv("VALU_ESTIMATE_GENERATION_URL", raising=False)
+    assert fetch_modeldata.modeldata_url() == fetch_modeldata.DEFAULT_MODELDATA_URL
 
 
 def _minimal_modeldata():
