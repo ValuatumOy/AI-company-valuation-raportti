@@ -6,7 +6,7 @@ import pytest
 
 from app import estimate_trigger, runner, valuatum
 from fetchers import company_data
-from valuatum_kit import fetch_modeldata
+from valuatum_kit import config as valuatum_config, fetch_modeldata
 
 
 def _run(coro):
@@ -14,7 +14,7 @@ def _run(coro):
 
 
 def _configure(monkeypatch):
-    monkeypatch.setenv("VALU_ESTIMATE_GENERATION_URL", "https://valu.test/rest/")
+    monkeypatch.setenv("VALUATUM_API_BASE_URL", "https://valu.test/rest/")
     monkeypatch.setenv("VALUATUM_TOKEN", "test-token")
     monkeypatch.setattr(estimate_trigger, "POLL_INTERVAL_SECONDS", 0.0)
 
@@ -129,25 +129,35 @@ def test_trigger_rejects_mismatched_poll_job_id(monkeypatch):
         _run(estimate_trigger.trigger_and_wait(42))
 
 
-def test_trigger_is_noop_when_url_is_unset(monkeypatch):
-    monkeypatch.delenv("VALU_ESTIMATE_GENERATION_URL", raising=False)
-    monkeypatch.delenv("VALUATUM_TOKEN", raising=False)
-    assert estimate_trigger.is_configured() is False
+def test_trigger_uses_test_environment_when_url_is_unset(monkeypatch):
+    monkeypatch.delenv("VALUATUM_API_BASE_URL", raising=False)
+    monkeypatch.setenv("VALUATUM_TOKEN", "test-token")
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, json={"jobId": 24, "status": "OK"})
+
+    _mock_client(monkeypatch, handler)
     _run(estimate_trigger.trigger_and_wait(42))
+
+    assert calls == [
+        "https://profindertest.valuatum.com/rest/estimates/generate/42"
+    ]
 
 
 def test_modeldata_uses_estimate_generation_environment(monkeypatch):
     monkeypatch.setenv(
-        "VALU_ESTIMATE_GENERATION_URL", "https://profindertest.valuatum.com/rest/"
+        "VALUATUM_API_BASE_URL", "https://valu.test/rest/"
     )
+    assert fetch_modeldata.modeldata_url() == "https://valu.test/rest/modeldata"
+
+
+def test_modeldata_defaults_to_test_environment(monkeypatch):
+    monkeypatch.delenv("VALUATUM_API_BASE_URL", raising=False)
     assert fetch_modeldata.modeldata_url() == (
-        "https://profindertest.valuatum.com/rest/modeldata"
+        valuatum_config.DEFAULT_VALUATUM_API_BASE_URL + "/modeldata"
     )
-
-
-def test_modeldata_keeps_production_default_when_generation_is_disabled(monkeypatch):
-    monkeypatch.delenv("VALU_ESTIMATE_GENERATION_URL", raising=False)
-    assert fetch_modeldata.modeldata_url() == fetch_modeldata.DEFAULT_MODELDATA_URL
 
 
 def _minimal_modeldata():
@@ -180,8 +190,8 @@ def _inline_export_threads(monkeypatch):
 def test_export_stream_generates_before_modeldata(monkeypatch):
     _inline_export_threads(monkeypatch)
     monkeypatch.setenv("VALUATUM_TOKEN", "tok")
-    monkeypatch.setenv("VALU_ESTIMATE_GENERATION_URL", "https://valu.test/rest")
-    monkeypatch.delenv("VALU_MCP_PROFINDER_URL", raising=False)
+    monkeypatch.setenv("VALUATUM_API_BASE_URL", "https://valu.test/rest")
+    monkeypatch.delenv("VALUATUM_MCP_URL", raising=False)
     order = []
 
     async def fake_trigger(fid):
@@ -211,7 +221,7 @@ async def _async_value(value):
 def test_export_stream_hard_fails_before_modeldata(monkeypatch):
     _inline_export_threads(monkeypatch)
     monkeypatch.setenv("VALUATUM_TOKEN", "tok")
-    monkeypatch.setenv("VALU_ESTIMATE_GENERATION_URL", "https://valu.test/rest")
+    monkeypatch.setenv("VALUATUM_API_BASE_URL", "https://valu.test/rest")
 
     async def fail_trigger(fid):
         raise estimate_trigger.EstimateGenerationError("ValuBuild testivirhe")
@@ -229,24 +239,31 @@ def test_export_stream_hard_fails_before_modeldata(monkeypatch):
     assert "ValuBuild testivirhe" in events[-1]["message"]
 
 
-def test_export_stream_keeps_old_path_when_url_is_unset(monkeypatch):
+def test_export_stream_generates_with_default_api_when_url_is_unset(monkeypatch):
     _inline_export_threads(monkeypatch)
     monkeypatch.setenv("VALUATUM_TOKEN", "tok")
-    monkeypatch.delenv("VALU_ESTIMATE_GENERATION_URL", raising=False)
-    monkeypatch.delenv("VALU_MCP_PROFINDER_URL", raising=False)
+    monkeypatch.delenv("VALUATUM_API_BASE_URL", raising=False)
+    monkeypatch.delenv("VALUATUM_MCP_URL", raising=False)
+    order = []
+
+    async def fake_trigger(fid):
+        order.append(("trigger", fid))
 
     def fake_run(cmd):
+        order.append(("modeldata", int(cmd[cmd.index("--fid") + 1])))
         output = cmd[cmd.index("--output") + 1]
         with open(output, "w", encoding="utf-8") as handle:
             json.dump(_minimal_modeldata(), handle)
         return 0, "", ""
 
+    monkeypatch.setattr(valuatum.estimate_trigger, "trigger_and_wait", fake_trigger)
     monkeypatch.setattr(valuatum, "_run", fake_run)
     monkeypatch.setattr(valuatum, "lookup_company_metadata", lambda **kwargs: _async_value({}))
 
     events = _run(_collect_export_events())
 
-    assert [event["step"] for event in events] == ["fetch", "ready"]
+    assert [event["step"] for event in events] == ["estimates", "fetch", "ready"]
+    assert order == [("trigger", 42), ("modeldata", 42)]
 
 
 def test_fetch_company_data_preserves_ready_warnings(monkeypatch):

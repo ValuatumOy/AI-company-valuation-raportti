@@ -3,7 +3,7 @@
 
 Steps:
 1. Fetch valuation modeldata by fid and map it to the structured JSON schema.
-2. If VALU_MCP_PROFINDER_URL is set, backfill detailed actual fields from
+2. If VALUATUM_MCP_URL is set, backfill detailed actual fields from
    Profinder MCP statement tools.
 
 This script uses only the Python standard library.
@@ -17,6 +17,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+try:
+    from .config import mcp_url
+except ImportError:  # Direct script execution.
+    from config import mcp_url
 
 
 ROOT = Path(__file__).resolve().parent
@@ -77,7 +82,7 @@ def main() -> None:
     ]
     run(export_cmd)
 
-    if os.environ.get("VALU_MCP_PROFINDER_URL"):
+    if mcp_url():
         backfill_cmd = [
             sys.executable,
             str(BACKFILL_SCRIPT),
@@ -93,7 +98,7 @@ def main() -> None:
         run(backfill_cmd)
     else:
         shutil.copyfile(base_json, final_json)
-        print("VALU_MCP_PROFINDER_URL not set; skipped Profinder backfill.")
+        print("VALUATUM_MCP_URL not set; skipped Profinder backfill.")
 
     print(f"Wrote {final_json}")
 

@@ -18,7 +18,7 @@ export function ValuatumExport({
 }) {
   const [config, setConfig] = useState<{
     token: boolean;
-    profinder: boolean;
+    mcp: boolean;
     kit: boolean;
   } | null>(null);
   const [name, setName] = useState("");
@@ -117,9 +117,9 @@ export function ValuatumExport({
             :stä — haku ei toimi ilman sitä.
           </div>
         )}
-        {config && config.token && !config.profinder && (
+        {config && config.token && !config.mcp && (
           <div className="text-xs text-neutral-400 mb-3">
-            VALU_MCP_PROFINDER_URL ei asetettu — actuals-backfill ohitetaan.
+            VALUATUM_MCP_URL ei asetettu — actuals-backfill ohitetaan.
           </div>
         )}
 

@@ -1,8 +1,7 @@
-"""Trigger ValuBuild estimate generation and wait for its persistent job.
+"""Trigger estimate generation and wait for its persistent job.
 
-The integration is deliberately a hard gate when configured: modeldata must
-not be fetched until ValuBuild has persisted fresh estimates. Leaving
-VALU_ESTIMATE_GENERATION_URL unset keeps the old development/emergency path.
+The integration is a hard gate: modeldata must not be fetched until Valuatum
+has persisted fresh estimates. The REST API defaults to profindertest.
 """
 import asyncio
 import os
@@ -10,6 +9,8 @@ import time
 from typing import Any
 
 import httpx
+
+from valuatum_kit.config import api_base_url
 
 
 POLL_INTERVAL_SECONDS = 10.0
@@ -19,10 +20,6 @@ REQUEST_TIMEOUT_SECONDS = 20.0
 
 class EstimateGenerationError(RuntimeError):
     """Estimate generation could not be completed safely."""
-
-
-def is_configured() -> bool:
-    return bool(os.environ.get("VALU_ESTIMATE_GENERATION_URL", "").strip())
 
 
 def _error_detail(response: httpx.Response) -> str:
@@ -57,13 +54,9 @@ def _job_id(payload: Any) -> int:
 async def trigger_and_wait(fid: int) -> None:
     """Start estimate generation for *fid* and return only after status OK.
 
-    If the integration URL is not configured, this is a no-op. Every failure
-    is normalized to EstimateGenerationError so stage 0 can stop before any
-    paid LLM stage starts.
+    Every failure is normalized to EstimateGenerationError so stage 0 can
+    stop before any paid LLM stage starts.
     """
-    base_url = os.environ.get("VALU_ESTIMATE_GENERATION_URL", "").strip()
-    if not base_url:
-        return
     if fid <= 0:
         raise EstimateGenerationError("Ennustegeneroinnin FID:n pitää olla positiivinen.")
 
@@ -73,7 +66,7 @@ async def trigger_and_wait(fid: int) -> None:
             "VALUATUM_TOKEN puuttuu, joten ennustegenerointia ei voida käynnistää."
         )
 
-    base_url = base_url.rstrip("/")
+    base_url = api_base_url()
     headers = {"accept": "application/json", "authorization": f"Bearer {token}"}
     deadline = time.monotonic() + TIMEOUT_SECONDS
 

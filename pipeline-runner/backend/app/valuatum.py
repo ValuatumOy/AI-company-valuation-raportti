@@ -4,7 +4,7 @@ company modeldata JSON (the FAKTAT input_data for Stage 0).
 Flow (matches valuatum-json-export-kit):
   1. /rest/modeldata by fid  → DCF / WACC / EVA / forecasts  (export script)
   2. Profinder MCP backfill by company_code → historical actuals
-Secrets come from env only: VALUATUM_TOKEN, VALU_MCP_PROFINDER_URL.
+Secrets come from env only: VALUATUM_TOKEN, VALUATUM_MCP_URL.
 Nulls are preserved; nothing is invented.
 """
 import asyncio
@@ -20,19 +20,22 @@ from pathlib import Path
 import httpx
 
 from . import estimate_trigger
+from valuatum_kit.config import api_base_url, mcp_url
 
 KIT = Path(__file__).resolve().parent.parent / "valuatum_kit"
 FETCH = KIT / "fetch_modeldata.py"
 EXPORT = KIT / "export_modeldata_json.py"
 BACKFILL = KIT / "backfill_modeldata_from_profinder.py"
 
-COMPANY_URL = "https://profinder.valuatum.com/rest/company"
-
 REQUIRED_KEYS = [
     "meta", "headcount", "actuals", "forecast", "forecast_parameters",
     "valuation_engine", "key_ratios", "credit_risk", "peers",
     "client_reported_signals", "flags",
 ]
+
+
+def company_url() -> str:
+    return api_base_url() + "/company"
 
 
 def _slug(value: str) -> str:
@@ -111,7 +114,7 @@ async def _company_rows(param: str, value: str) -> list[dict]:
         raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.get(
-            COMPANY_URL,
+            company_url(),
             params={param: value},
             headers={"accept": "application/json", "authorization": f"Bearer {token}"},
         )
@@ -258,9 +261,8 @@ async def export_stream(
     base = tmp / "base.json"
     complete = tmp / "complete.json"
     try:
-        if estimate_trigger.is_configured():
-            yield {"step": "estimates", "label": "Generating estimates"}
-            await estimate_trigger.trigger_and_wait(fid)
+        yield {"step": "estimates", "label": "Generating estimates"}
+        await estimate_trigger.trigger_and_wait(fid)
 
         # 1. modeldata → base JSON
         yield {"step": "fetch", "label": "Fetching modeldata"}
@@ -282,7 +284,7 @@ async def export_stream(
 
         # 2. Profinder backfill → complete JSON
         company_code = _derive_company_code(base_data, company_code_override)
-        profinder = os.environ.get("VALU_MCP_PROFINDER_URL")
+        profinder = mcp_url()
         if profinder and company_code:
             yield {"step": "backfill", "label": "Backfilling actuals",
                    "company_code": company_code}
@@ -304,7 +306,7 @@ async def export_stream(
             shutil.copyfile(base, complete)
             if not profinder:
                 warnings.append(
-                    "VALU_MCP_PROFINDER_URL ei asetettu — actuals-backfill "
+                    "VALUATUM_MCP_URL ei asetettu — actuals-backfill "
                     "ohitettu (historialliset kentät voivat olla harvoja)."
                 )
             elif not company_code:

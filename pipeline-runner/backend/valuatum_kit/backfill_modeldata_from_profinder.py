@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+try:
+    from .config import mcp_url
+except ImportError:  # Direct script execution.
+    from config import mcp_url
 
 
 def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -155,9 +159,9 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
 
-    url = os.environ.get("VALU_MCP_PROFINDER_URL")
+    url = mcp_url()
     if not url:
-        raise SystemExit("Set VALU_MCP_PROFINDER_URL.")
+        raise SystemExit("Set VALUATUM_MCP_URL.")
 
     payload = json.loads(args.input.read_text(encoding="utf-8"))
     years = [int(year) for year in payload["actuals"]["years"]]

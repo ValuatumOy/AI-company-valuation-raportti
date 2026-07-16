@@ -36,27 +36,22 @@ import sys
 import urllib.error
 import urllib.request
 
+try:
+    from .config import api_base_url
+except ImportError:  # Direct script execution.
+    from config import api_base_url
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-
-DEFAULT_MODELDATA_URL = "https://profinder.valuatum.com/rest/modeldata"
 
 # Prefer the VALUATUM_TOKEN env var or --token at runtime.
 TOKEN = ""
 
 
 def modeldata_url():
-    """Use the same ValuBuild environment as estimate generation.
-
-    Production remains the default when estimate generation is disabled. This
-    prevents local/test runs from generating estimates in profindertest and
-    then accidentally reading the same FID's modeldata from production.
-    """
-    estimate_base = os.environ.get("VALU_ESTIMATE_GENERATION_URL", "").strip()
-    if estimate_base:
-        return estimate_base.rstrip("/") + "/modeldata"
-    return DEFAULT_MODELDATA_URL
+    """Use the same REST environment as estimate generation."""
+    return api_base_url() + "/modeldata"
 
 
 # ---------------------------------------------------------------------------
