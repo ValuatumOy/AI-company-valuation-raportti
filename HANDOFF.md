@@ -1,4 +1,46 @@
-# Handoff — 2026-07-11 (read this first)
+# Handoff — 2026-07-16 (read this first)
+
+## 2026-07-16 — User-set scenario probabilities + pessimistic floor fix (a5b6c4e backend, 82844cb client, LIVE + reseeded)
+
+Backend HEAD a5b6c4e deployed (build `2026-07-16-scenario-probabilities`) +
+reseeded (7 stages, live pipeline confirmed carrying all three new prompt
+strings). Client 82844cb pushed (Vercel). 168 tests pass.
+
+- **Pessimistic scenario floor fix (singlewriter.txt):** the prompt was
+  effectively hardcoding owner value to 0 ("Omistaja-arvo 0 tEUR tai lähellä
+  sitä") — 27/28 stored runs came out 0 (only Supercell nonzero). Reframed as
+  a liquidation/realisation value: cash (full) + receivables + realizable
+  assets at a haircut − all liabilities; the 0 floor applies ONLY when that is
+  genuinely negative, not as a default for a healthy company with cash. Balance
+  items are already in input_data so the writer computes it directly.
+- **Profile rename:** "Tappiollinen käännekohde" → "Käännettä hakeva
+  tappiollinen yhtiö" (clearer). Only occurrence was singlewriter.txt.
+- **User-set scenario probabilities (the main feature):** the three scenario
+  probabilities were AI-picked from 3 fixed profiles (kept — fixed profiles are
+  correct: probability is the report's most uncertain number, free AI guessing
+  would make the headline value swing per-run). Added an OPTIONAL user override
+  on the round-2 form. Empty = AI picks the profile as before; filled must sum
+  to 100. Design: `ScenarioProbabilities` model (sum=100 validated) →
+  Round2In.scenario_probabilities → params → runner builds a
+  `{{probability_override}}` directive → singlewriter.txt Todennäköisyydet
+  section honours it instead of picking a profile. Threaded through the paid
+  round3+ path too (new `pending_rounds.scenario_probabilities` column survives
+  the Stripe redirect). Three optional percent inputs added to BOTH round-2
+  forms: admin `ClarifyPanel.tsx` and client `ExpertApp.tsx` inline panel.
+- **This is OUR-system UX, not an AI/report-quality fix.** It's the light
+  half of Esa's "let the user steer the numbers" ask. The HEAVY half —
+  letting the user rewrite the revenue/estimate forecasts (Valuatum's own model
+  numbers, e.g. the absurd 2026→2030 revenue decline) — is NOT done: it needs
+  the Valuatum "change estimates" channel wired up, a separate larger work item.
+  Question still open for Sami: is that estimate channel usable for
+  user-directed inputs (not just consensus/AI numbers)?
+
+- Files: backend models.py/runner.py/main.py/store.py/db.py + prompts/
+  singlewriter.txt + test_report_pipeline.py; admin frontend api.ts/App.tsx/
+  components/ClarifyPanel.tsx; client repo src/expert/expertApi.ts + ExpertApp.tsx.
+- Verify E2E (not done — needs a paid round-2 run, skipped per no-prod-runs
+  rule): generate round 1, open round-2 form, set e.g. 30/50/20, confirm the
+  report §11 uses exactly those and says "käyttäjän asettamat".
 
 ## 2026-07-11 — Roadmap steps 3–7 executed (6e2b77a…b8497d8, LIVE + reseeded, all 5 delivered RIDs verified)
 
