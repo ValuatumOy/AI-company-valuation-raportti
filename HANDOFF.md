@@ -697,8 +697,8 @@ it end-to-end has **NOT** been done — see "Pick up here".
 **Backend (`AI-company-valuation-raportti`, commit `7e419b8` + latest continuation commit):**
 - **New `GET /api/company-search?q=...`** (`app/valuatum.py:search_company`,
   wired in `app/main.py`) resolves a company name or Finnish y-tunnus to
-  Valuatum FID(s) via the real profinder REST API
-  (`https://profinder.valuatum.com/rest/company`, same `VALUATUM_TOKEN` auth
+  Valuatum FID(s) via the configured Valuatum REST API
+  (`{VALUATUM_API_BASE_URL}/company`, same `VALUATUM_TOKEN` auth
   as the existing `/rest/modeldata` calls in `valuatum_kit/fetch_modeldata.py`).
   This is what unblocks self-serve for ANY company — `POST
   /api/expert/generate` already accepted any `fid`; the pre-fetched-company
@@ -911,7 +911,7 @@ key `valuation_engine.dcf.bridge`.
   the FID blocker. Conditional path: manual peer y-tunnus list → financials
   fetchable TODAY via Profinder MCP statement tools (~100 lines / 3 files,
   sketch in workflow output). Zero-code first step: JSON-RPC tools/list
-  probe against VALU_MCP_PROFINDER_URL (secret on Railway only) to see if a
+  probe against VALUATUM_MCP_URL (secret on Railway only) to see if a
   search tool already exists. Else → Valuatum tech team ask.
 - **Reverse valuation AUDITED, no overclaim:** prompt implements a real
   crude calc (EV × WACC → required FCF vs achieved) but only when a signal

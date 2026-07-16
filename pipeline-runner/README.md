@@ -52,14 +52,25 @@ Stage 0:n input_dataksi ("→ Käytä Stage 0 input_datana").
 
 Backend ajaa vendoroidun kitin (`backend/valuatum_kit/`) kahdessa vaiheessa:
 1. `/rest/modeldata` fid:llä → DCF / WACC / EVA / forecasts.
-2. Profinder MCP backfill company_code:lla → historialliset actualsit.
+2. MCP-backfill company_code:lla → historialliset actualsit.
 
 Salaisuudet vain backendin `.env`:ssä (ei koskaan frontendiin):
 
 ```bash
 VALUATUM_TOKEN=...              # pakollinen
-VALU_MCP_PROFINDER_URL=...      # suositeltu (täydet actualsit + credit risk)
+VALUATUM_API_BASE_URL=https://profindertest.valuatum.com/rest
+VALUATUM_MCP_URL=...            # valinnainen; API-avain sisältyy URL:iin
 ```
+
+`VALUATUM_API_BASE_URL` on yhteinen REST-pohja yrityshaulle, ennusteiden
+generoinnille ja modeldatalle. Jos muuttuja puuttuu tai on tyhjä, oletuksena on
+`https://profindertest.valuatum.com/rest`. Backend generoi ennusteet ennen
+modeldata-hakua ja odottaa jobin valmistumista. Generointivirhe tai viiden
+minuutin aikakatkaisu pysäyttää Stage 0:n ennen maksullisia LLM-vaiheita.
+
+`VALUATUM_MCP_URL` on erillinen tekninen MCP-osoite, jonka API-avain sisältyy
+URL:iin. Sillä ei siksi ole oletusarvoa. Kun se asetetaan, sen ja
+`VALUATUM_API_BASE_URL`:n täytyy osoittaa samaan Valuatum-dataympäristöön.
 
 - Oletukset `actuals=5`, `estimates=10` (Advanced-osiossa muutettavissa).
 - Peruskäytössä company_code johdetaan modeldata-vastauksen y-tunnuksesta.

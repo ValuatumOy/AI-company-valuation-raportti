@@ -10,7 +10,7 @@ Supabase provides the Postgres database; Vercel serves the static UI.
                       ▼
                     Railway (FastAPI: validators, node+chromium, SSE)
                       │  DATABASE_URL ─────▶ Supabase Postgres (persistent, multi-safe)
-                      │  OPENROUTER_API_KEY / VALUATUM_TOKEN / VALU_MCP_PROFINDER_URL  (server-side only)
+                      │  OPENROUTER_API_KEY / VALUATUM_TOKEN / VALUATUM_MCP_URL  (server-side only)
 ```
 
 ## 1. Supabase — Postgres
@@ -36,9 +36,13 @@ Supabase provides the Postgres database; Vercel serves the static UI.
    APP_TOKEN               = <run: openssl rand -hex 24>
    OPENROUTER_API_KEY      = sk-or-...
    VALUATUM_TOKEN          = ...
-   VALU_MCP_PROFINDER_URL  = https://...
+   VALUATUM_API_BASE_URL   = https://profindertest.valuatum.com/rest
+   VALUATUM_MCP_URL        = https://...<API key included in URL>
    ALLOWED_ORIGINS         = https://<your-vercel-app>.vercel.app
    ```
+   `VALUATUM_API_BASE_URL` defaults to profindertest if omitted. The MCP URL
+   has no default because it contains an API key. When MCP is configured, both
+   URLs must point to the same Valuatum data environment.
    Railway injects `PORT` automatically; the container honors it.
 
    Finished-report email delivery (Amazon SES) adds these variables:

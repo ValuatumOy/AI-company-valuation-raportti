@@ -19,6 +19,11 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from .config import mcp_url
+except ImportError:  # Direct script execution.
+    from config import mcp_url
+
 
 EXTRA_VARS = [
     "cr_employees",
@@ -164,7 +169,7 @@ def coalesce(*values: Any) -> Any:
 
 
 def mcp_credit_risk(company_code: str, period_type: str = "annual", limit: int = 10) -> dict[str, Any] | None:
-    url = os.environ.get("VALU_MCP_PROFINDER_URL")
+    url = mcp_url()
     if not url:
         return None
 

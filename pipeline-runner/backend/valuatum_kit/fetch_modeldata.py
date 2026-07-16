@@ -36,14 +36,23 @@ import sys
 import urllib.error
 import urllib.request
 
+try:
+    from .config import api_base_url
+except ImportError:  # Direct script execution.
+    from config import api_base_url
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-MODELDATA_URL = "https://profinder.valuatum.com/rest/modeldata"
-
 # Prefer the VALUATUM_TOKEN env var or --token at runtime.
 TOKEN = ""
+
+
+def modeldata_url():
+    """Use the same REST environment as estimate generation."""
+    return api_base_url() + "/modeldata"
+
 
 # ---------------------------------------------------------------------------
 # Table definitions — (CVSVTABLEID, display title, [rows]).
@@ -285,7 +294,7 @@ def fetch_modeldata(fid, actuals, estimates, token):
         "includeEstimates": True,
     }
     req = urllib.request.Request(
-        MODELDATA_URL,
+        modeldata_url(),
         data=json.dumps(body).encode("utf-8"),
         method="POST",
         headers={

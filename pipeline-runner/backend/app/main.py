@@ -22,6 +22,7 @@ from .models import (  # noqa: E402
     ValidateIn, ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
+from valuatum_kit.config import mcp_url  # noqa: E402
 
 
 @asynccontextmanager
@@ -277,7 +278,7 @@ async def fetch_company(body: FetchIn):
 def valuatum_config():
     return {
         "token": bool(os.getenv("VALUATUM_TOKEN")),
-        "profinder": bool(os.getenv("VALU_MCP_PROFINDER_URL")),
+        "mcp": bool(mcp_url()),
         "kit": valuatum.EXPORT.exists(),
     }
 

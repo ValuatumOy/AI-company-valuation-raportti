@@ -2205,6 +2205,7 @@ def test_search_company_maps_models_to_fid_candidates(monkeypatch):
     from app import valuatum
 
     monkeypatch.setenv("VALUATUM_TOKEN", "tok")
+    monkeypatch.setenv("VALUATUM_API_BASE_URL", "https://valu.test/rest/")
 
     class FakeResponse:
         def raise_for_status(self):
@@ -2236,7 +2237,7 @@ def test_search_company_maps_models_to_fid_candidates(monkeypatch):
             return False
 
         async def get(self, url, params=None, headers=None):
-            assert url == valuatum.COMPANY_URL
+            assert url == "https://valu.test/rest/company"
             assert headers["authorization"] == "Bearer tok"
             return FakeResponse()
 
