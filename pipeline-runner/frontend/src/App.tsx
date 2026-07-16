@@ -281,7 +281,8 @@ export default function App() {
   async function startRound2(
     answers: { id: string; question: string; answer: string }[],
     freeText: string,
-    showOldNumbers: boolean
+    showOldNumbers: boolean,
+    scenarioProbabilities?: { pessimistic: number; base: number; optimistic: number }
   ) {
     if (!runId) return;
     setBusy(true);
@@ -294,6 +295,7 @@ export default function App() {
         clarifications: answers,
         clarifications_free_text: freeText,
         show_old_numbers: showOldNumbers,
+        scenario_probabilities: scenarioProbabilities,
       });
       setRunId(run_id); // the endpoint already started it server-side
       refreshRun(run_id);

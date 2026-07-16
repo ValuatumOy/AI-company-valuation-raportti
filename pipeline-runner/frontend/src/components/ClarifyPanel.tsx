@@ -13,15 +13,28 @@ export function ClarifyPanel({
   onSubmit: (
     answers: { id: string; question: string; answer: string }[],
     freeText: string,
-    showOldNumbers: boolean
+    showOldNumbers: boolean,
+    scenarioProbabilities?: { pessimistic: number; base: number; optimistic: number }
   ) => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [freeText, setFreeText] = useState("");
   const [showOldNumbers, setShowOldNumbers] = useState(false);
+  const [probs, setProbs] = useState({ pessimistic: "", base: "", optimistic: "" });
+  const probsFilled = [probs.pessimistic, probs.base, probs.optimistic].filter(
+    (v) => v.trim() !== ""
+  ).length;
+  const probsSum =
+    (parseInt(probs.pessimistic) || 0) +
+    (parseInt(probs.base) || 0) +
+    (parseInt(probs.optimistic) || 0);
+  const probsValid = probsFilled === 3 && probsSum === 100;
+  // Partial or non-100 entry is an error the user must fix or clear.
+  const probsError = probsFilled > 0 && !probsValid;
   const answered =
     Object.values(answers).filter((v) => v.trim()).length +
-    (freeText.trim() ? 1 : 0);
+    (freeText.trim() ? 1 : 0) +
+    (probsValid ? 1 : 0);
 
   return (
     <div className="px-4 py-3 border-b border-amber-900/50 bg-amber-950/20 shrink-0">
@@ -66,6 +79,44 @@ export function ClarifyPanel({
           </div>
         ))}
       </div>
+      <div className="mt-2 bg-neutral-900 border border-neutral-800 rounded p-2">
+        <div className="text-xs text-neutral-200 font-medium">
+          Skenaarioiden todennäköisyydet (valinnainen)
+        </div>
+        <div className="text-[10px] text-neutral-500 mt-0.5">
+          Jätä tyhjäksi = AI valitsee profiilin. Täytä kaikki kolme, summa 100 %.
+        </div>
+        <div className="flex items-center gap-2 mt-1.5">
+          {(
+            [
+              ["pessimistic", "Pessimistinen"],
+              ["base", "Konservatiivinen"],
+              ["optimistic", "Optimistinen"],
+            ] as const
+          ).map(([k, label]) => (
+            <label key={k} className="flex flex-col text-[10px] text-neutral-400">
+              {label}
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={5}
+                value={probs[k]}
+                onChange={(e) => setProbs((p) => ({ ...p, [k]: e.target.value }))}
+                disabled={busy}
+                placeholder="%"
+                className="mt-0.5 w-16 bg-neutral-950 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-200 disabled:opacity-50"
+              />
+            </label>
+          ))}
+          <span
+            className={`text-[10px] ${probsError ? "text-red-400" : "text-neutral-500"}`}
+          >
+            {probsFilled > 0 ? `Summa ${probsSum} %` : ""}
+            {probsError ? " — täytä kaikki kolme, summan oltava 100 %" : ""}
+          </span>
+        </div>
+      </div>
       <textarea
         value={freeText}
         onChange={(e) => setFreeText(e.target.value)}
@@ -86,10 +137,17 @@ export function ClarifyPanel({
                 }))
                 .filter((a) => a.answer),
               freeText.trim(),
-              showOldNumbers
+              showOldNumbers,
+              probsValid
+                ? {
+                    pessimistic: parseInt(probs.pessimistic),
+                    base: parseInt(probs.base),
+                    optimistic: parseInt(probs.optimistic),
+                  }
+                : undefined
             )
           }
-          disabled={busy || answered === 0}
+          disabled={busy || answered === 0 || probsError}
           className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold disabled:opacity-40"
         >
           Aja kierros 2 tarkennetuilla tiedoilla

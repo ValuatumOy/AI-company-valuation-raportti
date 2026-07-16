@@ -641,12 +641,13 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     new_rid = _start_refinement_round(
         rid, parent, body.clarifications, body.clarifications_free_text,
         show_old_numbers=body.show_old_numbers,
+        scenario_probabilities=body.scenario_probabilities,
     )
     return {"run_id": new_rid, "parent_run_id": rid}
 
 
 def _start_refinement_round(rid, parent, clarifications, clarifications_free_text,
-                            show_old_numbers=False) -> str:
+                            show_old_numbers=False, scenario_probabilities=None) -> str:
     # Maximal-preserve: hand the round the prior enrichment + assembled report
     # so it refines (keep the good, apply the fix) instead of regenerating blind.
     prev_enrichment = next(
@@ -662,6 +663,11 @@ def _start_refinement_round(rid, parent, clarifications, clarifications_free_tex
         "previous_enrichment": prev_enrichment,
         "previous_report": store.final_report_json(rid),
         "show_old_numbers": show_old_numbers,
+        "scenario_probabilities": (
+            scenario_probabilities.model_dump()
+            if hasattr(scenario_probabilities, "model_dump")
+            else scenario_probabilities
+        ),
         # Careful preserve-and-patch is an editing task, not creative writing —
         # use Opus for the round-2 writer whatever round 1's writer happens to be.
         "round2_writer_model": ROUND2_WRITER_MODEL,
@@ -687,7 +693,11 @@ async def round2_checkout(rid: str, body: Round2In, request: Request):
         raise HTTPException(503, "Lisäkierrosten maksut eivät ole vielä käytössä.")
     key = getattr(request.state, "access_key", None)
     token = store.create_pending_round(
-        rid, key, [c.model_dump() for c in body.clarifications], body.clarifications_free_text
+        rid, key, [c.model_dump() for c in body.clarifications], body.clarifications_free_text,
+        scenario_probabilities=(
+            body.scenario_probabilities.model_dump()
+            if body.scenario_probabilities else None
+        ),
     )
     site = (os.getenv("CLIENT_SITE_URL") or "").rstrip("/")
     key_q = f"&key={key}" if key else ""
@@ -730,6 +740,7 @@ async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
     new_rid = _start_refinement_round(
         rid, parent, pending["clarifications"], pending["clarifications_free_text"],
         show_old_numbers=body.show_old_numbers,
+        scenario_probabilities=pending.get("scenario_probabilities"),
     )
     return {"run_id": new_rid, "parent_run_id": rid}
 

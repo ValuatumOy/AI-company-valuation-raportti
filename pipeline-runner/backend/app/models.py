@@ -1,7 +1,7 @@
 """Pydantic v2 request/response schemas."""
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 DATA_FETCHER_MODEL = "__data_fetcher__"
 
@@ -81,6 +81,20 @@ class ClarificationAnswer(BaseModel):
     answer: str = Field(default="", max_length=4000)
 
 
+class ScenarioProbabilities(BaseModel):
+    """User-set scenario weights that override the AI's profile defaults.
+    Absent (None on Round2In) = AI picks the profile as usual."""
+    pessimistic: int = Field(ge=0, le=100)
+    base: int = Field(ge=0, le=100)
+    optimistic: int = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _sums_to_100(self):
+        if self.pessimistic + self.base + self.optimistic != 100:
+            raise ValueError("scenario probabilities must sum to 100")
+        return self
+
+
 class Round2In(BaseModel):
     clarifications: list[ClarificationAnswer] = Field(default_factory=list)
     clarifications_free_text: str = Field(default="", max_length=8000)
@@ -88,6 +102,9 @@ class Round2In(BaseModel):
     # wherever a number changed ("nousi 1 000 -> 3 270 tEUR"); when False (default)
     # it shows only the current numbers with no reference to the prior round.
     show_old_numbers: bool = False
+    # Optional user override of the three scenario probabilities. None = let the
+    # writer pick a profile default (singlewriter.txt "Todennäköisyydet").
+    scenario_probabilities: Optional[ScenarioProbabilities] = None
 
 
 class RedeemRoundIn(BaseModel):

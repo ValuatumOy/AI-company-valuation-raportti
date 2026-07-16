@@ -456,6 +456,20 @@ async def run_stages(run, stages, only=None, from_order=None):
         else "ÄLÄ mainitse edellisen kierroksen lukuja, niiden muutoksia tai "
              "vertailua aiempaan — esitä vain päivitetyt, ajantasaiset arvot."
     )
+    # Round-2 only: user-set scenario probabilities override the profile-based
+    # defaults the writer would otherwise pick (singlewriter.txt "Todennäköisyydet").
+    # Always set so {{probability_override}} never errors.
+    _probs = (params or {}).get("scenario_probabilities")
+    context["probability_override"] = (
+        "KÄYTTÄJÄN ASETTAMAT TODENNÄKÖISYYDET (ohittavat profiilin oletukset): "
+        f"pessimistinen {_probs['pessimistic']} %, konservatiivinen {_probs['base']} %, "
+        f"optimistinen {_probs['optimistic']} %. Käytä NÄITÄ tarkkoja lukuja "
+        "skenaariotaulukossa ja odotusarvon laskennassa — älä valitse profiilia. "
+        "Kerro raportissa, että todennäköisyydet ovat käyttäjän itse asettamat."
+        if isinstance(_probs, dict)
+        and all(k in _probs for k in ("pessimistic", "base", "optimistic"))
+        else "(Käyttäjä ei asettanut omia todennäköisyyksiä — valitse profiili normaalisti.)"
+    )
 
     # Round-2 only: swap the writer model (the highest-order LLM stage that
     # produces the report). Round 1 writes fresh with Fable; round 2's careful

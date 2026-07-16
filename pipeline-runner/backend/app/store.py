@@ -544,12 +544,15 @@ def create_paid_order(company, email, user_input, stripe_session_id, fid, access
 # metadata is too small to carry the clarification answers, so they're staged
 # here keyed by a token; Stripe metadata only carries the token.
 
-def create_pending_round(rid, access_key, clarifications, clarifications_free_text):
+def create_pending_round(rid, access_key, clarifications, clarifications_free_text,
+                         scenario_probabilities=None):
     token = _uuid()
     db.execute(
         "INSERT INTO pending_rounds(token,run_id,access_key,clarifications,"
-        "clarifications_free_text,consumed,created_at) VALUES(?,?,?,?,?,0,?)",
-        (token, rid, access_key, db.jdump(clarifications), clarifications_free_text, _now()),
+        "clarifications_free_text,scenario_probabilities,consumed,created_at) "
+        "VALUES(?,?,?,?,?,?,0,?)",
+        (token, rid, access_key, db.jdump(clarifications), clarifications_free_text,
+         db.jdump(scenario_probabilities) if scenario_probabilities else None, _now()),
     )
     return token
 
@@ -558,6 +561,7 @@ def get_pending_round(token):
     row = db.query_one("SELECT * FROM pending_rounds WHERE token=?", (token,))
     if row:
         row["clarifications"] = db.jload(row["clarifications"]) or []
+        row["scenario_probabilities"] = db.jload(row.get("scenario_probabilities"))
     return row
 
 

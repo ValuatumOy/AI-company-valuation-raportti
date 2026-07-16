@@ -2447,7 +2447,7 @@ def test_truncation_retry_respects_spend_cap(monkeypatch):
     res = asyncio.run(runner._execute_stage(
         stage2, {"input_data": "{}", "enrichment": "{}",
                  "previous_report": "", "user_input": "",
-                 "old_numbers_directive": ""},
+                 "old_numbers_directive": "", "probability_override": ""},
         None, None, None, rid=rid))
     assert calls["n"] == 1  # no second full-price attempt past the cap
     assert res["status"] == "error"
@@ -2458,7 +2458,7 @@ def test_truncation_retry_respects_spend_cap(monkeypatch):
     asyncio.run(runner._execute_stage(
         stage2, {"input_data": "{}", "enrichment": "{}",
                  "previous_report": "", "user_input": "",
-                 "old_numbers_directive": ""},
+                 "old_numbers_directive": "", "probability_override": ""},
         None, None, None, rid=rid2))
     assert calls["n"] == 2
 

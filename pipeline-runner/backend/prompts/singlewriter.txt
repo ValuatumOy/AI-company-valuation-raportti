@@ -104,7 +104,7 @@ Raportti sisältää aina kolme skenaariota — pessimistinen, konservatiivinen 
 
 ## Skenaarioiden sisältö
 
-* **Pessimistinen:** rahoitus katkeaa tai käänne ei toteudu. Omistaja-arvo 0 tEUR tai lähellä sitä; perustele konkreettisilla tase- ja kassaluvuilla — esimerkiksi ohut tai negatiivinen oman pääoman puskuri, kassan riittävyys tai rahoituksen katkeamisriski (toiminnan jatkuvuuden edellytys, going concern). Älä käytä abstraktia ilmaisua "going concern -paine"; nimeä aina se tase- tai kassatekijä, joka riskin aiheuttaa.
+* **Pessimistinen:** rahoitus katkeaa tai käänne ei toteudu — mutta omistaja-arvo **ei ole automaattisesti 0 tEUR**. Laske pessimistinen arvo realisointi-/likvidaatioarvona eli mitä yhtiöstä irtoaisi, jos toiminta lopetettaisiin heti ja omaisuus myytäisiin pakkomyyntinä: kassa täysimääräisenä + myyntisaamiset ja muu realisoitava omaisuus (koneet, kalusto, varasto, kiinteistöt) **haircutilla** (alennus kirjanpitoarvosta, koska pakkomyynti ei koskaan tuota täyttä arvoa) **− kaikki velat**. Käytä 0 tEUR -lattiaa vain, jos tämä erotus on aidosti negatiivinen — ei oletusarvona terveelle yhtiölle, jolla on kassaa ja realisoitavaa omaisuutta velkojen kattamiseksi. Tase-erät ovat jo input-datassa. Perustele haircut-oletukset ja lopputulos konkreettisilla tase- ja kassaluvuilla — nimeä aina se tase- tai kassatekijä, joka riskin aiheuttaa. Älä käytä abstraktia ilmaisua "going concern -paine".
 * **Konservatiivinen (base case):** toimitettu ennuste ja valuaatiomoottorin arvo toteutuvat. Arvo = painotettu base case -arvo (floorattuna). Tämä on ankkuri, ei optimistinen eikä pessimistinen.
 * **Optimistinen:** rakennetaan markkinalogiikasta, ei pelkästä tilinpäätöksestä — ks. seuraava lohko. Arvo perustuu eksplisiittisiin, näkyviin oletuksiin saavutettavasta markkinasta, siivusta ja kannattavuudesta.
 
@@ -120,9 +120,13 @@ Optimistinen skenaario on koko raportin suurin hallusinaatioriski. Noudata näit
 
 ## Todennäköisyydet
 
+Käyttäjän mahdollinen todennäköisyyksien yliajo: {{probability_override}}
+
+Jos yllä on käyttäjän asettamat todennäköisyydet, KÄYTÄ NIITÄ SELLAISENAAN äläkä valitse profiilia — hyppää suoraan sääntöihin (todennäköisyyksien on silti summauduttava sataan ja mainitse että ne ovat käyttäjän asettamat). Muuten valitse profiili alta.
+
 Todennäköisyys ei ole mallin vapaa arvio. Käytä profiiliin sidottuja **oletustodennäköisyyksiä**, jotka esitetään käyttäjän muokattavina:
 
-* **Tappiollinen käännekohde** (negatiivinen tai nollan lähellä oleva base case, käänne ennusteessa): pessimistinen 35 % / konservatiivinen 50 % / optimistinen 15 %.
+* **Käännettä hakeva tappiollinen yhtiö** (negatiivinen tai nollan lähellä oleva base case, käänne ennusteessa): pessimistinen 35 % / konservatiivinen 50 % / optimistinen 15 %.
 * **Vakaa voitollinen yhtiö** (positiivinen base case, vähintään kaksi voitollista vuotta kolmesta): pessimistinen 20 % / konservatiivinen 60 % / optimistinen 20 %.
 * **Volatiili tai vahvasti kasvuhakuinen teknologiayhtiö** (suuri liikevaihdon vaihtelu tai dokumentoitu skaalautuva malli): pessimistinen 35 % / konservatiivinen 40 % / optimistinen 25 %.
 
