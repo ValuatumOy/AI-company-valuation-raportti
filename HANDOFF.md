@@ -30,6 +30,18 @@ only an env var.
   U+2028/9) on home, content and blog pages — closes the `</script>` stored-XSS
   breakout. Verified: breakout string comes out fully `<`-escaped.
 
+- **Editor REMOVED (follow-up same session, client 360b7cc).** The M3 content
+  editor (/editor + /login + /api/editor/*) turned out to be fully filesystem-
+  based (sessions, drafts, publish all fs.writeFile) → never worked on Vercel's
+  read-only serverless fs (login 500'd → mislabeled "Väärä salasana"; saving
+  could never persist). It had no UI entry point. Per the user's call, removed
+  entirely rather than reworked. Homepage content is edited directly in
+  `src/content/fi/home.json` + `src/content/site.json` (commit redeploys).
+  loadPublishedBundle (the live site's content reader) kept; draft-preview
+  branch + editor config consts dropped. `next build` clean. The earlier
+  auth.ts fail-closed + stateless-cookie fixes are now moot (files deleted).
+  safeJsonLd escaping stays (blog/content pages still emit JSON-LD).
+
 REMAINING before real payments (config, not code — I can't do these, no keys):
 1. Stripe: create account keys; set `STRIPE_SECRET_KEY` on BOTH the client
    (Vercel) and backend (Railway); set `STRIPE_WEBHOOK_SECRET` (client);
