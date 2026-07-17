@@ -78,6 +78,21 @@ def _verottaja_blocks(input_data, value):
     # printing a negative reference value for distressed companies.
     substanssiarvo = max(0.0, equity)
     kaypa = (tuottoarvo + substanssiarvo) / 2 if tuottoarvo > substanssiarvo else substanssiarvo
+    # Explain floored zeros explicitly — a bare 0 next to the report's positive
+    # book equity (which includes capital loans) reads as a contradiction.
+    floor_notes = []
+    if avg_ni < 0:
+        floor_notes.append(
+            "Tuottoarvo on 0, koska kolmen viime vuoden keskimääräinen "
+            "nettotulos on negatiivinen."
+        )
+    if equity < 0:
+        floor_notes.append(
+            "Substanssiarvo on 0, koska oma pääoma ilman pääomalainoja on "
+            f"negatiivinen ({_fmt_num(equity)} tEUR) — verottajan mallissa "
+            "pääomalainat luetaan velkaan, minkä vuoksi luku poikkeaa raportin "
+            "tasearvosta, jossa pääomalainat sisältyvät omaan pääomaan."
+        )
     return [
         {
             "type": "table",
@@ -88,7 +103,8 @@ def _verottaja_blocks(input_data, value):
             "rows": [
                 ["Raportin arvo (DCF/EVA)", _fmt_num(value)],
                 ["Tuottoarvo (3 v:n keskitulos / 15 %)", _fmt_num(tuottoarvo)],
-                ["Substanssiarvo (oma pääoma)", _fmt_num(substanssiarvo)],
+                ["Substanssiarvo (oma pääoma ilman pääomalainoja)",
+                 _fmt_num(substanssiarvo)],
                 ["Verottajan käypä arvo", _fmt_num(kaypa)],
             ],
         },
@@ -97,12 +113,14 @@ def _verottaja_blocks(input_data, value):
             "text": (
                 "Verottajan mallissa (Verohallinnon arvostusohje) tuottoarvo on "
                 "kolmen viime vuoden keskimääräinen nettotulos pääomitettuna 15 %:n "
-                "tuottovaatimuksella ja substanssiarvo on yhtiön oma pääoma. Käypä "
+                "tuottovaatimuksella ja substanssiarvo on yhtiön oma pääoma ilman "
+                "pääomalainoja. Käypä "
                 "arvo on näiden keskiarvo, kun tuottoarvo ylittää substanssiarvon, "
                 "muutoin substanssiarvo. Malli on karkea julkinen vertailukohta "
                 "(perintö- ja lahjaverotus), ei tämän raportin ensisijainen "
                 "menetelmä: DCF/EVA on tarkempi, koska se käyttää yhtiön omia "
                 "ennusteita ja WACCia yksittäisen keskituloksen sijaan."
+                + ((" " + " ".join(floor_notes)) if floor_notes else "")
             ),
         },
     ]

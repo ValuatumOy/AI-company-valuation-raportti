@@ -81,7 +81,7 @@ def compute(assumptions, input_data):
         ["Jatkuvan arvon arvo toteutumisvuonna " + str(int(year)), _fmt(cv)],
         ["− Ennustettu nettovelka vuonna " + str(int(year)), _fmt(nd)],
         ["= Oman pääoman arvo vuonna " + str(int(year)), _fmt(equity_n)],
-        [f"Diskonttaus nykyhetkeen (WACC {_fmt(wacc, 1)} %, {n} v, kerroin {factor:.3f})",
+        [f"Diskonttaus nykyhetkeen (WACC {_fmt(wacc, 1)} %, {n} v, kerroin {_fmt(factor, 3)})",
          _fmt(pv)],
     ]
     if dilution:

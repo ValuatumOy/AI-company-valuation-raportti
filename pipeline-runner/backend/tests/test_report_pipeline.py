@@ -838,7 +838,7 @@ def test_verottaja_crosscheck_income_and_substance_branches():
     rows = {r[0]: r[1] for r in blocks[0]["rows"]}
     assert blocks[0]["table_id"] == "deterministic_valuation_crosscheck"
     assert rows["Tuottoarvo (3 v:n keskitulos / 15 %)"] == "1 333"
-    assert rows["Substanssiarvo (oma pääoma)"] == "500"
+    assert rows["Substanssiarvo (oma pääoma ilman pääomalainoja)"] == "500"
     assert rows["Verottajan käypä arvo"] == "917"
 
     # Substance-dominant: tiny earnings, big equity -> kaypa = substanssiarvo.
@@ -858,7 +858,7 @@ def test_verottaja_crosscheck_income_and_substance_branches():
     }}
     rows_real = {r[0]: r[1] for r in veq._verottaja_blocks(real_data, 450)[0]["rows"]}
     assert rows_real["Tuottoarvo (3 v:n keskitulos / 15 %)"] == "1 333"
-    assert rows_real["Substanssiarvo (oma pääoma)"] == "500"
+    assert rows_real["Substanssiarvo (oma pääoma ilman pääomalainoja)"] == "500"
     assert rows_real["Verottajan käypä arvo"] == "917"
 
     # Distressed company: negative equity floors substanssiarvo (and käypä arvo) at 0.
@@ -867,7 +867,7 @@ def test_verottaja_crosscheck_income_and_substance_branches():
         "balance_sheet": {"equity_excl_capital_loans": [-500]},
     }}
     rows_neg = {r[0]: r[1] for r in veq._verottaja_blocks(neg_data, -450)[0]["rows"]}
-    assert rows_neg["Substanssiarvo (oma pääoma)"] == "0"
+    assert rows_neg["Substanssiarvo (oma pääoma ilman pääomalainoja)"] == "0"
     assert rows_neg["Verottajan käypä arvo"] == "0"
 
     # Missing data -> no block (graceful skip).
