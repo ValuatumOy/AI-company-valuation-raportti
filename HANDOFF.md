@@ -42,7 +42,22 @@ only an env var.
   auth.ts fail-closed + stateless-cookie fixes are now moot (files deleted).
   safeJsonLd escaping stays (blog/content pages still emit JSON-LD).
 
+- **E2E VERIFIED 2026-07-17 with Stripe TEST keys** (user set STRIPE_SECRET_KEY
+  on Railway+Vercel, STRIPE_WEBHOOK_SECRET on Vercel, registered the dashboard
+  webhook endpoint). Full paid flow driven via browser (test card 4242): real
+  Stripe session (not demo), payment → backend verified payment_status=paid →
+  resolved Supercell (fid 170898) → generation started (rid 319cfd0f). Webhook:
+  bad/absent signature → 400, real event → 200; it fired at 08:31:54 BEFORE the
+  browser success page, i.e. the webhook itself created the run (durability
+  proven). Idempotency: exactly ONE run despite webhook + browser both calling
+  checkout-generate. Per-run $5 cap active. (Two 08:28 webhook 400s were pre-
+  deploy secret-propagation noise, resolved by 08:31.) Tax stayed off (gate) so
+  no address collection — as expected. Test run ~$3 ran to completion, emailed
+  a throwaway address.
+
 REMAINING before real payments (config, not code — I can't do these, no keys):
+0. Swap Stripe TEST keys → LIVE keys (same env vars on Railway + Vercel),
+   register a LIVE-mode webhook endpoint, set its whsec. Then a live smoke test.
 1. Stripe: create account keys; set `STRIPE_SECRET_KEY` on BOTH the client
    (Vercel) and backend (Railway); set `STRIPE_WEBHOOK_SECRET` (client);
    register the webhook endpoint `https://<client>/api/stripe/webhook` in the
