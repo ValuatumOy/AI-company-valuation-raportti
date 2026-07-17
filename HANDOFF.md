@@ -1,5 +1,52 @@
 # Handoff — 2026-07-16 (read this first)
 
+## 2026-07-16 — Production hardening for paid go-live (61a1caf client, LIVE but dormant; cap env set)
+
+Shipped the payment-critical gaps that stood between us and taking real money.
+All DORMANT until Stripe keys are set (client Stripe is still unset → demo mode),
+so pushing was safe. Client 61a1caf pushed (Vercel). Backend: no code change,
+only an env var.
+
+- **Durable Stripe webhook (audit H8) — client `/api/stripe/webhook`:** the old
+  fulfilment ran in the browser on the `/kassa/valmis` success page; if the user
+  closed the tab during the Stripe redirect, payment was taken and nothing
+  generated. New server-to-server webhook (checkout.session.completed /
+  async_payment_succeeded) calls the SAME backend `checkout-generate`, which is
+  idempotent on session id, so webhook + success-page racing can't double-run.
+  import/creditsafe fall to postOrder (ponytail: not session-idempotent → a
+  possible dup order row if both fire; no money path, operator dedupes).
+- **VAT — Stripe Tax (chosen by Esa: automatic_tax):** checkout now enables
+  `automatic_tax`, `tax_behavior: 'exclusive'`, and required billing address, so
+  the advertised "79 € + alv" actually adds Finnish VAT (25.5%) on top and
+  handles EU B2B reverse charge. NOTE the contradiction found: `pricing.ts`
+  comment said "prices + alv" (inclusive) but ALL UI says "+ alv" (exclusive) —
+  went exclusive per the ads.
+- **Per-run spend cap ON:** Railway `VALU_RUN_USD_CAP` 0 → 5 (day cap already
+  $75). One stuck run can no longer eat the whole day cap.
+- **M3 security (client):** editor auth now FAILS CLOSED when EDITOR_PASSWORD is
+  unset (was falling back to the guessable default 'valuatum-editor').
+  EDITOR_PASSWORD is set in Vercel prod (verified) so no lockout. JSON-LD from
+  the content editor is now run through `safeJsonLd` (escapes `<`/`>`/`&`/
+  U+2028/9) on home, content and blog pages — closes the `</script>` stored-XSS
+  breakout. Verified: breakout string comes out fully `<`-escaped.
+
+REMAINING before real payments (config, not code — I can't do these, no keys):
+1. Stripe: create account keys; set `STRIPE_SECRET_KEY` on BOTH the client
+   (Vercel) and backend (Railway); set `STRIPE_WEBHOOK_SECRET` (client);
+   register the webhook endpoint `https://<client>/api/stripe/webhook` in the
+   Stripe dashboard; enable + register Stripe Tax (else automatic_tax checkout
+   sessions error). `EXTRA_ROUND_PRICE_CENTS` already defaults to 500 for paid
+   round3+.
+2. E2E NOT DONE — needs the above keys first (payment path is demo-mode until
+   then). Once wired: Stripe test key + test card → real generation (~$3, within
+   the $5 cap the user authorized) → confirm webhook fulfils when the success
+   tab is closed, VAT shows on the Stripe page, report delivers.
+
+Files: client src/app/api/stripe/webhook/route.ts (new), src/lib/jsonld.ts
+(new), src/app/api/checkout/route.ts, src/editor/lib/auth.ts,
+src/app/(site)/page.tsx, src/app/(site)/blogi/[slug]/page.tsx,
+src/components/ContentPage.tsx.
+
 ## 2026-07-16 — User-set scenario probabilities + pessimistic floor fix (a5b6c4e backend, 82844cb client, LIVE + reseeded)
 
 Backend HEAD a5b6c4e deployed (build `2026-07-16-scenario-probabilities`) +
