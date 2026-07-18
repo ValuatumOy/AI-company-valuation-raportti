@@ -95,9 +95,23 @@ class ScenarioProbabilities(BaseModel):
         return self
 
 
+class ForecastEdit(BaseModel):
+    """One user-edited forecast cell. `varname` is a ValuBuild model variable
+    (ns = revenue, ebit); `value` is absolute in the modeldata unit (millions),
+    matching the ValuBuild import API. Allowlist + range are enforced server-side
+    (main._validate_forecast_edits) and again by ValuBuild."""
+    varname: str = Field(min_length=1, max_length=32)
+    year: int
+    value: float
+
+
 class Round2In(BaseModel):
     clarifications: list[ClarificationAnswer] = Field(default_factory=list)
     clarifications_free_text: str = Field(default="", max_length=8000)
+    # Optional forecast edits (ACE #3048). When present, the refinement round
+    # first imports these into a new ValuBuild model (new fid) and re-runs from
+    # stage 0 against it, instead of the clarifications-only enrichment path.
+    forecast_edits: Optional[list[ForecastEdit]] = None
     # When True the refreshed report shows both the previous and updated value
     # wherever a number changed ("nousi 1 000 -> 3 270 tEUR"); when False (default)
     # it shows only the current numbers with no reference to the prior round.

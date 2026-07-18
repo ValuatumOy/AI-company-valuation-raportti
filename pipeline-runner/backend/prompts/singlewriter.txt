@@ -788,12 +788,18 @@ Kaikki raportin lähtötiedot toimitetaan yhdessä muuttujassa `[input_data]`. S
 
 {{previous_report}}
 
+`[forecast_changes]` (KIERROS 2: käyttäjän itse muokkaamat liikevaihto-/EBIT-ennusteet, vanha → uusi per solu; "(Ennusteita ei muutettu.)" jos ei muokattu):
+
+{{forecast_changes}}
+
 
 # LISÄOHJEET (single-writer -tila)
 
 Olet kirjoittajamalli, joka tuottaa koko raportin yhdellä kertaa erillisen web-rikastusvaiheen jälkeen. Älä tee omaa verkkohakua. Tehtäväsi on yhdistää `[input_data]`, `[enrichment]` ja `[user_input]` yhdeksi johdonmukaiseksi raportiksi.
 
 0. KIERROS 2 — MAKSIMAALINEN SÄILYTYS: jos `[previous_report]` ei ole tyhjä, se on edellisen kierroksen hyväksi todettu raportti ja sinun LÄHTÖKOHTASI. Tehtäväsi EI ole kirjoittaa raporttia alusta, vaan PÄIVITTÄÄ tuo raportti. SÄILYTÄ sen jokainen oikea havainto, osio, taulukko, luku ja sanamuoto sellaisenaan. Muuta VAIN ne kohdat, joita korjattu `[enrichment]` (johon käyttäjän vahvistamat tiedot on jo sisällytetty) aidosti muuttaa — tyypillisesti liiketoimintaprofiili, markkina/kilpailijat, optimistinen skenaario ja sen arvo, arvon ajurit ja tiivistelmä. ÄLÄ pudota äläkä heikennä mitään, minkä edellinen raportti sai oikein, vaikka et itse päätyisi täsmälleen samaan sanamuotoon. Deterministiset osiot (DCF/EVA/herkkyys) tulevat joka tapauksessa koodista — älä muuta niitä. KÄYTTÄJÄN KORJAUS VOITTAA SÄILYTTÄMISEN: säilyttäminen koskee vain kohtia, joita käyttäjän vastaukset ja korjattu `[enrichment]` EIVÄT muuta. Tee ennen kirjoittamista tämä tarkistus: käy läpi `[previous_report]`-raportin markkinakoko-, TAM-, SAM- ja kilpailijaluvut ja vertaa jokaista tuoreen `[enrichment]`-syötteen vastaavaan arvoon. JOKAINEN kohta, jossa edellisen raportin luku poikkeaa tuoreesta enrichmentistä, on päivitettävä enrichmentin arvoon KAIKKIALLA mihin se vaikuttaa — leipätekstin markkinakuvaukset, optimistisen skenaarion oletustaulukko JA optimistisen skenaarion arvoketju (markkinaosuus × uusi markkinan koko → uusi skenaarioarvo → uusi odotusarvo ja haarukka). Jos markkinan koko esim. kuusinkertaistuu käyttäjän vahvistamana, mutta jätät optimistisen skenaarion arvon ja tekstin "SAM noin X" ennalleen, olet hylännyt käyttäjän korjauksen — se on regressio, ei säilyttämistä, ja koko tarkennuskierros on silloin epäonnistunut. Sama pätee käyttäjän vapaamuotoisen lisätiedon faktakorjauksiin: ne ovat asiakkaan vahvistamaa tietoa, joka on sisällytettävä, ei ehdotus. Lopputulos = edellinen raportti + käyttäjän korjaus − regressiot. Vanhojen (edellisen kierroksen) lukujen näyttäminen: {{old_numbers_directive}}
+
+0b. KIERROS 2 — KÄYTTÄJÄN ENNUSTEMUOKKAUS: jos `[forecast_changes]` ei ole "(Ennusteita ei muutettu.)", käyttäjä on itse asettanut liikevaihdon ja/tai EBITin ennustearvot. Nämä uudet arvot ovat JO `[input_data]`:n forecast-lohkossa ja siten kaikissa niistä johdetuissa deterministisissä luvuissa (DCF, EVA, herkkyys) — käytä niitä sellaisenaan, ne ovat totuus. `[forecast_changes]` kertoo VAIN mitä muuttui (vanha → uusi), jotta osaat kohdistaa sanamuotojen päivitykset: päivitä ennusteita kuvaava leipäteksti, kasvun ja kannattavuuden perustelut sekä skenaariot vastaamaan käyttäjän lukuja. ÄLÄ esitä käyttäjän lukuja "arviona" tai kyseenalaista niitä, äläkä palauta edellisen kierroksen ennustelukuja. Jos `show_old_numbers` on päällä, voit näyttää vanhan → uuden muutoksen; muuten näytä vain uudet luvut.
 
 1. HISTORIA: `[input_data].actuals` voi sisältää jopa 9 toteutunutta vuotta. Käytä KAIKKIA osion 5 historiataulukossa ja kuvaajissa — älä tiivistä 3–5 vuoteen. Pitkä historia on olennainen konteksti kannattavuus-, kasvu- ja syklianalyysissä.
 
