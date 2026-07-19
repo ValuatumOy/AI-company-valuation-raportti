@@ -580,8 +580,18 @@ def get_pending_round(token):
     return row
 
 
-def consume_pending_round(token):
-    db.execute("UPDATE pending_rounds SET consumed=1 WHERE token=?", (token,))
+def claim_pending_round(token):
+    """Atomically flip consumed 0→1; False means another redeem already claimed
+    the token. Pair with release_pending_round if the round then fails to start,
+    so a paid token never burns without a round (the forecast-edit branch calls
+    ValuBuild after payment and can fail there)."""
+    cur = db.execute(
+        "UPDATE pending_rounds SET consumed=1 WHERE token=? AND consumed=0", (token,))
+    return cur.rowcount == 1
+
+
+def release_pending_round(token):
+    db.execute("UPDATE pending_rounds SET consumed=0 WHERE token=?", (token,))
 
 
 # ---- expert access keys -----------------------------------------------------

@@ -232,6 +232,32 @@ def test_round2_forecast_edit_imports_new_fid_and_runs_from_stage0(monkeypatch):
     assert child.get("input_data") is None
 
 
+def test_round2_forecast_branch_carries_clarifications(monkeypatch):
+    """The feedback panel lets a user answer clarifications AND edit forecasts in
+    one submit — the forecast branch must not silently drop the answers (the
+    round re-runs stage 1, which is where they get folded in)."""
+    c, main, store = _seed_client(monkeypatch)
+
+    async def fake_import(base_fid, values):
+        return 4243
+
+    monkeypatch.setattr(main.forecast_import, "import_and_wait", fake_import)
+
+    pid = store.list_pipelines()[0]["id"]
+    parent = _parent_with_forecast(store, pid)
+    r = c.post(f"/api/runs/{parent}/round2", json={
+        "forecast_edits": [{"varname": "ns", "year": 2026, "value": 60.0}],
+        "clarifications": [{"id": "q1", "question": "Omistus?", "answer": "100 % perustajilla"}],
+        "clarifications_free_text": "IPR on yhtiöllä itsellään.",
+    })
+    assert r.status_code == 200
+    child = store.get_run(r.json()["run_id"])
+    assert child["params"]["clarifications"] == [
+        {"id": "q1", "question": "Omistus?", "answer": "100 % perustajilla"}
+    ]
+    assert child["params"]["clarifications_free_text"] == "IPR on yhtiöllä itsellään."
+
+
 def test_round2_clarifications_branch_unchanged(monkeypatch):
     c, main, store = _seed_client(monkeypatch)
 
@@ -327,6 +353,7 @@ def test_paid_redeem_runs_forecast_import_branch(monkeypatch):
     monkeypatch.setattr(main, "_stripe_create_checkout_session", fake_create)
     r = c.post(f"/api/runs/{parent}/round2/checkout", json={
         "forecast_edits": [{"varname": "ebit", "year": 2026, "value": 12.0}],
+        "clarifications_free_text": "Uusi sopimus allekirjoitettu.",
     })
     assert r.status_code == 200
     pending = db.query_one("SELECT * FROM pending_rounds WHERE run_id=?", (parent,))
@@ -347,6 +374,61 @@ def test_paid_redeem_runs_forecast_import_branch(monkeypatch):
     assert child["identifier"] == "4243"
     assert child["params"]["skip_estimate_generation"] is True
     assert started["kwargs"].get("from_order") == 0
+    # Staged clarification text rides along with the paid forecast edits.
+    assert child["params"]["clarifications_free_text"] == "Uusi sopimus allekirjoitettu."
+
+
+def test_paid_redeem_import_failure_keeps_token_redeemable(monkeypatch):
+    """A paid token must survive an import failure: the forecast branch calls
+    ValuBuild after the payment check, and burning the token there would mean
+    money taken, no round, no retry."""
+    from app import db
+    c, main, store = _seed_client(monkeypatch)
+    monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "sk_test_x")
+    monkeypatch.setenv("CLIENT_SITE_URL", "https://valuatum-arvonmaaritys.vercel.app")
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+
+    pid = store.list_pipelines()[0]["id"]
+    parent = _parent_with_forecast(store, pid)
+
+    async def fake_create(**kw):
+        return {"id": "cs_test_fail", "url": "https://checkout.stripe.com/pay/cs_test_fail"}
+
+    monkeypatch.setattr(main, "_stripe_create_checkout_session", fake_create)
+    r = c.post(f"/api/runs/{parent}/round2/checkout", json={
+        "forecast_edits": [{"varname": "ns", "year": 2026, "value": 60.0}],
+    })
+    assert r.status_code == 200
+    token = db.query_one("SELECT * FROM pending_rounds WHERE run_id=?", (parent,))["token"]
+
+    async def fake_get_paid(session_id):
+        return {"payment_status": "paid", "metadata": {"token": token}}
+
+    monkeypatch.setattr(main, "_stripe_get_checkout_session", fake_get_paid)
+
+    async def failing_import(base_fid, values):
+        raise main.forecast_import.ForecastImportError("ValuBuild kaatui")
+
+    monkeypatch.setattr(main.forecast_import, "import_and_wait", failing_import)
+    r_fail = c.post(f"/api/runs/{parent}/round2/redeem",
+                    json={"token": token, "stripe_session_id": "cs_test_fail"})
+    assert r_fail.status_code == 502
+    pending = db.query_one("SELECT * FROM pending_rounds WHERE token=?", (token,))
+    assert pending["consumed"] == 0  # claim rolled back → still redeemable
+
+    async def working_import(base_fid, values):
+        return 4243
+
+    monkeypatch.setattr(main.forecast_import, "import_and_wait", working_import)
+    r_retry = c.post(f"/api/runs/{parent}/round2/redeem",
+                     json={"token": token, "stripe_session_id": "cs_test_fail"})
+    assert r_retry.status_code == 200
+    assert store.get_run(r_retry.json()["run_id"])["identifier"] == "4243"
+
+    # Now the token is spent for good: a further redeem is a 409.
+    r_again = c.post(f"/api/runs/{parent}/round2/redeem",
+                     json={"token": token, "stripe_session_id": "cs_test_fail"})
+    assert r_again.status_code == 409
 
 
 def test_checkout_rejects_bad_forecast_edit_before_payment(monkeypatch):

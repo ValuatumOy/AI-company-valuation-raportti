@@ -646,6 +646,8 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     if body.forecast_edits:
         new_rid = await _start_forecast_import_round(
             rid, parent, body.forecast_edits,
+            clarifications=body.clarifications,
+            clarifications_free_text=body.clarifications_free_text,
             show_old_numbers=body.show_old_numbers,
             scenario_probabilities=body.scenario_probabilities,
         )
@@ -760,10 +762,14 @@ def _forecast_change_summary(parent, edits) -> str:
     return "\n".join(lines) if lines else "(Ennusteita ei muutettu.)"
 
 
-async def _start_forecast_import_round(rid, parent, edits, show_old_numbers=False,
+async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
+                                       clarifications_free_text="",
+                                       show_old_numbers=False,
                                        scenario_probabilities=None) -> str:
     """Import the user's forecast edits into a new ValuBuild fid, then start a
-    refinement round re-fid'd to it (stage 0 onward, gate bypassed)."""
+    refinement round re-fid'd to it (stage 0 onward, gate bypassed). Any
+    clarification answers submitted alongside the edits ride along — the round
+    re-runs stage 1 anyway, which is where they get folded in."""
     _validate_forecast_edits(edits)
     try:
         parent_fid = int(str(parent.get("identifier")).strip())
@@ -782,7 +788,7 @@ async def _start_forecast_import_round(rid, parent, edits, show_old_numbers=Fals
         raise HTTPException(502, str(exc))
     summary = _forecast_change_summary(parent, edits)
     return _start_refinement_round(
-        rid, parent, [], "",
+        rid, parent, clarifications or [], clarifications_free_text or "",
         show_old_numbers=show_old_numbers,
         scenario_probabilities=scenario_probabilities,
         forecast_edits=payload, forecast_changes=summary, new_fid=new_fid,
@@ -849,24 +855,38 @@ async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
     if (session.get("payment_status") != "paid"
             or (session.get("metadata") or {}).get("token") != body.token):
         raise HTTPException(402, "Maksua ei voitu vahvistaa.")
-    store.consume_pending_round(body.token)
+    # Claim the token atomically (guards a concurrent double-redeem), but roll
+    # the claim back if the round fails to start: the forecast branch calls
+    # ValuBuild AFTER the payment check and can fail or time out there, and a
+    # burned token would mean money taken with no round and no way to retry.
+    if not store.claim_pending_round(body.token):
+        raise HTTPException(409, "Tämä tarkennuskierros on jo käytetty.")
     parent = store.get_run(rid)
     forecast_edits = pending.get("forecast_edits")
-    if forecast_edits:
-        # Same two-branch logic as round2_run: paid forecast-edit round imports a
-        # new fid and re-runs from stage 0. Rebuild typed edits from the staged dicts.
-        edits = [ForecastEdit(**e) for e in forecast_edits]
-        new_rid = await _start_forecast_import_round(
-            rid, parent, edits,
-            show_old_numbers=body.show_old_numbers,
-            scenario_probabilities=pending.get("scenario_probabilities"),
-        )
-    else:
-        new_rid = _start_refinement_round(
-            rid, parent, pending["clarifications"], pending["clarifications_free_text"],
-            show_old_numbers=body.show_old_numbers,
-            scenario_probabilities=pending.get("scenario_probabilities"),
-        )
+    try:
+        if forecast_edits:
+            # Same two-branch logic as round2_run: paid forecast-edit round imports a
+            # new fid and re-runs from stage 0. Rebuild typed edits from the staged
+            # dicts; staged clarification answers ride along like in round2_run.
+            edits = [ForecastEdit(**e) for e in forecast_edits]
+            new_rid = await _start_forecast_import_round(
+                rid, parent, edits,
+                clarifications=pending["clarifications"],
+                clarifications_free_text=pending["clarifications_free_text"],
+                show_old_numbers=body.show_old_numbers,
+                scenario_probabilities=pending.get("scenario_probabilities"),
+            )
+        else:
+            new_rid = _start_refinement_round(
+                rid, parent, pending["clarifications"], pending["clarifications_free_text"],
+                show_old_numbers=body.show_old_numbers,
+                scenario_probabilities=pending.get("scenario_probabilities"),
+            )
+    except BaseException:
+        # BaseException: a client disconnect cancels this handler mid-import
+        # (CancelledError), and the paid token must survive that too.
+        store.release_pending_round(body.token)
+        raise
     return {"run_id": new_rid, "parent_run_id": rid}
 
 
