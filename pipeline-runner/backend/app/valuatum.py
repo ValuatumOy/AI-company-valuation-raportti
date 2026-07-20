@@ -246,9 +246,15 @@ async def export_stream(
     industry_code: str | None = None,
     industry_id=None,
     industry_tree=None,
+    skip_estimate_generation: bool = False,
 ):
     """Async generator yielding {step,...} events, ending with a 'ready' (or
-    'error') event that carries the final JSON."""
+    'error') event that carries the final JSON.
+
+    `skip_estimate_generation`: bypass the estimate-generation gate. Set ONLY on a
+    forecast-edit round (ACE #3048) — the edited fid is a fresh model whose
+    values ARE the user's forecasts, and running the gate (updateEstimates, which
+    does not apply consensus) would overwrite them."""
     if not os.environ.get("VALUATUM_TOKEN"):
         yield {"step": "error", "message": "VALUATUM_TOKEN puuttuu backendin .env:stä."}
         return
@@ -261,8 +267,12 @@ async def export_stream(
     base = tmp / "base.json"
     complete = tmp / "complete.json"
     try:
-        yield {"step": "estimates", "label": "Generating estimates"}
-        await estimate_trigger.trigger_and_wait(fid)
+        if skip_estimate_generation:
+            yield {"step": "estimates",
+                   "label": "Skipping estimate generation (edited forecast model)"}
+        else:
+            yield {"step": "estimates", "label": "Generating estimates"}
+            await estimate_trigger.trigger_and_wait(fid)
 
         # 1. modeldata → base JSON
         yield {"step": "fetch", "label": "Fetching modeldata"}

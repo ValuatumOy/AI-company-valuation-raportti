@@ -150,26 +150,39 @@ def create_run(pid, input_data, stop_on_failure, identifier=None, params=None,
     return rid
 
 
-def clone_run(parent_id, params=None):
+def clone_run(parent_id, params=None, identifier=None):
     """Round-2 run: reuse the parent's pipeline + stage-0 FAKTAT data (which is
     deterministic and expensive-free to keep), link back via parent_run_id, and
     carry the user's clarifications in params. Copies the parent's order-0 stage
-    result so a scoped `from_order=1` re-run finds stage 0 pre-loaded."""
+    result so a scoped `from_order=1` re-run finds stage 0 pre-loaded.
+
+    `identifier` overrides the run's stage-0 FID: forecast-edit rounds (ACE
+    #3048) point the clone at a freshly imported fid and re-run from stage 0,
+    so the parent's order-0 result is NOT copied (stage 0 must refetch)."""
     parent = get_run(parent_id)
     if not parent:
         raise ValueError("parent run not found")
     merged_params = dict(parent.get("params") or {})
     merged_params.update(params or {})
+    new_identifier = identifier if identifier is not None else parent.get("identifier")
+    # A re-fid'd forecast-edit round must refetch stage 0 against the new fid.
+    # Drop the parent's input_data (else runner's manual-paste shortcut would reuse
+    # the OLD fid's FAKTAT and silently ignore the edit) — stage 0 fetches by the
+    # new identifier instead.
+    new_input_data = None if identifier is not None else parent.get("input_data")
     rid = create_run(
-        parent["pipeline_id"], parent.get("input_data"),
-        parent.get("stop_on_failure", True), parent.get("identifier"),
+        parent["pipeline_id"], new_input_data,
+        parent.get("stop_on_failure", True), new_identifier,
         merged_params, parent_run_id=parent_id,
         access_key=parent.get("access_key"),  # refinement stays owned by the expert
     )
-    for res in parent.get("results") or []:
-        if res.get("order") == 0:
-            upsert_result(rid, {**res, "run_id": rid})
-            break
+    # Same reason: don't seed the parent's order-0 result (it holds the OLD fid's
+    # data) for a re-fid'd round.
+    if identifier is None:
+        for res in parent.get("results") or []:
+            if res.get("order") == 0:
+                upsert_result(rid, {**res, "run_id": rid})
+                break
     return rid
 
 
@@ -191,6 +204,20 @@ def set_run_status(rid, status):
     db.execute("UPDATE runs SET status=? WHERE id=?", (status, rid))
 
 
+def rebind_run_forecast(rid, identifier, params):
+    """Point an awaiting round-1 run at an imported forecast model.
+
+    input_data must be cleared with the identifier swap: otherwise the runner's
+    manual-input shortcut could silently reuse the old FID's stage-0 data.
+    Existing stage-0 is intentionally kept until the new stage-0 execution
+    overwrites it, so the operation remains auditable if starting the task fails.
+    """
+    db.execute(
+        "UPDATE runs SET identifier=?, input_data=?, params=?, status=? WHERE id=?",
+        (str(identifier), None, db.jdump(params or {}), "running", rid),
+    )
+
+
 def delete_run(rid):
     """Delete a run and its stage results. Explicit child delete so it works on
     SQLite (where FK cascade needs PRAGMA) and Postgres alike."""
@@ -201,8 +228,13 @@ def delete_run(rid):
 def reset_stale_runs():
     """On startup, any run still marked 'running' is an orphan from a previous
     process (a deploy/restart killed its background task). Flip to error so the
-    UI and history show a terminal state instead of a perpetual 'running'."""
+    UI and history show a terminal state instead of a perpetual 'running'. An
+    interrupted forecast import returns to the retryable pre-generation state."""
     db.execute("UPDATE runs SET status=? WHERE status=?", ("error", "running"))
+    db.execute(
+        "UPDATE runs SET status=? WHERE status=?",
+        ("awaiting_forecast", "importing_forecast"),
+    )
 
 
 def usd_spent_today():
@@ -545,14 +577,15 @@ def create_paid_order(company, email, user_input, stripe_session_id, fid, access
 # here keyed by a token; Stripe metadata only carries the token.
 
 def create_pending_round(rid, access_key, clarifications, clarifications_free_text,
-                         scenario_probabilities=None):
+                         scenario_probabilities=None, forecast_edits=None):
     token = _uuid()
     db.execute(
         "INSERT INTO pending_rounds(token,run_id,access_key,clarifications,"
-        "clarifications_free_text,scenario_probabilities,consumed,created_at) "
-        "VALUES(?,?,?,?,?,?,0,?)",
+        "clarifications_free_text,scenario_probabilities,forecast_edits,consumed,created_at) "
+        "VALUES(?,?,?,?,?,?,?,0,?)",
         (token, rid, access_key, db.jdump(clarifications), clarifications_free_text,
-         db.jdump(scenario_probabilities) if scenario_probabilities else None, _now()),
+         db.jdump(scenario_probabilities) if scenario_probabilities else None,
+         db.jdump(forecast_edits) if forecast_edits else None, _now()),
     )
     return token
 
@@ -562,11 +595,22 @@ def get_pending_round(token):
     if row:
         row["clarifications"] = db.jload(row["clarifications"]) or []
         row["scenario_probabilities"] = db.jload(row.get("scenario_probabilities"))
+        row["forecast_edits"] = db.jload(row.get("forecast_edits"))
     return row
 
 
-def consume_pending_round(token):
-    db.execute("UPDATE pending_rounds SET consumed=1 WHERE token=?", (token,))
+def claim_pending_round(token):
+    """Atomically flip consumed 0→1; False means another redeem already claimed
+    the token. Pair with release_pending_round if the round then fails to start,
+    so a paid token never burns without a round (the forecast-edit branch calls
+    ValuBuild after payment and can fail there)."""
+    cur = db.execute(
+        "UPDATE pending_rounds SET consumed=1 WHERE token=? AND consumed=0", (token,))
+    return cur.rowcount == 1
+
+
+def release_pending_round(token):
+    db.execute("UPDATE pending_rounds SET consumed=0 WHERE token=?", (token,))
 
 
 # ---- expert access keys -----------------------------------------------------

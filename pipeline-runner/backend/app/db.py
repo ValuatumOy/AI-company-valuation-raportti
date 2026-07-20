@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS pending_rounds (
     clarifications TEXT,
     clarifications_free_text TEXT,
     scenario_probabilities TEXT,
+    forecast_edits TEXT,
     consumed INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
@@ -157,6 +158,8 @@ if IS_PG:
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS fid INTEGER",
                 "ALTER TABLE pending_rounds ADD COLUMN IF NOT EXISTS "
                 "scenario_probabilities TEXT",
+                "ALTER TABLE pending_rounds ADD COLUMN IF NOT EXISTS "
+                "forecast_edits TEXT",
             ):
                 try:
                     conn.execute(mig)
@@ -204,6 +207,8 @@ else:
             "ALTER TABLE orders ADD COLUMN access_key TEXT",
             "ALTER TABLE orders ADD COLUMN run_id TEXT",
             "ALTER TABLE orders ADD COLUMN fid INTEGER",
+            "ALTER TABLE pending_rounds ADD COLUMN scenario_probabilities TEXT",
+            "ALTER TABLE pending_rounds ADD COLUMN forecast_edits TEXT",
         ):
             try:
                 c.execute(mig)

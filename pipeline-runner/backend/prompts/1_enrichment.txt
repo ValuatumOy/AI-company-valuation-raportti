@@ -28,6 +28,10 @@ SYÖTE:
 {{clarifications}}
 `previous_enrichment` (KIERROS 2: EDELLISEN kierroksen valmis, hyväksi todettu rikastus; tyhjä ensimmäisellä kierroksella):
 {{previous_enrichment}}
+`forecast_changes` (KIERROS 2: käyttäjän muokkaamat liikevaihto-/EBIT-ennusteet, vanha → uusi per solu; "(Ennusteita ei muutettu.)" jos ei muokattu):
+{{forecast_changes}}
+
+KIERROS 2 — ENNUSTEMUOKKAUS: jos `forecast_changes` ei ole "(Ennusteita ei muutettu.)", käyttäjä on itse asettanut liikevaihdon ja/tai EBITin ennustearvot, ja ne ovat jo `[input_data]`:n forecast-lohkossa (uusi malli). Käsittele ne VARMENNETTUNA TIETONA: älä kiistä lukuja, vaan sovita niiden liiketoiminnallinen perustelu (kasvun ajurit, marginaalikehitys) rikastukseen johdonmukaisesti. Jos muutettu näkymä on selvästi aiempaa optimistisempi/pessimistisempi, päivitä kytkeytyvät kentät (`business_thesis`, `forward_revenue_view`, optimistinen näkymä) vastaamaan käyttäjän lukuja.
 
 KIERROS 2 -KURI (MAKSIMAALINEN SÄILYTYS): jos `previous_enrichment` sisältää edellisen kierroksen rikastuksen, se on LÄHTÖKOHTA. SÄILYTÄ sen jokainen oikea löydös sellaisenaan — business_thesis, business_lines, competitors, market, market_signals, structural_inflections, source_register. ÄLÄ tee tuoretta täyshakua etkä johda kaikkea uudelleen; älä pudota tai muuta asioita jotka olivat jo oikein. Tee VAIN kaksi asiaa: (1) sovita `clarifications`-kentän käyttäjän vahvistamat tiedot päälle (ne kumoavat vain sen kohdan, jota ne koskevat), (2) korjaa kohta, jonka käyttäjä nimenomaan osoitti vääräksi tai puuttuvaksi. Voit tehdä KOHDENNETUN haun vain vahvistaaksesi käyttäjän uuden tiedon — et koko yhtiön uudelleentutkimista. Palauta koko rikastus-JSON (kaikki kentät), jotta mikään aiemmin oikea sisältö ei katoa.
 

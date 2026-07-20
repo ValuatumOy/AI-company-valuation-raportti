@@ -439,6 +439,14 @@ async def run_stages(run, stages, only=None, from_order=None):
         (params or {}).get("clarifications"),
         (params or {}).get("clarifications_free_text"),
     )
+    # Forecast-edit round (ACE #3048): a human-readable "old → new" summary of
+    # the revenue/EBIT cells the user changed. The numbers themselves already flow
+    # through stage 0 (the edited fid's fresh modeldata); this tells the writer WHY
+    # they changed so it treats them as user-confirmed fact. Always present so
+    # {{forecast_changes}} never errors.
+    context["forecast_changes"] = (
+        (params or {}).get("forecast_changes") or "(Ennusteita ei muutettu.)"
+    )
     # Round-2 maximal-preserve baseline: round-1's enrichment + report, so the
     # refinement LAYERS the user's fix onto the good report instead of re-rolling.
     context["previous_enrichment"] = (params or {}).get("previous_enrichment") \

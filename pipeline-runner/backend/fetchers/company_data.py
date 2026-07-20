@@ -33,6 +33,7 @@ async def fetch_company_data(identifier: str, params: dict) -> dict:
         industry_code=params.get("industry_code"),
         industry_id=params.get("industry_id"),
         industry_tree=params.get("industry_tree"),
+        skip_estimate_generation=bool(params.get("skip_estimate_generation")),
     ):
         if ev.get("step") == "error":
             raise RuntimeError(ev.get("message") or "Valuatum-haku epäonnistui")

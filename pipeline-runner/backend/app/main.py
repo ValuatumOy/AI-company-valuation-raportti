@@ -2,6 +2,7 @@
 import asyncio
 import hmac
 import json
+import math
 import os
 import re
 from contextlib import asynccontextmanager
@@ -11,15 +12,19 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import ValidationError
 from sse_starlette.sse import EventSourceResponse
 
 load_dotenv()
 
-from . import email_delivery, openrouter, report, runner, seed, store, validators, valuatum  # noqa: E402
+from . import (  # noqa: E402
+    email_delivery, forecast_import, forecast_interpret, openrouter, report, runner, seed, store,
+    validators, valuatum,
+)
 from .models import (  # noqa: E402
-    AccessKeyIn, AccessKeyLimitIn, CheckoutGenerateIn, CompareIn, ExpertGenerateIn, FetchIn, OrderIn,
-    OrderStatusIn, PipelineIn, RedeemRoundIn, ReorderIn, Round2In, RunIn, StageIn,
-    ValidateIn, ValuatumExportIn,
+    AccessKeyIn, AccessKeyLimitIn, CheckoutGenerateIn, CompareIn, ExpertGenerateIn, FetchIn,
+    ForecastEdit, ForecastPreviewIn, GenerateForecastIn, OrderIn, OrderStatusIn, PipelineIn,
+    RedeemRoundIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
 from valuatum_kit.config import mcp_url  # noqa: E402
@@ -50,7 +55,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-16-scenario-probabilities"
+BUILD = "2026-07-20-forecast-editing"
 
 # Round-2 refinement writer. Preserve-and-patch is an editing task, not creative
 # writing — Sonnet 5 ($2/$10) does it at 1/2.5 of Opus 4.8's price; round-1
@@ -108,7 +113,8 @@ _EXPERT_GET = re.compile(
     r"|expert/me)$"
 )
 _EXPERT_POST = re.compile(
-    r"^/api/(expert/generate|runs/[^/]+/round2(/checkout|/redeem)?)$"
+    r"^/api/(expert/generate|runs/[^/]+/"
+    r"(round2(/checkout|/redeem)?|forecast-preview|fetch-forecast|generate-forecast))$"
 )
 
 
@@ -384,6 +390,9 @@ _RATE_RULES = {
     # stripe_session_id, and VALU_DAILY_USD_CAP is the real money backstop — this
     # is only a runaway-loop guard, so it must be far above any real hour's sales.
     "checkout": (40, 3600.0),
+    # Cheap LLM interpretation call. This does not consume a report credit or
+    # import anything, but a runaway preview loop should still be bounded.
+    "forecast_preview": (20, 60.0),
 }
 
 
@@ -519,7 +528,7 @@ async def _stream_progress(rid):
     paid pipeline (bypassing the _RUN_TASKS dedup and credit consumption) — a
     finished report could be re-run for free just by opening its stream URL.
     Execution now happens only via POST /start's background task."""
-    terminal = {"ok", "error", "validation_failed"}
+    terminal = {"ok", "error", "validation_failed", "awaiting_forecast"}
     last = None
     while True:
         run = store.get_run(rid)
@@ -555,7 +564,8 @@ async def stream_run(rid: str, request: Request):
 _RUN_TASKS: dict[str, asyncio.Task] = {}
 
 
-async def _drive_run(rid: str, only=None, from_order=None):
+async def _drive_run(rid: str, only=None, from_order=None, completion_status=None):
+    task_removed = False
     try:
         run = _run_with_params(rid)
         if not run:
@@ -574,6 +584,14 @@ async def _drive_run(rid: str, only=None, from_order=None):
     finally:
         try:
             final_run = store.get_run(rid)
+            if (completion_status and final_run
+                    and final_run.get("status") == "ok"):
+                # Make continuation safe as soon as the UI sees the awaiting
+                # state: remove the completed stage-0 task before publishing it.
+                _RUN_TASKS.pop(rid, None)
+                task_removed = True
+                store.set_run_status(rid, completion_status)
+                final_run = store.get_run(rid)
             if final_run and final_run.get("status") == "ok":
                 readiness = store.report_readiness(rid)
                 if readiness["ready"]:
@@ -587,15 +605,19 @@ async def _drive_run(rid: str, only=None, from_order=None):
                           f"{readiness['issues']}", flush=True)
         except Exception as e:
             print(f"report email delivery failed for {rid}: {e}", flush=True)
-        _RUN_TASKS.pop(rid, None)
+        if not task_removed:
+            _RUN_TASKS.pop(rid, None)
 
 
-def _start_bg(rid: str, only=None, from_order=None) -> bool:
+def _start_bg(rid: str, only=None, from_order=None, completion_status=None) -> bool:
     task = _RUN_TASKS.get(rid)
     if task and not task.done():
         return False
     _RUN_TASKS[rid] = asyncio.create_task(
-        _drive_run(rid, only=only, from_order=from_order)
+        _drive_run(
+            rid, only=only, from_order=from_order,
+            completion_status=completion_status,
+        )
     )
     return True
 
@@ -618,7 +640,9 @@ async def start_run(rid: str, request: Request,
 async def round2_run(rid: str, body: Round2In, request: Request):
     """Round 2: clone the parent run (reuse its stage-0 FAKTAT), fold the user's
     clarifications into params, and re-run from enrichment so the corrected facts
-    reshape the locked business thesis and the scenarios."""
+    reshape the locked business thesis and the scenarios. Forecast edits belong
+    to the same included round; they first import a new ValuBuild model and then
+    re-run from stage 0 against its fresh data."""
     _check_not_paused()
     parent = _require_run_access(rid, request)
     # Round-2 is credit-free, so cap refinements per report — otherwise one key
@@ -633,21 +657,33 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     caller_key = getattr(request.state, "access_key", None)
     key_row = store.get_access_key(caller_key) if caller_key else None
     uncapped = key_row is not None and (key_row["generations_limit"] or 0) <= 0
+    # The cap gates BOTH branches before any import runs: a forecast edit must not
+    # trigger a (paid, uncancellable) ValuBuild import if the round isn't free/paid.
     if not uncapped and store.lineage_depth(rid) >= max_r2:
         raise HTTPException(
             429, f"Tarkennuskierrosten enimmäismäärä ({max_r2}) on jo käytetty "
                  "tälle raportille."
         )
-    new_rid = _start_refinement_round(
-        rid, parent, body.clarifications, body.clarifications_free_text,
-        show_old_numbers=body.show_old_numbers,
-        scenario_probabilities=body.scenario_probabilities,
-    )
+    if body.forecast_edits:
+        new_rid = await _start_forecast_import_round(
+            rid, parent, body.forecast_edits,
+            clarifications=body.clarifications,
+            clarifications_free_text=body.clarifications_free_text,
+            show_old_numbers=body.show_old_numbers,
+            scenario_probabilities=body.scenario_probabilities,
+        )
+    else:
+        new_rid = _start_refinement_round(
+            rid, parent, body.clarifications, body.clarifications_free_text,
+            show_old_numbers=body.show_old_numbers,
+            scenario_probabilities=body.scenario_probabilities,
+        )
     return {"run_id": new_rid, "parent_run_id": rid}
 
 
 def _start_refinement_round(rid, parent, clarifications, clarifications_free_text,
-                            show_old_numbers=False, scenario_probabilities=None) -> str:
+                            show_old_numbers=False, scenario_probabilities=None,
+                            forecast_edits=None, forecast_changes=None, new_fid=None) -> str:
     # Maximal-preserve: hand the round the prior enrichment + assembled report
     # so it refines (keep the good, apply the fix) instead of regenerating blind.
     prev_enrichment = next(
@@ -655,7 +691,7 @@ def _start_refinement_round(rid, parent, clarifications, clarifications_free_tex
          if r.get("order") == 1),
         None,
     )
-    new_rid = store.clone_run(rid, params={
+    params = {
         "clarifications": [
             c.model_dump() if hasattr(c, "model_dump") else c for c in clarifications
         ],
@@ -671,15 +707,301 @@ def _start_refinement_round(rid, parent, clarifications, clarifications_free_tex
         # Careful preserve-and-patch is an editing task, not creative writing —
         # use Opus for the round-2 writer whatever round 1's writer happens to be.
         "round2_writer_model": ROUND2_WRITER_MODEL,
-    })
-    # NOTE: every refinement round MUST re-run stage 1 (from_order=1): the
-    # enrichment stage is where clarifications get folded in (1_enrichment.txt
-    # KIERROS 2 -KURI) — the writer prompt has no {{clarifications}} of its
-    # own, it consumes the corrected enrichment. That stage is
-    # maximal-preserve + targeted search, so it's cheap (~$0.15), not a full
-    # re-research.
+    }
+    if new_fid is not None:
+        # Forecast-edit round (ACE #3048): re-fid to the freshly imported model
+        # and re-run from stage 0 (which refetches the edited fid's modeldata) with
+        # the estimate-generation gate bypassed so the user's values survive.
+        params["forecast_edits"] = forecast_edits
+        params["forecast_changes"] = forecast_changes
+        params["skip_estimate_generation"] = True
+        new_rid = store.clone_run(rid, params=params, identifier=str(new_fid))
+        _start_bg(new_rid, from_order=0)
+        return new_rid
+    new_rid = store.clone_run(rid, params=params)
+    # NOTE: every clarifications-only refinement round MUST re-run stage 1
+    # (from_order=1): the enrichment stage is where clarifications get folded in
+    # (1_enrichment.txt KIERROS 2 -KURI) — the writer prompt has no
+    # {{clarifications}} of its own, it consumes the corrected enrichment. That
+    # stage is maximal-preserve + targeted search, so it's cheap (~$0.15), not a
+    # full re-research.
     _start_bg(new_rid, from_order=1)
     return new_rid
+
+
+# Variables a user may edit in v1 — mirrors the ValuBuild server-side allowlist
+# (EstimateController.ALLOWED_VARNAMES). Kept in sync manually for now.
+FORECAST_ALLOWED_VARNAMES = {"ns", "ebit"}
+_FORECAST_LABELS = {"ns": "Liikevaihto", "ebit": "EBIT"}
+
+
+def _validate_forecast_edits(edits):
+    """Light server-side guard before the (paid, uncancellable) import. ValuBuild
+    validates again authoritatively; this just rejects obvious garbage early."""
+    if not edits:
+        raise HTTPException(400, "forecast_edits ei saa olla tyhjä.")
+    seen = set()
+    for e in edits:
+        varname = (e.varname or "").strip()
+        if varname not in FORECAST_ALLOWED_VARNAMES:
+            raise HTTPException(400, f"Tuntematon muuttuja: {e.varname!r}")
+        if e.year < 2000 or e.year > 2100:
+            raise HTTPException(400, f"Virheellinen ennustevuosi: {e.year}")
+        key = (varname, e.year)
+        if key in seen:
+            raise HTTPException(400, f"Sama ennustesolu annettiin kahdesti: {varname} {e.year}")
+        seen.add(key)
+        if not math.isfinite(e.value):
+            raise HTTPException(400, "Ennustearvon on oltava äärellinen luku.")
+        if varname == "ns" and e.value <= 0:
+            raise HTTPException(400, "Liikevaihdon (ns) on oltava positiivinen.")
+
+
+def _forecast_change_summary(parent, edits) -> str:
+    """Human-readable 'old → new' list for the writer context. Old values come
+    from the parent run's stage-0 forecast block (tEUR); the edits are in millions
+    (modeldata unit), so ×1000 to compare in the report's tEUR."""
+    forecast = _extract_stage0_forecast(parent) or {}
+    years = forecast.get("years") or []
+    old_by_var = {"ns": forecast.get("net_sales") or [], "ebit": forecast.get("ebit") or []}
+
+    def fmt(v):
+        if not isinstance(v, (int, float)):
+            return "?"
+        return f"{v:,.0f}".replace(",", " ")
+
+    lines = []
+    for e in edits:
+        varname = (e.varname or "").strip()
+        label = _FORECAST_LABELS.get(varname, varname)
+        new_teur = e.value * 1000
+        old_teur = None
+        if e.year in years:
+            arr = old_by_var.get(varname) or []
+            idx = years.index(e.year)
+            if idx < len(arr):
+                old_teur = arr[idx]
+        lines.append(f"- {label} {e.year}: {fmt(old_teur)} → {fmt(new_teur)} tEUR")
+    return "\n".join(lines) if lines else "(Ennusteita ei muutettu.)"
+
+
+def _extract_stage0_forecast(run) -> dict | None:
+    """Return a run's stage-0 forecast block without copying or unit changes."""
+    stage0 = next(
+        (result.get("parsed_json") for result in (run.get("results") or [])
+         if result.get("order") == 0),
+        None,
+    )
+    forecast = (stage0 or {}).get("forecast") if isinstance(stage0, dict) else None
+    return forecast if isinstance(forecast, dict) else None
+
+
+def _forecast_value_teur(forecast: dict, varname: str, year: int):
+    years = forecast.get("years") or []
+    series_name = {"ns": "net_sales", "ebit": "ebit"}.get(varname)
+    values = forecast.get(series_name) or [] if series_name else []
+    if year not in years:
+        return None
+    index = years.index(year)
+    if index >= len(values):
+        return None
+    value = values[index]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _forecast_preview_rows(forecast: dict, edits) -> list[dict]:
+    """Validate edit cells against stage 0 and build tEUR comparison rows."""
+    rows = []
+    for edit in edits:
+        old_teur = _forecast_value_teur(forecast, edit.varname, edit.year)
+        if old_teur is None:
+            raise HTTPException(
+                400,
+                f"Ennusteessa ei ole arvoa muuttujalle {edit.varname!r} vuodelle {edit.year}.",
+            )
+        rows.append({
+            "varname": edit.varname,
+            "year": edit.year,
+            "old": old_teur,
+            "value": edit.value * 1000,
+        })
+    return rows
+
+
+@app.post("/api/runs/{rid}/forecast-preview")
+async def forecast_preview(rid: str, body: ForecastPreviewIn, request: Request):
+    """Interpret free text into a safe, non-importing forecast proposal.
+
+    ``edits[].value`` follows the ValuBuild contract (millions). The comparison
+    ``rows`` use tEUR, matching the stage-0 forecast shown by the UI.
+    """
+    _check_not_paused()
+    run = _require_run_access(rid, request)
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "Ennusteiden muokkauspyyntö ei saa olla tyhjä.")
+    forecast = _extract_stage0_forecast(run)
+    if not forecast:
+        raise HTTPException(400, "Runilta puuttuu stage 0:n ennustedata.")
+    if not _rate_ok("forecast_preview", _client_ip(request)):
+        raise HTTPException(429, "Liian monta ennusteiden esikatselupyyntöä. Yritä hetken kuluttua.")
+
+    try:
+        proposal = await forecast_interpret.interpret(text, forecast)
+    except forecast_interpret.ForecastInterpretError as exc:
+        raise HTTPException(502, str(exc))
+    try:
+        edits = [ForecastEdit.model_validate(edit) for edit in proposal["edits"]]
+    except (KeyError, TypeError, ValidationError) as exc:
+        raise HTTPException(502, "AI-tulkinta palautti virheellisiä ennustemuutoksia.") from exc
+
+    _validate_forecast_edits(edits)
+    rows = _forecast_preview_rows(forecast, edits)
+
+    notes = list(proposal.get("notes") or [])
+    notes.extend(forecast_interpret.magnitude_notes(forecast, edits))
+    notes = list(dict.fromkeys(notes))
+    return {
+        "edits": [edit.model_dump() for edit in edits],
+        "summary": proposal.get("summary") or "",
+        "rows": rows,
+        "notes": notes,
+    }
+
+
+@app.post("/api/runs/{rid}/fetch-forecast")
+async def fetch_forecast(rid: str, request: Request):
+    """Run only stage 0 and stop in the round-1 forecast editing state."""
+    _check_not_paused()
+    run = _require_run_access(rid, request)
+    if any(result.get("order", 0) >= 1 for result in (run.get("results") or [])):
+        raise HTTPException(
+            409,
+            "Raportin kirjoitusvaiheet on jo aloitettu; käytä maksullista tarkennuskierrosta.",
+        )
+    forecast = _extract_stage0_forecast(run)
+    if run.get("status") == "awaiting_forecast" and forecast:
+        return {
+            "run_id": rid,
+            "started": False,
+            "status": "awaiting_forecast",
+            "forecast": forecast,
+        }
+    if run.get("status") == "importing_forecast":
+        raise HTTPException(409, "Ennustemuutosten tuonti on jo käynnissä.")
+    started = _start_bg(rid, only=0, completion_status="awaiting_forecast")
+    return {
+        "run_id": rid,
+        "started": started,
+        "status": "running" if started else run.get("status"),
+        "forecast": None,
+    }
+
+
+@app.post("/api/runs/{rid}/generate-forecast")
+async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request):
+    """Continue an awaiting round-1 run, optionally after a forecast import."""
+    _check_not_paused()
+    run = _require_run_access(rid, request)
+    if run.get("status") != "awaiting_forecast":
+        raise HTTPException(409, "Run ei odota ennusteiden hyväksyntää.")
+    forecast = _extract_stage0_forecast(run)
+    if not forecast:
+        raise HTTPException(400, "Runilta puuttuu stage 0:n ennustedata.")
+    task = _RUN_TASKS.get(rid)
+    if task and not task.done():
+        raise HTTPException(409, "Runin taustatehtävä on vielä käynnissä.")
+
+    edits = body.forecast_edits or []
+    if not edits:
+        store.set_run_status(rid, "running")
+        started = _start_bg(rid, from_order=1)
+        if not started:
+            store.set_run_status(rid, "awaiting_forecast")
+            raise HTTPException(409, "Raportin generointi on jo käynnissä.")
+        return {"run_id": rid, "started": True, "forecast_edited": False}
+
+    _validate_forecast_edits(edits)
+    _forecast_preview_rows(forecast, edits)
+    try:
+        base_fid = int(str(run.get("identifier")).strip())
+    except (TypeError, ValueError):
+        raise HTTPException(
+            400, "Ennusteiden muokkaus vaatii FID-pohjaisen runin (ei liitettyä FAKTAT-dataa)."
+        )
+    payload = [
+        {"varname": (edit.varname or "").strip(), "year": edit.year, "value": edit.value}
+        for edit in edits
+    ]
+
+    # Claim the awaiting run synchronously before the first await. A concurrent
+    # duplicate request then sees importing_forecast and cannot launch a second
+    # paid, uncancellable ValuBuild import.
+    store.set_run_status(rid, "importing_forecast")
+    try:
+        new_fid = await forecast_import.import_and_wait(base_fid, payload)
+    except forecast_import.ForecastImportError as exc:
+        store.set_run_status(rid, "awaiting_forecast")
+        raise HTTPException(502, str(exc))
+    except asyncio.CancelledError:
+        store.set_run_status(rid, "awaiting_forecast")
+        raise
+    except Exception:
+        store.set_run_status(rid, "awaiting_forecast")
+        raise
+
+    params = dict(run.get("params") or {})
+    params.update({
+        "forecast_edits": payload,
+        "forecast_changes": _forecast_change_summary(run, edits),
+        "skip_estimate_generation": True,
+    })
+    store.rebind_run_forecast(rid, new_fid, params)
+    started = _start_bg(rid, from_order=0)
+    if not started:
+        store.set_run_status(rid, "error")
+        raise HTTPException(409, "Raportin generointia ei voitu käynnistää.")
+    return {
+        "run_id": rid,
+        "started": True,
+        "forecast_edited": True,
+        "identifier": str(new_fid),
+    }
+
+
+async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
+                                       clarifications_free_text="",
+                                       show_old_numbers=False,
+                                       scenario_probabilities=None) -> str:
+    """Import the user's forecast edits into a new ValuBuild fid, then start a
+    refinement round re-fid'd to it (stage 0 onward, gate bypassed). Any
+    clarification answers submitted alongside the edits ride along — the round
+    re-runs stage 1 anyway, which is where they get folded in."""
+    _validate_forecast_edits(edits)
+    try:
+        parent_fid = int(str(parent.get("identifier")).strip())
+    except (TypeError, ValueError):
+        raise HTTPException(
+            400, "Ennusteiden muokkaus vaatii FID-pohjaisen runin (ei liitettyä FAKTAT-dataa)."
+        )
+    payload = [
+        {"varname": (e.varname or "").strip(), "year": e.year, "value": e.value}
+        for e in edits
+    ]
+    try:
+        new_fid = await forecast_import.import_and_wait(parent_fid, payload)
+    except forecast_import.ForecastImportError as exc:
+        # Import failed → no round starts, no quota/lineage consumed.
+        raise HTTPException(502, str(exc))
+    summary = _forecast_change_summary(parent, edits)
+    return _start_refinement_round(
+        rid, parent, clarifications or [], clarifications_free_text or "",
+        show_old_numbers=show_old_numbers,
+        scenario_probabilities=scenario_probabilities,
+        forecast_edits=payload, forecast_changes=summary, new_fid=new_fid,
+    )
 
 
 @app.post("/api/runs/{rid}/round2/checkout")
@@ -691,12 +1013,19 @@ async def round2_checkout(rid: str, body: Round2In, request: Request):
     _require_run_access(rid, request)
     if not STRIPE_SECRET_KEY:
         raise HTTPException(503, "Lisäkierrosten maksut eivät ole vielä käytössä.")
+    # Validate forecast edits before taking payment — a bad edit must fail here,
+    # not after the user has paid for a round that can't run.
+    if body.forecast_edits:
+        _validate_forecast_edits(body.forecast_edits)
     key = getattr(request.state, "access_key", None)
     token = store.create_pending_round(
         rid, key, [c.model_dump() for c in body.clarifications], body.clarifications_free_text,
         scenario_probabilities=(
             body.scenario_probabilities.model_dump()
             if body.scenario_probabilities else None
+        ),
+        forecast_edits=(
+            [e.model_dump() for e in body.forecast_edits] if body.forecast_edits else None
         ),
     )
     site = (os.getenv("CLIENT_SITE_URL") or "").rstrip("/")
@@ -735,13 +1064,38 @@ async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
     if (session.get("payment_status") != "paid"
             or (session.get("metadata") or {}).get("token") != body.token):
         raise HTTPException(402, "Maksua ei voitu vahvistaa.")
-    store.consume_pending_round(body.token)
+    # Claim the token atomically (guards a concurrent double-redeem), but roll
+    # the claim back if the round fails to start: the forecast branch calls
+    # ValuBuild AFTER the payment check and can fail or time out there, and a
+    # burned token would mean money taken with no round and no way to retry.
+    if not store.claim_pending_round(body.token):
+        raise HTTPException(409, "Tämä tarkennuskierros on jo käytetty.")
     parent = store.get_run(rid)
-    new_rid = _start_refinement_round(
-        rid, parent, pending["clarifications"], pending["clarifications_free_text"],
-        show_old_numbers=body.show_old_numbers,
-        scenario_probabilities=pending.get("scenario_probabilities"),
-    )
+    forecast_edits = pending.get("forecast_edits")
+    try:
+        if forecast_edits:
+            # Same two-branch logic as round2_run: paid forecast-edit round imports a
+            # new fid and re-runs from stage 0. Rebuild typed edits from the staged
+            # dicts; staged clarification answers ride along like in round2_run.
+            edits = [ForecastEdit(**e) for e in forecast_edits]
+            new_rid = await _start_forecast_import_round(
+                rid, parent, edits,
+                clarifications=pending["clarifications"],
+                clarifications_free_text=pending["clarifications_free_text"],
+                show_old_numbers=body.show_old_numbers,
+                scenario_probabilities=pending.get("scenario_probabilities"),
+            )
+        else:
+            new_rid = _start_refinement_round(
+                rid, parent, pending["clarifications"], pending["clarifications_free_text"],
+                show_old_numbers=body.show_old_numbers,
+                scenario_probabilities=pending.get("scenario_probabilities"),
+            )
+    except BaseException:
+        # BaseException: a client disconnect cancels this handler mid-import
+        # (CancelledError), and the paid token must survive that too.
+        store.release_pending_round(body.token)
+        raise
     return {"run_id": new_rid, "parent_run_id": rid}
 
 
@@ -921,9 +1275,11 @@ def _create_generation_run(
     *, fid: int, company_name: str, company_code=None, industry_text=None,
     industry_code=None, industry_id=None, industry_tree=None,
     delivery_email=None, user_input="", pipeline_id=None, access_key=None,
+    forecast_mode=False,
 ) -> str:
     """Shared by the invite-key expert flow and the public paid checkout flow:
-    build the stage-0 params and kick off a background run."""
+    build the stage-0 params and kick off a background run. Forecast mode stops
+    after stage 0 so the same purchased round can be edited before writing."""
     pid = _default_pipeline_id(pipeline_id)
     if not pid or not store.get_pipeline(pid):
         raise HTTPException(404, "pipeline not found")
@@ -946,7 +1302,10 @@ def _create_generation_run(
     rid = store.create_run(
         pid, None, True, identifier=str(fid), params=params, access_key=access_key,
     )
-    _start_bg(rid)
+    if forecast_mode:
+        _start_bg(rid, only=0, completion_status="awaiting_forecast")
+    else:
+        _start_bg(rid)
     return rid
 
 
@@ -967,8 +1326,9 @@ async def expert_generate(body: ExpertGenerateIn, request: Request):
         industry_id=body.industry_id, industry_tree=body.industry_tree,
         delivery_email=body.delivery_email, user_input=body.user_input,
         pipeline_id=body.pipeline_id, access_key=key,
+        forecast_mode=body.mode == "forecast",
     )
-    return {"run_id": rid}
+    return {"run_id": rid, "mode": body.mode}
 
 
 def _pick_checkout_candidate(candidates: list[dict]) -> dict | None:
