@@ -204,6 +204,20 @@ def set_run_status(rid, status):
     db.execute("UPDATE runs SET status=? WHERE id=?", (status, rid))
 
 
+def rebind_run_forecast(rid, identifier, params):
+    """Point an awaiting round-1 run at an imported forecast model.
+
+    input_data must be cleared with the identifier swap: otherwise the runner's
+    manual-input shortcut could silently reuse the old FID's stage-0 data.
+    Existing stage-0 is intentionally kept until the new stage-0 execution
+    overwrites it, so the operation remains auditable if starting the task fails.
+    """
+    db.execute(
+        "UPDATE runs SET identifier=?, input_data=?, params=?, status=? WHERE id=?",
+        (str(identifier), None, db.jdump(params or {}), "running", rid),
+    )
+
+
 def delete_run(rid):
     """Delete a run and its stage results. Explicit child delete so it works on
     SQLite (where FK cascade needs PRAGMA) and Postgres alike."""
@@ -214,8 +228,13 @@ def delete_run(rid):
 def reset_stale_runs():
     """On startup, any run still marked 'running' is an orphan from a previous
     process (a deploy/restart killed its background task). Flip to error so the
-    UI and history show a terminal state instead of a perpetual 'running'."""
+    UI and history show a terminal state instead of a perpetual 'running'. An
+    interrupted forecast import returns to the retryable pre-generation state."""
     db.execute("UPDATE runs SET status=? WHERE status=?", ("error", "running"))
+    db.execute(
+        "UPDATE runs SET status=? WHERE status=?",
+        ("awaiting_forecast", "importing_forecast"),
+    )
 
 
 def usd_spent_today():

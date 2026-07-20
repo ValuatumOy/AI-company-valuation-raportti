@@ -179,12 +179,23 @@ def test_company_data_forwards_skip_flag(monkeypatch):
 # ---- round2 endpoint: two-branch logic --------------------------------------
 
 def _seed_client(monkeypatch):
-    from starlette.testclient import TestClient
     from app import main, seed, store
 
+    class ASGIClient:
+        def post(self, path, **kwargs):
+            async def send():
+                transport = httpx.ASGITransport(app=main.app)
+                async with httpx.AsyncClient(
+                    transport=transport, base_url="http://testserver"
+                ) as client:
+                    return await client.post(path, **kwargs)
+
+            return _run(send())
+
     seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "")
     monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)  # never actually run
-    return TestClient(main.app), main, store
+    return ASGIClient(), main, store
 
 
 def _parent_with_forecast(store, pid, fid="42"):
@@ -198,8 +209,9 @@ def _parent_with_forecast(store, pid, fid="42"):
     return rid
 
 
-def test_round2_forecast_edit_imports_new_fid_and_runs_from_stage0(monkeypatch):
-    c, main, store = _seed_client(monkeypatch)
+def test_forecast_import_round_imports_new_fid_and_runs_from_stage0(monkeypatch):
+    _, main, store = _seed_client(monkeypatch)
+    from app.models import ForecastEdit
 
     async def fake_import(base_fid, values):
         assert base_fid == 42
@@ -213,11 +225,12 @@ def test_round2_forecast_edit_imports_new_fid_and_runs_from_stage0(monkeypatch):
 
     pid = store.list_pipelines()[0]["id"]
     parent = _parent_with_forecast(store, pid)
-    r = c.post(f"/api/runs/{parent}/round2", json={
-        "forecast_edits": [{"varname": "ns", "year": 2026, "value": 60.0}],
-    })
-    assert r.status_code == 200
-    child = store.get_run(r.json()["run_id"])
+    child_rid = _run(main._start_forecast_import_round(
+        parent,
+        store.get_run(parent),
+        [ForecastEdit(varname="ns", year=2026, value=60.0)],
+    ))
+    child = store.get_run(child_rid)
     # Re-fid'd to the imported model, gate bypassed, re-run from stage 0.
     assert child["identifier"] == "4243"
     assert child["params"]["skip_estimate_generation"] is True
@@ -232,11 +245,12 @@ def test_round2_forecast_edit_imports_new_fid_and_runs_from_stage0(monkeypatch):
     assert child.get("input_data") is None
 
 
-def test_round2_forecast_branch_carries_clarifications(monkeypatch):
+def test_forecast_import_round_carries_clarifications(monkeypatch):
     """The feedback panel lets a user answer clarifications AND edit forecasts in
     one submit — the forecast branch must not silently drop the answers (the
     round re-runs stage 1, which is where they get folded in)."""
-    c, main, store = _seed_client(monkeypatch)
+    _, main, store = _seed_client(monkeypatch)
+    from app.models import ClarificationAnswer, ForecastEdit
 
     async def fake_import(base_fid, values):
         return 4243
@@ -245,13 +259,18 @@ def test_round2_forecast_branch_carries_clarifications(monkeypatch):
 
     pid = store.list_pipelines()[0]["id"]
     parent = _parent_with_forecast(store, pid)
-    r = c.post(f"/api/runs/{parent}/round2", json={
-        "forecast_edits": [{"varname": "ns", "year": 2026, "value": 60.0}],
-        "clarifications": [{"id": "q1", "question": "Omistus?", "answer": "100 % perustajilla"}],
-        "clarifications_free_text": "IPR on yhtiöllä itsellään.",
-    })
-    assert r.status_code == 200
-    child = store.get_run(r.json()["run_id"])
+    child_rid = _run(main._start_forecast_import_round(
+        parent,
+        store.get_run(parent),
+        [ForecastEdit(varname="ns", year=2026, value=60.0)],
+        clarifications=[
+            ClarificationAnswer(
+                id="q1", question="Omistus?", answer="100 % perustajilla"
+            )
+        ],
+        clarifications_free_text="IPR on yhtiöllä itsellään.",
+    ))
+    child = store.get_run(child_rid)
     assert child["params"]["clarifications"] == [
         {"id": "q1", "question": "Omistus?", "answer": "100 % perustajilla"}
     ]
@@ -281,8 +300,10 @@ def test_round2_clarifications_branch_unchanged(monkeypatch):
     assert started["kwargs"].get("from_order") == 1
 
 
-def test_round2_forecast_import_failure_starts_no_round(monkeypatch):
-    c, main, store = _seed_client(monkeypatch)
+def test_forecast_import_failure_starts_no_round(monkeypatch):
+    _, main, store = _seed_client(monkeypatch)
+    from fastapi import HTTPException
+    from app.models import ForecastEdit
 
     async def failing_import(base_fid, values):
         raise main.forecast_import.ForecastImportError("ValuBuild kaatui")
@@ -294,11 +315,14 @@ def test_round2_forecast_import_failure_starts_no_round(monkeypatch):
     pid = store.list_pipelines()[0]["id"]
     parent = _parent_with_forecast(store, pid)
     before = store.lineage_depth(parent)
-    r = c.post(f"/api/runs/{parent}/round2", json={
-        "forecast_edits": [{"varname": "ns", "year": 2026, "value": 60.0}],
-    })
-    assert r.status_code == 502
-    assert "ValuBuild kaatui" in r.text
+    with pytest.raises(HTTPException) as exc:
+        _run(main._start_forecast_import_round(
+            parent,
+            store.get_run(parent),
+            [ForecastEdit(varname="ns", year=2026, value=60.0)],
+        ))
+    assert exc.value.status_code == 502
+    assert "ValuBuild kaatui" in str(exc.value.detail)
     # No child run was created → no quota/lineage consumed.
     assert store.lineage_depth(parent) == before
 
@@ -315,7 +339,7 @@ def test_round2_forecast_edit_rejects_bad_varname(monkeypatch):
     assert r.status_code == 400
 
 
-def test_round2_cap_blocks_forecast_import_before_valubuild(monkeypatch):
+def test_free_round2_forecast_edit_requires_checkout_before_cap(monkeypatch):
     c, main, store = _seed_client(monkeypatch)
     monkeypatch.setenv("ROUND2_MAX_PER_RUN", "0")
     monkeypatch.setattr(main.forecast_import, "import_and_wait",
@@ -325,7 +349,8 @@ def test_round2_cap_blocks_forecast_import_before_valubuild(monkeypatch):
     r = c.post(f"/api/runs/{parent}/round2", json={
         "forecast_edits": [{"varname": "ns", "year": 2026, "value": 60.0}],
     })
-    assert r.status_code == 429
+    assert r.status_code == 402
+    assert "checkout" in r.text
 
 
 def test_paid_redeem_runs_forecast_import_branch(monkeypatch):

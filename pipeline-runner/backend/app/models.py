@@ -1,5 +1,5 @@
 """Pydantic v2 request/response schemas."""
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -73,6 +73,9 @@ class ExpertGenerateIn(BaseModel):
     delivery_email: Optional[str] = Field(default=None, max_length=200, pattern=r".+@.+\..+")
     pipeline_id: Optional[str] = None
     user_input: str = Field(default="", max_length=4000)
+    # "forecast" splits round 1 after stage 0 so the user can preview/edit the
+    # deterministic forecast before the expensive writing stages run.
+    mode: Literal["generate", "forecast"] = "generate"
 
 
 class ClarificationAnswer(BaseModel):
@@ -103,6 +106,14 @@ class ForecastEdit(BaseModel):
     varname: str = Field(min_length=1, max_length=32)
     year: int
     value: float
+
+
+class ForecastPreviewIn(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
+
+
+class GenerateForecastIn(BaseModel):
+    forecast_edits: Optional[list[ForecastEdit]] = None
 
 
 class Round2In(BaseModel):
