@@ -640,19 +640,11 @@ async def start_run(rid: str, request: Request,
 async def round2_run(rid: str, body: Round2In, request: Request):
     """Round 2: clone the parent run (reuse its stage-0 FAKTAT), fold the user's
     clarifications into params, and re-run from enrichment so the corrected facts
-    reshape the locked business thesis and the scenarios."""
+    reshape the locked business thesis and the scenarios. Forecast edits belong
+    to the same included round; they first import a new ValuBuild model and then
+    re-run from stage 0 against its fresh data."""
     _check_not_paused()
     parent = _require_run_access(rid, request)
-    if body.forecast_edits:
-        # Post-report forecast changes regenerate the whole report and therefore
-        # always use the paid checkout/redeem flow. Validate first so malformed
-        # input gets a useful 400 without ever reaching Stripe.
-        _validate_forecast_edits(body.forecast_edits)
-        raise HTTPException(
-            402,
-            "Valmiin raportin ennustemuutos vaatii maksullisen "
-            "/round2/checkout- ja /round2/redeem-polun.",
-        )
     # Round-2 is credit-free, so cap refinements per report — otherwise one key
     # can spam unlimited Opus-priced full-report rewrites ($6-runs incident).
     # Depth-based, not a per-node child count: refining round 2's own result
@@ -672,11 +664,20 @@ async def round2_run(rid: str, body: Round2In, request: Request):
             429, f"Tarkennuskierrosten enimmäismäärä ({max_r2}) on jo käytetty "
                  "tälle raportille."
         )
-    new_rid = _start_refinement_round(
-        rid, parent, body.clarifications, body.clarifications_free_text,
-        show_old_numbers=body.show_old_numbers,
-        scenario_probabilities=body.scenario_probabilities,
-    )
+    if body.forecast_edits:
+        new_rid = await _start_forecast_import_round(
+            rid, parent, body.forecast_edits,
+            clarifications=body.clarifications,
+            clarifications_free_text=body.clarifications_free_text,
+            show_old_numbers=body.show_old_numbers,
+            scenario_probabilities=body.scenario_probabilities,
+        )
+    else:
+        new_rid = _start_refinement_round(
+            rid, parent, body.clarifications, body.clarifications_free_text,
+            show_old_numbers=body.show_old_numbers,
+            scenario_probabilities=body.scenario_probabilities,
+        )
     return {"run_id": new_rid, "parent_run_id": rid}
 
 

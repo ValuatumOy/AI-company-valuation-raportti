@@ -339,7 +339,32 @@ def test_round2_forecast_edit_rejects_bad_varname(monkeypatch):
     assert r.status_code == 400
 
 
-def test_free_round2_forecast_edit_requires_checkout_before_cap(monkeypatch):
+def test_free_round2_forecast_edit_uses_included_round_before_cap(monkeypatch):
+    c, main, store = _seed_client(monkeypatch)
+    monkeypatch.setenv("ROUND2_MAX_PER_RUN", "2")
+
+    async def fake_import(base_fid, values):
+        assert base_fid == 42
+        assert values == [{"varname": "ns", "year": 2026, "value": 60.0}]
+        return 4243
+
+    monkeypatch.setattr(main.forecast_import, "import_and_wait", fake_import)
+    started = {}
+    monkeypatch.setattr(main, "_start_bg",
+                        lambda rid, **k: started.update(rid=rid, kwargs=k) or True)
+    pid = store.list_pipelines()[0]["id"]
+    parent = _parent_with_forecast(store, pid)
+    r = c.post(f"/api/runs/{parent}/round2", json={
+        "forecast_edits": [{"varname": "ns", "year": 2026, "value": 60.0}],
+    })
+    assert r.status_code == 200
+    child = store.get_run(r.json()["run_id"])
+    assert child["identifier"] == "4243"
+    assert child["params"]["skip_estimate_generation"] is True
+    assert started["kwargs"].get("from_order") == 0
+
+
+def test_free_round2_forecast_edit_requires_checkout_at_cap(monkeypatch):
     c, main, store = _seed_client(monkeypatch)
     monkeypatch.setenv("ROUND2_MAX_PER_RUN", "0")
     monkeypatch.setattr(main.forecast_import, "import_and_wait",
@@ -349,8 +374,8 @@ def test_free_round2_forecast_edit_requires_checkout_before_cap(monkeypatch):
     r = c.post(f"/api/runs/{parent}/round2", json={
         "forecast_edits": [{"varname": "ns", "year": 2026, "value": 60.0}],
     })
-    assert r.status_code == 402
-    assert "checkout" in r.text
+    assert r.status_code == 429
+    assert "enimmäismäärä" in r.text
 
 
 def test_paid_redeem_runs_forecast_import_branch(monkeypatch):
