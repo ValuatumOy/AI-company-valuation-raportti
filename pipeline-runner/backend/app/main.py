@@ -1309,6 +1309,10 @@ def _create_generation_run(
         params["delivery_email"] = delivery_email.strip()
     if user_input.strip():
         params["user_input"] = user_input.strip()
+    if forecast_mode:
+        # Exposed so the UI can tell the ~1 min forecast data-fetch phase apart
+        # from the 10-20 min report generation and show the right progress copy.
+        params["forecast_mode"] = True
     rid = store.create_run(
         pid, None, True, identifier=str(fid), params=params, access_key=access_key,
     )
