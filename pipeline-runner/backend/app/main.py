@@ -1417,6 +1417,7 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
             industry_code=candidate.get("industry_code"), industry_id=candidate.get("industry_id"),
             industry_tree=candidate.get("industry_tree"), delivery_email=body.email,
             user_input=body.user_input, access_key=key,
+            forecast_mode=body.mode == "forecast",
         )
         store.create_paid_order(
             body.company_name, body.email, body.user_input, body.stripe_session_id,

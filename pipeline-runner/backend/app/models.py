@@ -164,6 +164,10 @@ class CheckoutGenerateIn(BaseModel):
     user_input: str = Field(default="", max_length=4000)
     stripe_session_id: str = Field(min_length=4, max_length=200)
     website: str = ""  # honeypot — humans leave it empty
+    # "forecast" stops the paid run after the data-fetch stage so the buyer can
+    # review/edit revenue+EBIT before the report is written (opt-in at checkout);
+    # "generate" (default) runs straight through and auto-delivers as before.
+    mode: Literal["generate", "forecast"] = "generate"
 
 
 class OrderStatusIn(BaseModel):
