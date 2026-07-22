@@ -592,6 +592,16 @@ async def _drive_run(rid: str, only=None, from_order=None, completion_status=Non
                 task_removed = True
                 store.set_run_status(rid, completion_status)
                 final_run = store.get_run(rid)
+                # Paid forecast-mode run parked for review: email the buyer the
+                # link so an opted-in customer who closed the success page still
+                # gets their report. No-op without a delivery_email / access key.
+                if completion_status == "awaiting_forecast":
+                    try:
+                        result = await email_delivery.send_forecast_ready(rid)
+                        if isinstance(result, dict) and not result.get("sent", True):
+                            print(f"forecast email for {rid} not sent: {result}", flush=True)
+                    except Exception as e:
+                        print(f"forecast email delivery failed for {rid}: {e}", flush=True)
             if final_run and final_run.get("status") == "ok":
                 readiness = store.report_readiness(rid)
                 if readiness["ready"]:

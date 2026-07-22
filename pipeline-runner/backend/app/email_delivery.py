@@ -94,6 +94,46 @@ def _send_with_ses(
     )
 
 
+async def _dispatch(message: EmailMessage, *, region: str, sender: str,
+                    to: str, rid: str) -> dict:
+    """Send a built message via SES, normalising provider errors to sent=False.
+    Shared by the report-ready and forecast-ready emails."""
+    try:
+        response = await asyncio.to_thread(
+            _send_with_ses,
+            region=region,
+            sender=sender,
+            recipient=to,
+            raw_message=message.as_bytes(),
+            run_id=rid,
+        )
+    except NoCredentialsError:
+        return {
+            "sent": False,
+            "reason": "missing-aws-credentials",
+            "detail": "AWS credentials were not available",
+        }
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        return {
+            "sent": False,
+            "reason": "provider-error",
+            "status_code": (
+                exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            ),
+            "code": error.get("Code"),
+            "detail": str(error.get("Message") or "")[:500],
+        }
+    except BotoCoreError as exc:
+        return {
+            "sent": False,
+            "reason": "provider-error",
+            "status_code": None,
+            "detail": type(exc).__name__,
+        }
+    return {"sent": True, "provider": "ses", "id": response.get("MessageId")}
+
+
 async def send_report_ready(rid: str) -> dict:
     """Send the finished run's report to params.delivery_email when configured.
 
@@ -169,42 +209,61 @@ async def send_report_ready(rid: str) -> dict:
         filename=attachment_name,
     )
 
-    try:
-        response = await asyncio.to_thread(
-            _send_with_ses,
-            region=region,
-            sender=sender,
-            recipient=to,
-            raw_message=message.as_bytes(),
-            run_id=rid,
-        )
-    except NoCredentialsError:
-        return {
-            "sent": False,
-            "reason": "missing-aws-credentials",
-            "detail": "AWS credentials were not available",
-        }
-    except ClientError as exc:
-        error = exc.response.get("Error", {})
-        return {
-            "sent": False,
-            "reason": "provider-error",
-            "status_code": (
-                exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            ),
-            "code": error.get("Code"),
-            "detail": str(error.get("Message") or "")[:500],
-        }
-    except BotoCoreError as exc:
-        return {
-            "sent": False,
-            "reason": "provider-error",
-            "status_code": None,
-            "detail": type(exc).__name__,
-        }
+    return await _dispatch(message, region=region, sender=sender, to=to, rid=rid)
 
-    return {
-        "sent": True,
-        "provider": "ses",
-        "id": response.get("MessageId"),
-    }
+
+async def send_forecast_ready(rid: str) -> dict:
+    """Email the buyer a link to review/confirm forecasts before the report is
+    generated (paid forecast-mode run parked at awaiting_forecast). No attachment
+    — the report does not exist yet; the link is the whole point, and without it
+    an opted-in buyer who closes the success page would never get their report."""
+    run = store.get_run(rid)
+    if not run:
+        return {"sent": False, "reason": "run-not-found"}
+    to = _recipient(run)
+    if not to:
+        return {"sent": False, "reason": "no-recipient"}
+    if not _truthy_env("REPORT_EMAIL_ENABLED", "1"):
+        return {"sent": False, "reason": "disabled"}
+    region = _aws_region()
+    sender = _sender()
+    if not region:
+        return {"sent": False, "reason": "missing-aws-region"}
+    if not sender:
+        return {"sent": False, "reason": "missing-sender"}
+    link = _report_link(rid, run)
+    if not link:
+        return {"sent": False, "reason": "no-link"}
+
+    company = (run.get("params") or {}).get("company_name") or "yritys"
+    subject = f"Tarkista ennusteet: {company} -arvonmaaritys"
+    escaped_company = html.escape(str(company))
+    esc_link = html.escape(link)
+    html_body = (
+        "<p>Hei,</p>"
+        f"<p>Kiitos tilauksesta. Ennen kuin luomme {escaped_company} "
+        "-arvonmaaritysraportin, voit tarkistaa ja halutessasi muokata "
+        "liikevaihto- ja EBIT-ennusteita.</p>"
+        f'<p><a href="{esc_link}">Avaa ja vahvista ennusteet</a></p>'
+        "<p>Raportti luodaan vasta kun olet vahvistanut ennusteet linkin takana. "
+        "Voit myos jatkaa suoraan meidan ennusteillamme.</p>"
+        "<p>Ystavallisin terveisin,<br>Valuatum</p>"
+    )
+    text_body = (
+        f"Hei,\n\nKiitos tilauksesta. Ennen kuin luomme {company} "
+        "-arvonmaaritysraportin, voit tarkistaa ja halutessasi muokata "
+        "liikevaihto- ja EBIT-ennusteita.\n\n"
+        f"Avaa ja vahvista ennusteet: {link}\n\n"
+        "Raportti luodaan vasta kun olet vahvistanut ennusteet. "
+        "Voit myos jatkaa suoraan meidan ennusteillamme.\n\n"
+        "Ystavallisin terveisin,\nValuatum"
+    )
+
+    message = EmailMessage(policy=policy.SMTP)
+    message["From"] = sender
+    message["To"] = to
+    message["Subject"] = subject
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
+
+    return await _dispatch(message, region=region, sender=sender, to=to, rid=rid)

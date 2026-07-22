@@ -2342,6 +2342,62 @@ def test_email_delivery_sends_pdf_attachment_with_ses(monkeypatch, tmp_path):
     assert attachments[0].get_payload(decode=True) == b"%PDF-1.4 test"
 
 
+def test_forecast_email_sends_link_without_attachment(monkeypatch):
+    import asyncio
+    from email import policy
+    from email.parser import BytesParser
+    from app import email_delivery
+
+    monkeypatch.setenv("REPORT_EMAIL_ENABLED", "1")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    monkeypatch.setenv("REPORT_EMAIL_FROM", "Valuatum <reports@example.com>")
+    monkeypatch.setenv("CLIENT_SITE_URL", "https://client.example.com")
+    monkeypatch.setattr(email_delivery.store, "get_run", lambda rid: {
+        "id": rid,
+        "params": {"delivery_email": "buyer@testi.fi", "company_name": "Valuatum Oy"},
+        "access_key": "exp_abc123",
+        "parent_run_id": None,
+    })
+
+    calls = {}
+
+    def fake_send(**kwargs):
+        calls.update(kwargs)
+        return {"MessageId": "ses_fc_1"}
+
+    async def inline_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(email_delivery.asyncio, "to_thread", inline_to_thread)
+    monkeypatch.setattr(email_delivery, "_send_with_ses", fake_send)
+
+    out = asyncio.run(email_delivery.send_forecast_ready("run_fc"))
+
+    assert out == {"sent": True, "provider": "ses", "id": "ses_fc_1"}
+    parsed = BytesParser(policy=policy.default).parsebytes(calls["raw_message"])
+    # No attachment (report does not exist yet); link to the review page present.
+    assert not list(parsed.iter_attachments())
+    # plain-text part carries the raw link; html part escapes & -> &amp;
+    text = parsed.get_body(preferencelist=("plain",)).get_content()
+    assert "https://client.example.com/testi?key=exp_abc123&rid=run_fc" in text
+
+
+def test_forecast_email_skipped_without_access_key(monkeypatch):
+    import asyncio
+    from app import email_delivery
+
+    monkeypatch.setenv("REPORT_EMAIL_ENABLED", "1")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    monkeypatch.setenv("REPORT_EMAIL_FROM", "Valuatum <reports@example.com>")
+    monkeypatch.setenv("CLIENT_SITE_URL", "https://client.example.com")
+    # Admin run: delivery_email but no access_key -> no public link -> no email.
+    monkeypatch.setattr(email_delivery.store, "get_run", lambda rid: {
+        "id": rid, "params": {"delivery_email": "x@y.fi"}, "access_key": None,
+    })
+    out = asyncio.run(email_delivery.send_forecast_ready("run_fc"))
+    assert out == {"sent": False, "reason": "no-link"}
+
+
 def test_email_delivery_configures_transient_ses_retries(monkeypatch):
     from app import email_delivery
 
