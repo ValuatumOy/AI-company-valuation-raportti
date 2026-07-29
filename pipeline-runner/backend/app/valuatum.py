@@ -8,6 +8,7 @@ Secrets come from env only: VALUATUM_TOKEN, VALUATUM_MCP_URL.
 Nulls are preserved; nothing is invented.
 """
 import asyncio
+import copy
 import json
 import os
 import re
@@ -15,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import httpx
@@ -43,6 +45,12 @@ def _slug(value: str) -> str:
     return "_".join(p for p in cleaned.split("_") if p) or "company"
 
 
+# Valuatum's /company rejects anything shorter with a 400 ("The search
+# parameter name must contain at least 3 characters"), so gate locally rather
+# than spend a round trip on a guaranteed error.
+MIN_QUERY_LENGTH = 3
+
+
 def _normalize_query(query: str) -> tuple[str, str]:
     """A Finnish y-tunnus is 7 digits + a check digit (hyphen optional, e.g.
     "1612398-8" or "16123988"); anything else is treated as a name search."""
@@ -69,6 +77,20 @@ def _finnish_industry(company: dict) -> str | None:
         name = node.get("name") or {}
         if isinstance(name, dict) and name.get("fi"):
             return str(name["fi"])
+    return None
+
+
+def _company_city(company: dict | None) -> str | None:
+    """/rest/company carries no explicit kotipaikka, but its companyData block
+    has the postal town — the closest thing available, and the same for the vast
+    majority of companies. Postal address first, visiting address as fallback."""
+    data = (company or {}).get("companyData")
+    if not isinstance(data, dict):
+        return None
+    for key in ("POSTIOSOITTEEN_POSTITOIMIPAIKKA", "KAYNTIOSOITTEEN_POSTITOIMIPAIKKA"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return None
 
 
@@ -108,18 +130,65 @@ def _apply_company_metadata(data: dict, metadata: dict | None) -> dict:
     return data
 
 
+# One shared client — and therefore one TLS connection pool — for every
+# Valuatum REST call. A fresh AsyncClient per request meant a full TCP+TLS
+# handshake on every homepage search (~130 ms of the round trip, measured).
+_CLIENT: httpx.AsyncClient | None = None
+
+# /company is the slow part of homepage search (~1.4 s at profindertest), and it
+# gets asked the same question repeatedly: search-as-you-type repeats the query,
+# and the client site looks the SAME company up a second time when the visitor
+# clicks a result (name query for the dropdown, then code query for the company
+# page). A short TTL removes that duplicate round trip. Bounded and in-process —
+# same tradeoff as _RATE_HITS in main.py; move to the DB if this ever runs on
+# more than one instance.
+_ROWS_TTL = float(os.environ.get("VALUATUM_COMPANY_CACHE_TTL", "60"))
+_ROWS_CACHE_MAX = 512
+_ROWS_CACHE: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+
+
+def _client() -> httpx.AsyncClient:
+    global _CLIENT
+    if _CLIENT is None:
+        _CLIENT = httpx.AsyncClient(
+            timeout=20,
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+        )
+    return _CLIENT
+
+
+async def aclose_client() -> None:
+    """Release the pooled connections on app shutdown (called from _lifespan)."""
+    global _CLIENT
+    client, _CLIENT = _CLIENT, None
+    if client is not None:
+        await client.aclose()
+
+
 async def _company_rows(param: str, value: str) -> list[dict]:
     token = os.environ.get("VALUATUM_TOKEN")
     if not token:
         raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(
-            company_url(),
-            params={param: value},
-            headers={"accept": "application/json", "authorization": f"Bearer {token}"},
-        )
+    key = (param, value)
+    now = time.monotonic()
+    cached = _ROWS_CACHE.get(key)
+    if cached and now - cached[0] < _ROWS_TTL:
+        # Deep copy both ways: industry_tree is handed straight to the stage-0
+        # meta block by _apply_company_metadata, so a caller mutating it would
+        # otherwise poison every later hit on this key.
+        return copy.deepcopy(cached[1])
+    resp = await _client().get(
+        company_url(),
+        params={param: value},
+        headers={"accept": "application/json", "authorization": f"Bearer {token}"},
+    )
     resp.raise_for_status()
-    return resp.json() or []
+    rows = resp.json() or []
+    if _ROWS_TTL > 0:
+        if len(_ROWS_CACHE) >= _ROWS_CACHE_MAX:
+            _ROWS_CACHE.clear()  # crude but bounded; entries are cheap to refetch
+        _ROWS_CACHE[key] = (now, copy.deepcopy(rows))
+    return rows
 
 
 async def search_company(query: str) -> list[dict]:
@@ -129,7 +198,7 @@ async def search_company(query: str) -> list[dict]:
     (company, model) pair, since a company can have more than one followed
     model (fid); the caller picks when there's more than one candidate."""
     param, value = _normalize_query(query)
-    if len(value) < 2:
+    if len(value) < MIN_QUERY_LENGTH:
         return []
     rows = await _company_rows(param, value)
     out = []
@@ -147,6 +216,7 @@ async def search_company(query: str) -> list[dict]:
                 "fid": fid,
                 "company_name": c.get("companyName"),
                 "company_code": c.get("companyCode"),
+                "city": _company_city(c),
                 **industry,
                 "analyst_name": m.get("analystName"),
             })
@@ -167,7 +237,7 @@ async def lookup_company_metadata(
     seen: set[tuple[str, str]] = set()
     for query in queries:
         param, value = _normalize_query(str(query))
-        if len(value) < 2 or (param, value) in seen:
+        if len(value) < MIN_QUERY_LENGTH or (param, value) in seen:
             continue
         seen.add((param, value))
         try:
