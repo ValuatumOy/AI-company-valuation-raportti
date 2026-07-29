@@ -2271,10 +2271,12 @@ def test_search_company_maps_models_to_fid_candidates(monkeypatch):
     out = asyncio.run(valuatum.search_company("1612398-8"))
     assert out == [
         {"fid": 184362, "company_name": "Valuatum Oy", "company_code": "1612398-8",
+         "city": None,  # no companyData in this payload
          "industry_text": "Software", "industry_code": "62.100", "industry_id": 123,
          "industry_tree": [{"id": 12, "code": "62", "name": "IT"}],
          "analyst_name": "A"},
         {"fid": 999, "company_name": "Valuatum Oy", "company_code": "1612398-8",
+         "city": None,
          "industry_text": "Software", "industry_code": "62.100", "industry_id": 123,
          "industry_tree": [{"id": 12, "code": "62", "name": "IT"}],
          "analyst_name": "B"},
@@ -2392,6 +2394,26 @@ def test_cached_rows_cannot_be_mutated_by_callers(monkeypatch):
 
     second = asyncio.run(run())
     assert second[0]["industry_tree"]["name"]["fi"] == "Ohjelmistot"
+
+
+def test_company_city_comes_from_company_data():
+    """The client site's Kotipaikka tile. /rest/company has no kotipaikka field,
+    so it reads the postal town, falling back to the visiting address."""
+    from app import valuatum
+
+    postal = {"companyData": {
+        "POSTIOSOITTEEN_POSTITOIMIPAIKKA": "Helsinki",
+        "KAYNTIOSOITTEEN_POSTITOIMIPAIKKA": "Espoo",
+    }}
+    assert valuatum._company_city(postal) == "Helsinki"
+    assert valuatum._company_city(
+        {"companyData": {"KAYNTIOSOITTEEN_POSTITOIMIPAIKKA": "Oulu"}}
+    ) == "Oulu"
+    # Blanks are not a city; neither is a missing or malformed block.
+    assert valuatum._company_city({"companyData": {"POSTIOSOITTEEN_POSTITOIMIPAIKKA": "  "}}) is None
+    assert valuatum._company_city({"companyData": None}) is None
+    assert valuatum._company_city({}) is None
+    assert valuatum._company_city(None) is None
 
 
 def test_apply_company_metadata_hydrates_stage0_meta():

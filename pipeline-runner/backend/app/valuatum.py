@@ -80,6 +80,20 @@ def _finnish_industry(company: dict) -> str | None:
     return None
 
 
+def _company_city(company: dict | None) -> str | None:
+    """/rest/company carries no explicit kotipaikka, but its companyData block
+    has the postal town — the closest thing available, and the same for the vast
+    majority of companies. Postal address first, visiting address as fallback."""
+    data = (company or {}).get("companyData")
+    if not isinstance(data, dict):
+        return None
+    for key in ("POSTIOSOITTEEN_POSTITOIMIPAIKKA", "KAYNTIOSOITTEEN_POSTITOIMIPAIKKA"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _industry_metadata(company: dict | None) -> dict:
     company = company or {}
     return {
@@ -202,6 +216,7 @@ async def search_company(query: str) -> list[dict]:
                 "fid": fid,
                 "company_name": c.get("companyName"),
                 "company_code": c.get("companyCode"),
+                "city": _company_city(c),
                 **industry,
                 "analyst_name": m.get("analystName"),
             })
