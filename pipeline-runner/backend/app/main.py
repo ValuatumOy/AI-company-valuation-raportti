@@ -55,7 +55,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-20-forecast-editing"
+BUILD = "2026-07-29-report-path-emails"
 
 # Round-2 refinement writer. Preserve-and-patch is an editing task, not creative
 # writing — Sonnet 5 ($2/$10) does it at 1/2.5 of Opus 4.8's price; round-1
@@ -422,7 +422,7 @@ async def company_search_public(q: str, request: Request):
     site's homepage search (that page has no invite key to send). One row per
     company, not per followed model — same disambiguation heuristic as the
     checkout-generate endpoint, since the marketing site just needs "does this
-    company exist in Valuatum", not the model picker /testi has."""
+    company exist in Valuatum", not the model picker /raportti has."""
     q = (q or "").strip()
     if len(q) < 2:
         return []
@@ -1041,11 +1041,11 @@ async def round2_checkout(rid: str, body: Round2In, request: Request):
     site = (os.getenv("CLIENT_SITE_URL") or "").rstrip("/")
     key_q = f"&key={key}" if key else ""
     success_url = (
-        f"{site}/testi?rid={rid}{key_q}&paid_round_token={token}"
+        f"{site}{email_delivery.REPORT_PATH}?rid={rid}{key_q}&paid_round_token={token}"
         f"&show_old_numbers={1 if body.show_old_numbers else 0}"
         "&session_id={CHECKOUT_SESSION_ID}"
     )
-    cancel_url = f"{site}/testi?rid={rid}{key_q}"
+    cancel_url = f"{site}{email_delivery.REPORT_PATH}?rid={rid}{key_q}"
     session = await _stripe_create_checkout_session(
         success_url=success_url, cancel_url=cancel_url,
         metadata={"token": token, "rid": rid},
@@ -1347,7 +1347,7 @@ async def expert_generate(body: ExpertGenerateIn, request: Request):
 
 def _pick_checkout_candidate(candidates: list[dict]) -> dict | None:
     """Automated FID pick for the unattended checkout flow (no human in the
-    loop to use the /testi disambiguation picker). Prefer the "Profinder"
+    loop to use the /raportti disambiguation picker). Prefer the "Profinder"
     auto-model, then a parent company_code (no "K" suffix — see HANDOFF for
     the K-suffix group-company convention), else the first result.
     ponytail: heuristic, not guaranteed correct for every company — if this
