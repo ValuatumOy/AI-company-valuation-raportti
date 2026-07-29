@@ -2379,7 +2379,7 @@ def test_forecast_email_sends_link_without_attachment(monkeypatch):
     assert not list(parsed.iter_attachments())
     # plain-text part carries the raw link; html part escapes & -> &amp;
     text = parsed.get_body(preferencelist=("plain",)).get_content()
-    assert "https://client.example.com/testi?key=exp_abc123&rid=run_fc" in text
+    assert "https://client.example.com/raportti?key=exp_abc123&rid=run_fc" in text
 
 
 def test_forecast_email_skipped_without_access_key(monkeypatch):
