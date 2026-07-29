@@ -36,6 +36,7 @@ async def _lifespan(app):
     store.reset_stale_runs()  # clear orphan 'running' rows left by the last restart
     await openrouter.refresh_models()
     yield
+    await valuatum.aclose_client()
 
 
 app = FastAPI(title="Valuation Pipeline Runner", lifespan=_lifespan)
@@ -352,7 +353,7 @@ async def company_search(q: str):
     generation isn't limited to the operator's pre-fetched company list (the
     long-standing FID blocker)."""
     q = (q or "").strip()
-    if len(q) < 2:
+    if len(q) < valuatum.MIN_QUERY_LENGTH:
         return []
     try:
         return await valuatum.search_company(q)
@@ -424,7 +425,7 @@ async def company_search_public(q: str, request: Request):
     checkout-generate endpoint, since the marketing site just needs "does this
     company exist in Valuatum", not the model picker /raportti has."""
     q = (q or "").strip()
-    if len(q) < 2:
+    if len(q) < valuatum.MIN_QUERY_LENGTH:
         return []
     # Own bucket, not the 5/hour order limit — that's sized for order submission,
     # not autocomplete, and a search box blows through 5/hour in one typing

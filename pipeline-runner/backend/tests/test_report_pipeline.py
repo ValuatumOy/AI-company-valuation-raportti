@@ -1,6 +1,7 @@
 """Tests for the v2 pipeline: code assembler, validators, and — most importantly
 — the cover guard (the cover headline corrupted twice in production, so this is
 a required regression guard)."""
+import copy
 import json
 import os
 
@@ -1710,6 +1711,27 @@ def test_public_company_search_dedupes_and_needs_no_auth(monkeypatch):
     assert out[0]["fid"] == 2  # Profinder model preferred over the plain one
 
 
+def test_public_company_search_rejects_short_queries_without_calling_valuatum(monkeypatch):
+    """Valuatum's /company 400s below 3 characters, so a 2-char query must be
+    answered locally instead of spending a round trip on a guaranteed error."""
+    from starlette.testclient import TestClient
+    from app import main
+
+    called = []
+
+    async def fake_search(query):
+        called.append(query)
+        return []
+
+    monkeypatch.setattr(main.valuatum, "search_company", fake_search)
+    c = TestClient(main.app)
+    assert c.get("/api/public/company-search?q=wo").json() == []
+    assert called == []
+
+    c.get("/api/public/company-search?q=wol")
+    assert called == ["wol"]
+
+
 def test_public_checkout_generate_mints_key_and_starts_run(monkeypatch):
     from starlette.testclient import TestClient
     from app import main, seed, store
@@ -2242,6 +2264,10 @@ def test_search_company_maps_models_to_fid_candidates(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr(valuatum.httpx, "AsyncClient", FakeClient)
+    # The client is a module-level singleton and rows are cached per query, so
+    # reset both (monkeypatch restores them after the test).
+    monkeypatch.setattr(valuatum, "_CLIENT", None)
+    monkeypatch.setattr(valuatum, "_ROWS_CACHE", {})
     out = asyncio.run(valuatum.search_company("1612398-8"))
     assert out == [
         {"fid": 184362, "company_name": "Valuatum Oy", "company_code": "1612398-8",
@@ -2253,6 +2279,119 @@ def test_search_company_maps_models_to_fid_candidates(monkeypatch):
          "industry_tree": [{"id": 12, "code": "62", "name": "IT"}],
          "analyst_name": "B"},
     ]
+
+
+def _fake_company_client(monkeypatch, calls, rows=None):
+    """Install a fake httpx client that records each construction and GET into
+    `calls`, which the caller then inspects."""
+    from app import valuatum
+
+    payload = rows if rows is not None else [{
+        "companyName": "Valuatum Oy", "companyCode": "1612398-8",
+        "industryText": "Software", "industryCode": "62.100",
+        "industryId": 123, "industryTree": {"name": {"fi": "Ohjelmistot"}},
+        "models": [{"followedModelId": 184362, "analystName": "Profinder"}],
+    }]
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return copy.deepcopy(payload)
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            calls.append("construct")
+
+        async def get(self, url, params=None, headers=None):
+            calls.append(("get", params[list(params)[0]]))
+            return FakeResponse()
+
+    monkeypatch.setenv("VALUATUM_TOKEN", "tok")
+    monkeypatch.setattr(valuatum.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(valuatum, "_CLIENT", None)
+    monkeypatch.setattr(valuatum, "_ROWS_CACHE", {})
+
+
+def test_company_rows_are_cached_within_ttl(monkeypatch):
+    """The homepage search box repeats queries, and the client site looks the
+    same company up again when the visitor clicks a result. Profinder's
+    /company is ~1.4 s, so a repeat inside the TTL must not go out again."""
+    import asyncio
+    from app import valuatum
+
+    calls = []
+    _fake_company_client(monkeypatch, calls)
+    monkeypatch.setattr(valuatum, "_ROWS_TTL", 60.0)
+
+    async def run():
+        first = await valuatum.search_company("1612398-8")
+        second = await valuatum.search_company("1612398-8")
+        third = await valuatum.search_company("Valuatum")  # different query
+        return first, second, third
+
+    first, second, third = asyncio.run(run())
+
+    assert first == second           # cache hit returns the same data
+    assert third                     # and a different query still resolves
+    gets = [c for c in calls if c != "construct"]
+    assert gets == [("get", "1612398-8"), ("get", "Valuatum")]
+
+
+def test_expired_cache_entry_refetches(monkeypatch):
+    import asyncio
+    from app import valuatum
+
+    calls = []
+    _fake_company_client(monkeypatch, calls)
+    monkeypatch.setattr(valuatum, "_ROWS_TTL", 0.0001)
+
+    async def run():
+        await valuatum.search_company("1612398-8")
+        await asyncio.sleep(0.01)
+        await valuatum.search_company("1612398-8")
+
+    asyncio.run(run())
+    assert [c for c in calls if c != "construct"] == [
+        ("get", "1612398-8"), ("get", "1612398-8"),
+    ]
+
+
+def test_http_client_is_reused_across_calls(monkeypatch):
+    """One TLS handshake, not one per search."""
+    import asyncio
+    from app import valuatum
+
+    calls = []
+    _fake_company_client(monkeypatch, calls)
+    monkeypatch.setattr(valuatum, "_ROWS_TTL", 0.0)  # force a real call each time
+
+    async def run():
+        await valuatum.search_company("1612398-8")
+        await valuatum.search_company("Valuatum")
+
+    asyncio.run(run())
+    assert calls.count("construct") == 1
+
+
+def test_cached_rows_cannot_be_mutated_by_callers(monkeypatch):
+    """industry_tree is handed to the stage-0 meta block, so a caller mutating
+    it must not poison the cache for the next visitor."""
+    import asyncio
+    from app import valuatum
+
+    calls = []
+    _fake_company_client(monkeypatch, calls)
+    monkeypatch.setattr(valuatum, "_ROWS_TTL", 60.0)
+
+    async def run():
+        first = await valuatum.search_company("1612398-8")
+        first[0]["industry_tree"]["name"]["fi"] = "MUTATED"
+        return await valuatum.search_company("1612398-8")
+
+    second = asyncio.run(run())
+    assert second[0]["industry_tree"]["name"]["fi"] == "Ohjelmistot"
 
 
 def test_apply_company_metadata_hydrates_stage0_meta():
