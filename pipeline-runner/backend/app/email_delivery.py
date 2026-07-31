@@ -334,6 +334,21 @@ def _admin_ready() -> tuple[str, str, str] | dict:
     return region, sender, _admin_recipient()
 
 
+_EMAIL_VALUE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _cell_html(value: str) -> str:
+    """Clickable where it makes sense. A report link pasted as bare text is a
+    link the reader has to copy out by hand, and mail clients only autolink the
+    plain-text part — which is not the part they are looking at."""
+    escaped = html.escape(value)
+    if value.startswith(("https://", "http://")):
+        return f'<a href="{escaped}">{escaped}</a>'
+    if _EMAIL_VALUE.match(value):
+        return f'<a href="mailto:{escaped}">{escaped}</a>'
+    return escaped
+
+
 def _admin_message(
     subject: str,
     intro: str,
@@ -349,7 +364,7 @@ def _admin_message(
         text_lines.append(f"{label}: {shown}")
         html_rows.append(
             f'<tr><td style="color:#666;padding:4px 16px 4px 0;vertical-align:top;">'
-            f"{html.escape(str(label))}</td><td>{html.escape(shown)}</td></tr>"
+            f"{html.escape(str(label))}</td><td>{_cell_html(shown)}</td></tr>"
         )
     html_body = (
         f"<p><strong>{html.escape(intro)}</strong></p>"
