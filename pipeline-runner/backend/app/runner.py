@@ -409,8 +409,38 @@ def _fmt_clarifications(items, free_text):
     )
 
 
+HEARTBEAT_SECONDS = float(os.getenv("VALU_HEARTBEAT_SECONDS") or 30)
+
+
+async def _heartbeat_loop(rid, interval=None):
+    """Stamp proof-of-life while a run executes.
+
+    It has to tick on a timer rather than at stage boundaries: the writer is a
+    single 20–35 minute HTTP call, so a run that only stamped between stages
+    would look abandoned for most of its life."""
+    while True:
+        try:
+            store.touch_heartbeat(rid)
+        except Exception:  # a DB blip must never kill the run it is watching
+            pass
+        await asyncio.sleep(interval or HEARTBEAT_SECONDS)
+
+
 async def run_stages(run, stages, only=None, from_order=None):
-    """Async generator yielding SSE event dicts. Persists each StageResult."""
+    """Async generator yielding SSE event dicts. Persists each StageResult.
+
+    Wraps the stage loop with the heartbeat ticker so every execution path —
+    background runs, admin reruns, streamed compares — advertises that it is
+    alive, and the orphan sweep can tell a live run from an abandoned one."""
+    ticker = asyncio.create_task(_heartbeat_loop(run["id"]))
+    try:
+        async for event in _run_stages(run, stages, only=only, from_order=from_order):
+            yield event
+    finally:
+        ticker.cancel()
+
+
+async def _run_stages(run, stages, only=None, from_order=None):
     rid = run["id"]
     input_data = run.get("input_data")
     stop_on_failure = run.get("stop_on_failure", True)
@@ -589,6 +619,15 @@ async def run_stages(run, stages, only=None, from_order=None):
                 res = retry
 
         store.upsert_result(rid, res)
+
+        # Stage failures were persisted to stage_results and never logged, so a
+        # dead run left NOTHING in the Railway log — the 2026-07-31 diagnosis had
+        # to be done from the database. One line per failure, truncated: the
+        # error text can carry a whole model response.
+        if res["status"] in ("error", "validation_failed"):
+            detail = (res.get("error_message") or "")[:500].replace("\n", " ")
+            print(f"run {rid} stage {s['order']} ({s['name']}) {res['status']}: "
+                  f"{detail or '(ei virheilmoitusta)'}", flush=True)
 
         if res["status"] in ("ok", "validation_failed"):
             _contribute(context, s, _output_value(res))

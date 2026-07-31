@@ -1,5 +1,79 @@
 # Handoff — 2026-07-31 (read this first)
 
+## 2026-07-31 (cont.) — Runs survive a deploy: orphan heartbeat + auto-resume
+
+Root cause of the colleague's "raportti ei läpäissyt tarkistuksia: run status is
+'error' … missing report sections 1–17" on run `8dfd3918`: **we killed it by
+deploying.** Stage 0 (06:12 UTC) and stage 1 (09:14 UTC, $0.16) were `ok`; the
+writer stage started 09:14:25 and was still running when the internal-alert PRs
+were merged (12:40/12:56 EEST = 09:40/09:56 UTC) and Railway replaced the
+container. The old `reset_stale_runs()` then flipped the *run* row to `error` on
+boot but left the *stage* row at `running` — so no stage was named, the client's
+per-stage error message never triggered, nothing was logged (there is no
+`print()` anywhere in runner/openrouter/valuatum/store — stage failures are
+persisted, never logged), no alert fired, and the credit was never refunded
+(the refund lives at the end of `run_stages`, which never returned).
+
+- **`runs.heartbeat_at`** (db.py + both migration lists, stamped at creation):
+  `status='running'` alone cannot distinguish mid-writer-stage from
+  killed-20-minutes-ago. `runner._heartbeat_loop` ticks it every 30 s from a
+  wrapper around the stage loop — it has to be a timer, not a stage boundary,
+  because the writer is one 20–35 min call.
+- **`store.reset_stale_runs()` no longer blanket-errors running rows.** That
+  UPDATE was also unsafe during a rolling deploy: it marked runs owned by the
+  still-live previous container as failed. It now only reverts
+  `importing_forecast` → `awaiting_forecast` as before.
+- **`main._recover_stale_runs()`** runs in the lifespan: adopts runs whose
+  heartbeat is stale, resumes each from the first stage that isn't
+  ok/validation_failed/skipped (completed stages are reused, not re-paid), and
+  claims the run by stamping the heartbeat before starting. A run killed after
+  its last stage resumes past the end — free, and it makes the normal readiness
+  + delivery path run. A forecast-mode run killed inside stage 0 parks at
+  `awaiting_forecast` again instead of running through to a report.
+- **Give-up path** (`store.fail_stale_run`) when a guard trips — paused backend,
+  `VALU_RESUME_MAX_ATTEMPTS` (2) exhausted, spend cap, missing pipeline: flips
+  the frozen stage rows to `error` with a readable Finnish message, refunds the
+  credit under the runner's guards, logs, and fires `send_admin_run_failed`.
+  This is also the fix for the opaque "missing sections" message.
+- **Every failure alert leads with the action, in one line:** "Automaattinen
+  generointi epäonnistui — tee raportti käsin ja lähetä se asiakkaalle" (and the
+  equivalents for pidätetty / lähetys epäonnistui). The customer knows nothing
+  about runs or credits; they are waiting for a report, so a refunded credit is
+  bookkeeping, not a resolution. Detail belongs in the metadata rows — a test
+  caps the intro at 120 chars so the paragraph does not grow back.
+- **Every failure alert now carries a `Syy` row.** When no reason is passed,
+  `email_delivery._stage_failure_reason` derives one from the first failed stage
+  ("vaihe 2 (Raportti): OpenRouter 502 …") — the DB always knew, the email only
+  ever said `Tila: error`. The orphan path passes its own reason and states only
+  what was observed ("prosessi ei enää vastannut"), not a cause: a crash, an OOM
+  kill or a vanished host are indistinguishable from a deploy at that point.
+- **Cost caveat:** the interrupted provider call is billed even though the row
+  recorded $0, so a resume genuinely re-pays for that stage. Hence the attempt
+  cap; `VALU_RUN_USD_CAP` still applies. Env knobs are in DEPLOY.md.
+- **Logging, the reason the diagnosis was archaeology:** stage failures are now
+  logged (`runner`, one truncated line per error/validation_failed — they were
+  persisted to `stage_results` and nothing else), and `_drive_run`'s catch-all
+  prints the traceback instead of swallowing it. Those two were the whole reason
+  "Railway showed no errors" was true of a dead run.
+- **Alert gate widened** (`email_delivery._customer_run`): a run alerts when it
+  has a delivery address **or** an access key. Gating on the address alone meant
+  every expert self-serve run whose user skipped the optional /raportti email
+  field failed silently — the most common real failure was the unheard one.
+  Admin runs (neither) still stay out of the inbox.
+- **Tests:** `tests/test_orphan_recovery.py` (11 new — resume point, live-run
+  hands-off during rolling deploy, attempt cap + refund + alert, finalize-only,
+  forecast-mode park, heartbeat ticker, paused backend, alert gate both ways,
+  driver traceback). `test_admin_alerts_ignore_runs_with_no_customer_waiting`
+  updated: its fixture kept an `access_key`, so it was asserting the old silence
+  for what is really an expert run. Full suite 231 passed.
+- **NOT DONE:** not deployed or verified in production. `heartbeat_at` is a
+  nullable column added by the existing migration lists, so the deploy is
+  self-applying — but the FIRST boot after it will see every legacy `running`
+  row with a NULL heartbeat and treat it as an orphan (age-guarded to 6 h).
+  Check what is in `running` before shipping it. Also unresolved from earlier
+  today: whether the SES identity is out of sandbox, without which the alerts
+  this relies on vanish silently.
+
 ## 2026-07-31 — Internal alert emails to arvonmaaritys26@valuatum.com (backend only)
 
 Until now every email this backend sent went to the **buyer**; nobody at Valuatum

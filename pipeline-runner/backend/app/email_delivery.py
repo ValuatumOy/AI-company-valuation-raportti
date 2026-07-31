@@ -412,13 +412,16 @@ def _run_rows(rid: str, run: dict) -> list[tuple[str, object]]:
 def _customer_run(rid: str) -> tuple[dict, str] | dict:
     """A run with somebody waiting on it, or a sent=False reason.
 
-    The delivery_email check is what keeps admin experiments and local pipeline
-    debugging out of the shared inbox — those runs fail all the time by design,
-    and no customer is affected when they do."""
+    "Somebody" is a delivery address OR an access key. Gating on the address
+    alone silenced every expert self-serve run whose user never typed an email —
+    the /raportti address field is optional, so the most common real failure was
+    also the one nobody heard about. Admin experiments and local pipeline
+    debugging have neither and still stay out of the shared inbox; those fail all
+    the time by design."""
     run = store.get_run(rid)
     if not run:
         return {"sent": False, "reason": "run-not-found"}
-    if not _recipient(run):
+    if not _recipient(run) and not run.get("access_key"):
         return {"sent": False, "reason": "no-recipient"}
     return run, _company_name(run)
 
@@ -434,25 +437,50 @@ async def send_admin_report_held(rid: str, issues: list[str]) -> dict:
     rows.insert(4, ("Ongelmat", "; ".join(issues) if issues else "—"))
     return await send_admin_alert(
         f"Raportti pidätetty — {company}",
-        "Valmis ajo ei läpäissyt laatutarkistuksia, joten raporttia EI lähetetty "
-        "asiakkaalle. Tarkista ajo ja toimita raportti käsin.",
+        "Raportti ei läpäissyt laatutarkistuksia eikä sitä lähetetty — "
+        "tarkista se ja lähetä asiakkaalle käsin.",
         rows,
         tag=rid,
     )
 
 
-async def send_admin_run_failed(rid: str) -> dict:
-    """The run died. A customer paid and is waiting for nothing."""
+def _stage_failure_reason(run: dict) -> str | None:
+    """Why this run failed, in the words of the stage that failed.
+
+    The database always knows — `stage_results.error_message` — but the alert
+    used to report only `Tila: error`, so every diagnosis started by opening the
+    run. Reports the FIRST failed stage: with stop_on_failure the later ones are
+    consequences of it."""
+    for result in sorted(run.get("results") or [], key=lambda r: r.get("order", 0)):
+        if result.get("status") not in ("error", "validation_failed"):
+            continue
+        detail = (result.get("error_message") or "").strip().replace("\n", " ")
+        label = f"vaihe {result.get('order')} ({result.get('name') or '?'})"
+        if result.get("status") == "validation_failed" and not detail:
+            detail = "ei läpäissyt numero-/johdonmukaisuustarkistuksia"
+        return f"{label}: {detail[:400] or 'ei virheilmoitusta'}"
+    return None
+
+
+async def send_admin_run_failed(rid: str, reason: str | None = None) -> dict:
+    """The run died. A customer paid and is waiting for nothing.
+
+    `reason` is for causes the run row cannot express — an abandoned run records
+    its explanation on the stage row, which nobody reading the alert can see.
+    When it is not given, the failing stage speaks for itself."""
     found = _customer_run(rid)
     if isinstance(found, dict):
         return found
     run, company = found
     rows = _run_rows(rid, run)
     rows.insert(4, ("Tila", run.get("status")))
+    reason = reason or _stage_failure_reason(run)
+    if reason:
+        rows.insert(5, ("Syy", reason))
     return await send_admin_alert(
         f"Ajo epäonnistui — {company}",
-        "Ajo päättyi virheeseen eikä asiakas saanut raporttia. "
-        "Tarkista ajo ja toimita raportti käsin.",
+        "Automaattinen generointi epäonnistui — tee raportti käsin ja lähetä "
+        "se asiakkaalle.",
         rows,
         tag=rid,
     )
@@ -470,8 +498,7 @@ async def send_admin_delivery_failed(rid: str, result: dict) -> dict:
     rows.insert(4, ("Syy", f"{reason} {detail}".strip()))
     return await send_admin_alert(
         f"Raportin lähetys epäonnistui — {company}",
-        "Raportti valmistui, mutta sen lähettäminen asiakkaalle epäonnistui. "
-        "Toimita raportti käsin.",
+        "Raportin lähetys asiakkaalle epäonnistui — lähetä se käsin.",
         rows,
         tag=rid,
     )

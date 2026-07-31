@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at TEXT NOT NULL,
     identifier TEXT,
     params TEXT,
-    parent_run_id TEXT
+    parent_run_id TEXT,
+    heartbeat_at TEXT
 );
 CREATE TABLE IF NOT EXISTS companies (
     fid INTEGER PRIMARY KEY,
@@ -152,6 +153,7 @@ if IS_PG:
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS params TEXT",
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS parent_run_id TEXT",
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS access_key TEXT",
+                "ALTER TABLE runs ADD COLUMN IF NOT EXISTS heartbeat_at TEXT",
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_session_id TEXT",
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS access_key TEXT",
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS run_id TEXT",
@@ -203,6 +205,7 @@ else:
             "ALTER TABLE runs ADD COLUMN params TEXT",
             "ALTER TABLE runs ADD COLUMN parent_run_id TEXT",
             "ALTER TABLE runs ADD COLUMN access_key TEXT",
+            "ALTER TABLE runs ADD COLUMN heartbeat_at TEXT",
             "ALTER TABLE orders ADD COLUMN stripe_session_id TEXT",
             "ALTER TABLE orders ADD COLUMN access_key TEXT",
             "ALTER TABLE orders ADD COLUMN run_id TEXT",

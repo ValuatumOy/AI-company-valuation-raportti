@@ -2693,13 +2693,18 @@ def test_admin_held_report_alert_reaches_the_shared_inbox(monkeypatch):
 
 
 def test_admin_alerts_ignore_runs_with_no_customer_waiting(monkeypatch):
-    """Admin experiments fail constantly by design — they must not page anyone."""
+    """Admin experiments fail constantly by design — they must not page anyone.
+
+    "No customer" means neither a delivery address nor an access key. A run
+    carrying an expert key DOES alert even without an address: the /raportti
+    email field is optional, and gating on it alone silenced the most common
+    real failure (see test_orphan_recovery)."""
     import asyncio
     from app import email_delivery
 
     _admin_email_env(monkeypatch)
     _paid_run(monkeypatch, email_delivery, params={"company_name": "Valuatum Oy"},
-              status="error")
+              status="error", access_key=None)
 
     assert asyncio.run(email_delivery.send_admin_run_failed("run_admin")) == {
         "sent": False, "reason": "no-recipient",

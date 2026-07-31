@@ -1,6 +1,6 @@
 """CRUD over SQLite. Single source of truth for pipelines/stages/runs/results."""
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import db
 
@@ -140,12 +140,16 @@ def reorder(pid, stage_ids):
 def create_run(pid, input_data, stop_on_failure, identifier=None, params=None,
                parent_run_id=None, access_key=None):
     rid = _uuid()
+    now = _now()
+    # heartbeat_at is stamped at creation, not left NULL: the orphan sweep treats
+    # a missing heartbeat as "nobody owns this", and a run created seconds before
+    # a sibling container boots must not look abandoned.
     db.execute(
         "INSERT INTO runs(id,pipeline_id,input_data,status,stop_on_failure,"
-        "total_cost_usd,created_at,identifier,params,parent_run_id,access_key) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        "total_cost_usd,created_at,identifier,params,parent_run_id,access_key,"
+        "heartbeat_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         (rid, pid, db.jdump(input_data), "running", int(stop_on_failure), 0.0,
-         _now(), identifier, db.jdump(params or {}), parent_run_id, access_key),
+         now, identifier, db.jdump(params or {}), parent_run_id, access_key, now),
     )
     return rid
 
@@ -226,15 +230,95 @@ def delete_run(rid):
 
 
 def reset_stale_runs():
-    """On startup, any run still marked 'running' is an orphan from a previous
-    process (a deploy/restart killed its background task). Flip to error so the
-    UI and history show a terminal state instead of a perpetual 'running'. An
-    interrupted forecast import returns to the retryable pre-generation state."""
-    db.execute("UPDATE runs SET status=? WHERE status=?", ("error", "running"))
+    """An interrupted forecast import returns to the retryable pre-generation
+    state on startup.
+
+    This used to also flip every 'running' run to 'error'. It no longer does:
+    a running row is now resolved by the orphan sweep (main._recover_stale_runs),
+    which resumes what it can and only fails what it cannot. The blanket UPDATE
+    was also unsafe during a rolling deploy — it marked runs owned by the still
+    live previous container as failed."""
     db.execute(
         "UPDATE runs SET status=? WHERE status=?",
         ("awaiting_forecast", "importing_forecast"),
     )
+
+
+def touch_heartbeat(rid):
+    """Proof of life for a run in progress. The runner stamps this every few
+    seconds while a stage is executing; a stale stamp is what tells a freshly
+    booted process that nobody is working on the run any more. Without it,
+    'running' is ambiguous — mid-writer-stage and killed-20-minutes-ago look
+    identical in the database."""
+    db.execute("UPDATE runs SET heartbeat_at=? WHERE id=?", (_now(), rid))
+
+
+def stale_running_runs(stale_seconds, max_age_hours=None):
+    """Runs marked 'running' whose heartbeat has gone quiet — i.e. orphaned by a
+    restart, deploy or crash.
+
+    `max_age_hours` (when given) ignores anything created longer ago than that,
+    so a startup after a long outage does not resurrect ancient work.
+    A NULL heartbeat means the row predates this column; those are only stale if
+    they are also old enough to fail the age check."""
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(seconds=stale_seconds)).isoformat()
+    rows = db.query("SELECT * FROM runs WHERE status=?", ("running",))
+    out = []
+    for r in rows:
+        heartbeat = r.get("heartbeat_at")
+        if heartbeat and heartbeat > cutoff:
+            continue  # someone is actively working on it — hands off
+        if not heartbeat and (r.get("created_at") or "") > cutoff:
+            continue  # just created by another process, not yet stamped
+        if max_age_hours:
+            age_cutoff = (now - timedelta(hours=max_age_hours)).isoformat()
+            if (r.get("created_at") or "") < age_cutoff:
+                continue
+        r["params"] = db.jload(r.get("params")) or {}
+        out.append(r)
+    return out
+
+
+def bump_restart_attempts(rid):
+    """Count the recoveries of one run and return the new total. The counter is
+    what stops a boot loop: a run that kills the process (OOM on a huge payload)
+    would otherwise be resumed on every startup, forever."""
+    row = db.query_one("SELECT params FROM runs WHERE id=?", (rid,))
+    params = (db.jload(row.get("params")) if row else None) or {}
+    attempts = int(params.get("_restart_attempts") or 0) + 1
+    params["_restart_attempts"] = attempts
+    db.execute("UPDATE runs SET params=? WHERE id=?", (db.jdump(params), rid))
+    return attempts
+
+
+def fail_stale_run(rid, message):
+    """Give up on an orphaned run, leaving a state a human can actually read.
+
+    The stage rows matter as much as the run row: a stage frozen at 'running'
+    is why an abandoned run used to surface as an opaque 'missing report
+    sections' gate failure instead of naming what broke. Refunds the generation
+    credit under the same guards as runner.run_stages, since the finalization
+    that normally refunds never ran."""
+    run = get_run(rid)
+    if not run:
+        return None
+    for result in run.get("results") or []:
+        if result.get("status") in ("running", "pending"):
+            db.execute(
+                "UPDATE stage_results SET status=?, error_message=?, finished_at=? "
+                "WHERE run_id=? AND \"order\"=?",
+                ("error", message, _now(), rid, result["order"]),
+            )
+    set_run_status(rid, "error")
+    refunded = False
+    if (run.get("access_key")
+            and not run.get("parent_run_id")
+            and not (run.get("params") or {}).get("_credit_refunded")):
+        refund_generation(run["access_key"])
+        mark_credit_refunded(rid)
+        refunded = True
+    return {"run": run, "credit_refunded": refunded}
 
 
 def usd_spent_today():
