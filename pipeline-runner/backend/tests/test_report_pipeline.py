@@ -2680,6 +2680,14 @@ def test_admin_held_report_alert_reaches_the_shared_inbox(monkeypatch):
     assert "stage 7 (Arvonmääritys) failed" in text
     assert "buyer@testi.fi" in text
     assert "https://client.example.com/raportti?key=exp_abc123&rid=run_admin" in text
+    # The report link must be CLICKABLE — mail clients autolink the plain-text
+    # part, which is not the part anyone is looking at.
+    body_html = parsed.get_body(preferencelist=("html",)).get_content()
+    assert ('<a href="https://client.example.com/raportti?key=exp_abc123&amp;'
+            'rid=run_admin">') in body_html
+    assert '<a href="mailto:buyer@testi.fi">' in body_html
+    # ...but plain values stay plain: no stray anchor around the company name.
+    assert '<a href="mailto:Valuatum Oy"' not in body_html
     # Internal mail is a metadata table, never the report itself.
     assert not list(parsed.iter_attachments())
 
