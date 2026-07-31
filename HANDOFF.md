@@ -1,4 +1,45 @@
-# Handoff — 2026-07-16 (read this first)
+# Handoff — 2026-07-31 (read this first)
+
+## 2026-07-31 — Internal alert emails to arvonmaaritys26@valuatum.com (backend only)
+
+Until now every email this backend sent went to the **buyer**; nobody at Valuatum
+was told anything. A held report, a dead paid run, or a manual-fulfilment order
+was a `print()` in the Railway log that nobody reads. Ported the internal-mail
+pattern from the sister product `Osakeanalyysi-nettisivut/server/email.js`
+(`sendAdminNotification` / `sendAdminDeliveryNotice` / `sendCoverageRequest` /
+`sendAdminAlert`): metadata tables, never attachments, and never allowed to
+disturb the customer path.
+
+- **`app/email_delivery.py`** — new internal senders on top of the existing SES
+  `_dispatch`, no new dependency and no second client: `send_admin_alert`
+  (generic), `send_admin_report_held`, `send_admin_run_failed`,
+  `send_admin_delivery_failed`, `send_admin_delivery_notice`,
+  `send_admin_order_intake`. Recipient is `ADMIN_EMAIL`, defaulting to the
+  hardcoded `arvonmaaritys26@valuatum.com`.
+- **`app/main.py` `_run_bg`** — the readiness-HELD branch, the
+  report-email-failed branch and a new `status == "error"` branch each fire an
+  alert; a successful delivery fires the FYI. All wrapped in `_admin_notify`,
+  which swallows everything: a broken shared inbox must not change what the
+  buyer receives.
+- **`app/main.py` `post_order`** — manual-fulfilment orders (upload / Creditsafe /
+  hero form) now ping the inbox via `BackgroundTasks`, after the honeypot and
+  rate limit so bots never reach it.
+- **Gating.** `REPORT_EMAIL_ENABLED=0` silences internal mail too (one kill
+  switch for everything). `ADMIN_NOTIFY_ON_SUCCESS=0` keeps failures only.
+  Failure alerts require `params.delivery_email` — admin experiments fail all the
+  time by design and must not page anyone. Alerts are skipped when the reason is
+  `disabled` or `no-recipient`, which would otherwise mean one alert per run.
+- **Tests:** 5 new in `tests/test_report_pipeline.py`; full suite 219 passed.
+- **NOT DONE / next:** nothing has been sent for real. Set `ADMIN_EMAIL` in
+  Railway (or rely on the default) and check whether the SES identity is still in
+  sandbox — if so, arvonmaaritys26@valuatum.com must be verified as a recipient
+  or the alerts silently vanish. See DEPLOY.md **SES prerequisites** step 5.
+  (Fixed while here: DEPLOY.md's env example said `AWS_REGION = eu-north-1`,
+  which was never right — everything is in **eu-west-1**, as `.env.example` and
+  the tests already had it.)
+  Also still open: if the client site's Stripe webhook fails BOTH
+  `checkout-generate` and its `postOrder` fallback, the backend never learns of
+  the purchase, so no alert can fire from here.
 
 ## 2026-07-16 — Production hardening for paid go-live (61a1caf client, LIVE but dormant; cap env set)
 

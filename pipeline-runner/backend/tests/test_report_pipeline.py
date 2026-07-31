@@ -2145,6 +2145,30 @@ def test_public_order_intake_and_honeypot():
                    for o in store.list_orders())
 
 
+def test_order_intake_alerts_the_shared_inbox_but_not_for_bots(monkeypatch):
+    """The endpoint wiring: a real order pings Valuatum, a honeypot hit doesn't."""
+    from starlette.testclient import TestClient
+    from app import main
+
+    sent = []
+
+    async def fake_intake(oid, company, email, user_input=None):
+        sent.append((company, email, user_input))
+        return {"sent": True}
+
+    monkeypatch.setattr(main.email_delivery, "send_admin_order_intake", fake_intake)
+
+    with TestClient(main.app) as c:
+        c.post("/api/orders", json={
+            "company": "Alerttest Oy", "email": "omistaja@testi.fi",
+            "user_input": "Tilinpäätös liitteenä"})
+        assert sent == [("Alerttest Oy", "omistaja@testi.fi", "Tilinpäätös liitteenä")]
+
+        c.post("/api/orders", json={
+            "company": "Bot Oy", "email": "bot@spam.io", "website": "http://x"})
+        assert len(sent) == 1  # honeypot short-circuits before the alert
+
+
 def test_delete_run_removes_run_and_results():
     from starlette.testclient import TestClient
     from app import main, seed, store
@@ -2593,6 +2617,146 @@ def test_email_delivery_configures_transient_ses_retries(monkeypatch):
         "total_max_attempts": 3,
         "mode": "standard",
     }
+
+
+def _admin_email_env(monkeypatch):
+    monkeypatch.setenv("REPORT_EMAIL_ENABLED", "1")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    monkeypatch.setenv("REPORT_EMAIL_FROM", "Valuatum <reports@example.com>")
+    monkeypatch.setenv("CLIENT_SITE_URL", "https://client.example.com")
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    monkeypatch.delenv("ADMIN_NOTIFY_ON_SUCCESS", raising=False)
+
+
+def _capture_ses(monkeypatch, email_delivery):
+    calls = {}
+
+    def fake_send(**kwargs):
+        calls.update(kwargs)
+        return {"MessageId": "ses_admin_1"}
+
+    async def inline_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(email_delivery.asyncio, "to_thread", inline_to_thread)
+    monkeypatch.setattr(email_delivery, "_send_with_ses", fake_send)
+    return calls
+
+
+def _paid_run(monkeypatch, email_delivery, **overrides):
+    run = {
+        "id": "run_admin",
+        "status": "ok",
+        "params": {"delivery_email": "buyer@testi.fi", "company_name": "Valuatum Oy"},
+        "access_key": "exp_abc123",
+        "parent_run_id": None,
+    }
+    run.update(overrides)
+    monkeypatch.setattr(email_delivery.store, "get_run", lambda rid: run)
+    return run
+
+
+def test_admin_held_report_alert_reaches_the_shared_inbox(monkeypatch):
+    """A report withheld by its readiness checks used to be a print() nobody read."""
+    import asyncio
+    from email import policy
+    from email.parser import BytesParser
+    from app import email_delivery
+
+    _admin_email_env(monkeypatch)
+    _paid_run(monkeypatch, email_delivery)
+    calls = _capture_ses(monkeypatch, email_delivery)
+
+    out = asyncio.run(email_delivery.send_admin_report_held(
+        "run_admin", ["stage 7 (Arvonmääritys) failed its number/consistency checks"],
+    ))
+
+    assert out == {"sent": True, "provider": "ses", "id": "ses_admin_1"}
+    # No ADMIN_EMAIL set -> the hardcoded shared inbox, as in server/email.js.
+    assert calls["recipient"] == "arvonmaaritys26@valuatum.com"
+    parsed = BytesParser(policy=policy.default).parsebytes(calls["raw_message"])
+    assert parsed["Subject"] == "[Arvonmääritys] Raportti pidätetty — Valuatum Oy"
+    text = parsed.get_body(preferencelist=("plain",)).get_content()
+    assert "stage 7 (Arvonmääritys) failed" in text
+    assert "buyer@testi.fi" in text
+    assert "https://client.example.com/raportti?key=exp_abc123&rid=run_admin" in text
+    # Internal mail is a metadata table, never the report itself.
+    assert not list(parsed.iter_attachments())
+
+
+def test_admin_alerts_ignore_runs_with_no_customer_waiting(monkeypatch):
+    """Admin experiments fail constantly by design — they must not page anyone."""
+    import asyncio
+    from app import email_delivery
+
+    _admin_email_env(monkeypatch)
+    _paid_run(monkeypatch, email_delivery, params={"company_name": "Valuatum Oy"},
+              status="error")
+
+    assert asyncio.run(email_delivery.send_admin_run_failed("run_admin")) == {
+        "sent": False, "reason": "no-recipient",
+    }
+    assert asyncio.run(email_delivery.send_admin_report_held("run_admin", [])) == {
+        "sent": False, "reason": "no-recipient",
+    }
+
+
+def test_admin_delivery_notice_can_be_turned_off(monkeypatch):
+    import asyncio
+    from app import email_delivery
+
+    _admin_email_env(monkeypatch)
+    _paid_run(monkeypatch, email_delivery)
+    calls = _capture_ses(monkeypatch, email_delivery)
+
+    # Default: on, like reconciler.js's ADMIN_NOTIFY_ON_SUCCESS.
+    assert asyncio.run(email_delivery.send_admin_delivery_notice("run_admin"))["sent"]
+
+    monkeypatch.setenv("ADMIN_NOTIFY_ON_SUCCESS", "0")
+    calls.clear()
+    assert asyncio.run(email_delivery.send_admin_delivery_notice("run_admin")) == {
+        "sent": False, "reason": "disabled-on-success",
+    }
+    assert not calls  # nothing handed to SES
+
+
+def test_report_email_kill_switch_silences_internal_mail_too(monkeypatch):
+    import asyncio
+    from app import email_delivery
+
+    _admin_email_env(monkeypatch)
+    monkeypatch.setenv("REPORT_EMAIL_ENABLED", "0")
+    _paid_run(monkeypatch, email_delivery)
+    calls = _capture_ses(monkeypatch, email_delivery)
+
+    assert asyncio.run(email_delivery.send_admin_report_held("run_admin", ["x"])) == {
+        "sent": False, "reason": "disabled",
+    }
+    assert not calls
+
+
+def test_admin_order_intake_email_carries_the_order_details(monkeypatch):
+    import asyncio
+    from email import policy
+    from email.parser import BytesParser
+    from app import email_delivery
+
+    _admin_email_env(monkeypatch)
+    monkeypatch.setenv("ADMIN_EMAIL", "tiimi@valuatum.com")
+    calls = _capture_ses(monkeypatch, email_delivery)
+
+    out = asyncio.run(email_delivery.send_admin_order_intake(
+        "ord_12", "Mäkelä Oy", "omistaja@testi.fi", "Tilinpäätös liitteenä",
+    ))
+
+    assert out["sent"]
+    assert calls["recipient"] == "tiimi@valuatum.com"  # env overrides the default
+    parsed = BytesParser(policy=policy.default).parsebytes(calls["raw_message"])
+    assert parsed["Subject"] == "[Arvonmääritys] Uusi tilaus odottaa käsittelyä — Mäkelä Oy"
+    text = parsed.get_body(preferencelist=("plain",)).get_content()
+    assert "omistaja@testi.fi" in text
+    assert "ord_12" in text
+    assert "Tilinpäätös liitteenä" in text
 
 
 @pytest.mark.skipif(not render.pdf_available(), reason="no local Chromium")
