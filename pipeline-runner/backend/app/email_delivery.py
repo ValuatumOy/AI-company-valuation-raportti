@@ -68,6 +68,11 @@ def _recipient(run: dict) -> str | None:
     return email or None
 
 
+def _company_name(run: dict) -> str:
+    name = ((run.get("params") or {}).get("company_name") or "").strip()
+    return name or "tuntematon yritys"
+
+
 def _sender() -> str | None:
     return (os.getenv("REPORT_EMAIL_FROM") or "").strip() or None
 
@@ -287,3 +292,210 @@ async def send_forecast_ready(rid: str) -> dict:
     message.add_alternative(html_body, subtype="html", cte="quoted-printable")
 
     return await _dispatch(message, region=region, sender=sender, to=to, rid=rid)
+
+
+# ---- internal (Valuatum-facing) mail -----------------------------------------
+# Nobody here watches the Railway logs, so the things that used to be a lone
+# print() — a report held back by its readiness checks, a run that died with a
+# paying customer waiting, an order that needs fulfilling by hand — get emailed
+# to the shared inbox instead. Modelled on Osakeanalyysi-nettisivut's
+# server/email.js (sendAdminNotification / sendAdminDeliveryNotice /
+# sendCoverageRequest / sendAdminAlert): metadata tables, never attachments,
+# and never allowed to disturb the customer-facing path.
+
+ADMIN_SUBJECT_PREFIX = "[Arvonmääritys]"
+DEFAULT_ADMIN_EMAIL = "arvonmaaritys26@valuatum.com"
+
+
+def _admin_recipient() -> str:
+    return (os.getenv("ADMIN_EMAIL") or "").strip() or DEFAULT_ADMIN_EMAIL
+
+
+def _ses_tag(value: str, fallback: str = "admin") -> str:
+    """SES EmailTags values accept only [A-Za-z0-9_-] and must be non-empty."""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", str(value or ""))[:32].strip("-")
+    return cleaned or fallback
+
+
+def _admin_ready() -> tuple[str, str, str] | dict:
+    """(region, sender, recipient) when internal mail can be sent, otherwise the
+    same sent=False dict shape the customer senders return.
+
+    REPORT_EMAIL_ENABLED gates internal mail too: it is the one kill switch for
+    everything this module sends, so an unconfigured deploy stays silent."""
+    if not _truthy_env("REPORT_EMAIL_ENABLED", "1"):
+        return {"sent": False, "reason": "disabled"}
+    region = _aws_region()
+    if not region:
+        return {"sent": False, "reason": "missing-aws-region"}
+    sender = _sender()
+    if not sender:
+        return {"sent": False, "reason": "missing-sender"}
+    return region, sender, _admin_recipient()
+
+
+def _admin_message(
+    subject: str,
+    intro: str,
+    rows: list[tuple[str, object]],
+    *,
+    sender: str,
+    to: str,
+) -> EmailMessage:
+    text_lines = [intro, ""]
+    html_rows = []
+    for label, value in rows:
+        shown = str(value).strip() if value not in (None, "") else "—"
+        text_lines.append(f"{label}: {shown}")
+        html_rows.append(
+            f'<tr><td style="color:#666;padding:4px 16px 4px 0;vertical-align:top;">'
+            f"{html.escape(str(label))}</td><td>{html.escape(shown)}</td></tr>"
+        )
+    html_body = (
+        f"<p><strong>{html.escape(intro)}</strong></p>"
+        '<table cellpadding="0" cellspacing="0" '
+        'style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">'
+        f'{"".join(html_rows)}</table>'
+    )
+
+    message = EmailMessage(policy=policy.SMTP)
+    message["From"] = sender
+    message["To"] = to
+    message["Subject"] = f"{ADMIN_SUBJECT_PREFIX} {subject}"
+    message.set_content("\n".join(text_lines), cte="quoted-printable")
+    message.add_alternative(html_body, subtype="html", cte="quoted-printable")
+    return message
+
+
+async def send_admin_alert(
+    subject: str,
+    intro: str,
+    rows: list[tuple[str, object]],
+    *,
+    tag: str = "alert",
+) -> dict:
+    """Generic internal notification. Returns the usual status dict; provider
+    errors come back as sent=False rather than raising."""
+    config = _admin_ready()
+    if isinstance(config, dict):
+        return config
+    region, sender, to = config
+    message = _admin_message(subject, intro, rows, sender=sender, to=to)
+    return await _dispatch(message, region=region, sender=sender, to=to, rid=_ses_tag(tag))
+
+
+def _run_rows(rid: str, run: dict) -> list[tuple[str, object]]:
+    return [
+        ("Yritys", _company_name(run)),
+        ("Versio", _report_version(run)),
+        ("Asiakas", _recipient(run)),
+        ("Run id", rid),
+        ("Raporttilinkki", _report_link(rid, run)),
+    ]
+
+
+def _customer_run(rid: str) -> tuple[dict, str] | dict:
+    """A run with somebody waiting on it, or a sent=False reason.
+
+    The delivery_email check is what keeps admin experiments and local pipeline
+    debugging out of the shared inbox — those runs fail all the time by design,
+    and no customer is affected when they do."""
+    run = store.get_run(rid)
+    if not run:
+        return {"sent": False, "reason": "run-not-found"}
+    if not _recipient(run):
+        return {"sent": False, "reason": "no-recipient"}
+    return run, _company_name(run)
+
+
+async def send_admin_report_held(rid: str, issues: list[str]) -> dict:
+    """The run finished but failed its readiness checks, so the customer was
+    deliberately NOT sent anything. Someone has to look at it."""
+    found = _customer_run(rid)
+    if isinstance(found, dict):
+        return found
+    run, company = found
+    rows = _run_rows(rid, run)
+    rows.insert(4, ("Ongelmat", "; ".join(issues) if issues else "—"))
+    return await send_admin_alert(
+        f"Raportti pidätetty — {company}",
+        "Valmis ajo ei läpäissyt laatutarkistuksia, joten raporttia EI lähetetty "
+        "asiakkaalle. Tarkista ajo ja toimita raportti käsin.",
+        rows,
+        tag=rid,
+    )
+
+
+async def send_admin_run_failed(rid: str) -> dict:
+    """The run died. A customer paid and is waiting for nothing."""
+    found = _customer_run(rid)
+    if isinstance(found, dict):
+        return found
+    run, company = found
+    rows = _run_rows(rid, run)
+    rows.insert(4, ("Tila", run.get("status")))
+    return await send_admin_alert(
+        f"Ajo epäonnistui — {company}",
+        "Ajo päättyi virheeseen eikä asiakas saanut raporttia. "
+        "Tarkista ajo ja toimita raportti käsin.",
+        rows,
+        tag=rid,
+    )
+
+
+async def send_admin_delivery_failed(rid: str, result: dict) -> dict:
+    """The report was fine; handing it to the customer is what broke."""
+    found = _customer_run(rid)
+    if isinstance(found, dict):
+        return found
+    run, company = found
+    rows = _run_rows(rid, run)
+    reason = (result or {}).get("reason") or "tuntematon"
+    detail = (result or {}).get("detail") or (result or {}).get("code") or ""
+    rows.insert(4, ("Syy", f"{reason} {detail}".strip()))
+    return await send_admin_alert(
+        f"Raportin lähetys epäonnistui — {company}",
+        "Raportti valmistui, mutta sen lähettäminen asiakkaalle epäonnistui. "
+        "Toimita raportti käsin.",
+        rows,
+        tag=rid,
+    )
+
+
+async def send_admin_delivery_notice(rid: str) -> dict:
+    """Success FYI — no action needed. Off with ADMIN_NOTIFY_ON_SUCCESS=0 for
+    anyone who only wants to hear about problems."""
+    if not _truthy_env("ADMIN_NOTIFY_ON_SUCCESS", "1"):
+        return {"sent": False, "reason": "disabled-on-success"}
+    found = _customer_run(rid)
+    if isinstance(found, dict):
+        return found
+    run, company = found
+    return await send_admin_alert(
+        f"Raportti toimitettu — {company}",
+        "Raportti luotiin ja lähetettiin asiakkaalle. Ei toimenpiteitä.",
+        _run_rows(rid, run),
+        tag=rid,
+    )
+
+
+async def send_admin_order_intake(
+    order_id: str,
+    company: str,
+    email: str,
+    user_input: str | None = None,
+) -> dict:
+    """A website order that does not auto-generate (upload/Creditsafe/yhteydenotto)
+    — until now it appeared only as a row in Tilaukset that nobody was told about."""
+    return await send_admin_alert(
+        f"Uusi tilaus odottaa käsittelyä — {company or 'tuntematon yritys'}",
+        "Sivustolta saapui tilaus, joka ei generoidu automaattisesti. "
+        "Käsittele se Tilaukset-näkymässä.",
+        [
+            ("Yritys", company),
+            ("Asiakas", email),
+            ("Tilaus id", order_id),
+            ("Viesti", user_input),
+        ],
+        tag=_ses_tag(order_id, "order"),
+    )

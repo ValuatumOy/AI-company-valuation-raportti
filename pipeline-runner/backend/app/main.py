@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import ValidationError
@@ -454,18 +454,42 @@ async def company_search_public(q: str, request: Request):
     return out
 
 
+# ---- internal alerts ---------------------------------------------------------
+
+async def _admin_notify(coro, ref: str, label: str) -> None:
+    """Fire an internal alert without ever letting it disturb the customer path:
+    a broken shared inbox must not change what the buyer receives."""
+    try:
+        result = await coro
+        if isinstance(result, dict) and not result.get("sent", True):
+            print(f"admin {label} for {ref} not sent: {result}", flush=True)
+    except Exception as e:
+        print(f"admin {label} for {ref} failed: {e}", flush=True)
+
+
+async def _order_intake_alert(oid: str, company: str, email: str, user_input) -> None:
+    await _admin_notify(
+        email_delivery.send_admin_order_intake(oid, company, email, user_input),
+        oid, "order intake alert",
+    )
+
+
 # ---- website orders (public intake; operator fulfils in this UI) -------------
 
 @app.post("/api/orders")
-def post_order(body: OrderIn, request: Request):
+def post_order(body: OrderIn, request: Request, background: BackgroundTasks):
     if body.website.strip():  # honeypot filled → bot; pretend success
         return {"ok": True}
     if not _rate_ok("order", _client_ip(request)):
         raise HTTPException(429, "liian monta tilausta — yritä myöhemmin uudelleen")
-    oid = store.create_order(
-        body.company.strip(), body.email.strip(),
-        body.user_input.strip() or None,
-    )
+    company = body.company.strip()
+    email = body.email.strip()
+    user_input = body.user_input.strip() or None
+    oid = store.create_order(company, email, user_input)
+    # Backgrounded: intake must answer fast and must not 500 the customer's order
+    # because SES is having a bad day. Past the honeypot/rate limit, so bots
+    # never reach the inbox.
+    background.add_task(_order_intake_alert, oid, company, email, user_input)
     return {"ok": True, "order_id": oid}
 
 
@@ -609,13 +633,43 @@ async def _drive_run(rid: str, only=None, from_order=None, completion_status=Non
                     result = await email_delivery.send_report_ready(rid)
                     if isinstance(result, dict) and not result.get("sent", True):
                         print(f"report email for {rid} not sent: {result}", flush=True)
+                        # "disabled" (kill switch) and "no-recipient" (admin run)
+                        # are normal — alerting on them would mean an alert per
+                        # run, and with the kill switch on it couldn't send anyway.
+                        if result.get("reason") not in ("disabled", "no-recipient"):
+                            await _admin_notify(
+                                email_delivery.send_admin_delivery_failed(rid, result),
+                                rid, "delivery failure",
+                            )
+                    else:
+                        await _admin_notify(
+                            email_delivery.send_admin_delivery_notice(rid),
+                            rid, "delivery notice",
+                        )
                 else:
                     # Delivering a report that failed its hard checks to a paying
                     # client is worse than a late email — hold it and log why.
                     print(f"report email for {rid} HELD, readiness issues: "
                           f"{readiness['issues']}", flush=True)
+                    await _admin_notify(
+                        email_delivery.send_admin_report_held(rid, readiness["issues"]),
+                        rid, "held-report alert",
+                    )
+            elif final_run and final_run.get("status") == "error":
+                # Money taken, run dead, buyer waiting on an email that will never
+                # arrive. send_admin_run_failed no-ops for runs with no customer.
+                await _admin_notify(
+                    email_delivery.send_admin_run_failed(rid), rid, "run-failure alert",
+                )
         except Exception as e:
             print(f"report email delivery failed for {rid}: {e}", flush=True)
+            # A throw here (not a provider error — _dispatch turns those into
+            # sent=False) means the customer got nothing and the branches above
+            # never ran. _admin_notify swallows a second failure.
+            await _admin_notify(
+                email_delivery.send_admin_delivery_failed(rid, {"reason": str(e)}),
+                rid, "delivery failure",
+            )
         if not task_removed:
             _RUN_TASKS.pop(rid, None)
 

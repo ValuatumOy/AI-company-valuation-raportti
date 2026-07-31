@@ -50,13 +50,24 @@ Supabase provides the Postgres database; Vercel serves the static UI.
    REPORT_EMAIL_ENABLED    = 1        # set 0 for an immediate delivery kill switch
    REPORT_EMAIL_FROM       = Valuatum <reports@yourdomain.com>
    CLIENT_SITE_URL         = https://<your-vercel-app>.vercel.app
-   AWS_REGION              = eu-north-1
+   AWS_REGION              = eu-west-1   # where our SES identity lives
    AWS_ACCESS_KEY_ID       = ...
    AWS_SECRET_ACCESS_KEY   = ...
    AWS_SESSION_TOKEN       = ...      # temporary credentials only; omit otherwise
    ```
    Keep AWS credentials server-side only — never expose them through Vercel or a
    `VITE_` variable. See **SES prerequisites** below before enabling delivery.
+
+   Internal (Valuatum-facing) mail rides on the same SES setup:
+   ```
+   ADMIN_EMAIL             = arvonmaaritys26@valuatum.com   # this is also the default
+   ADMIN_NOTIFY_ON_SUCCESS = 1        # 0 = only tell us about problems
+   ```
+   These alert the shared inbox when a report is held back by its readiness
+   checks, when a paid run dies, when a buyer's email fails to send, and when a
+   manual-fulfilment order arrives — all of which were log-only before.
+   `REPORT_EMAIL_ENABLED=0` silences internal mail too; it is the one kill switch
+   for everything the backend sends.
 4. Service → **Settings** → **Generate Domain**. That URL (e.g.
    `https://valu-pipeline.up.railway.app`) is your backend.
 5. Check `…/api/health` → `{"ok":true,"auth":true}`.
@@ -73,6 +84,9 @@ Finished reports are delivered through Amazon SES. Before setting
 2. Use a From address under the verified domain for `REPORT_EMAIL_FROM`.
 3. Create a least-privilege IAM.
 4. Store its credentials only in service variables.
+5. If this SES identity is still in the sandbox, verify `ADMIN_EMAIL` as a
+   recipient as well — internal alerts go out through the same identity, and a
+   sandbox account silently drops mail to unverified addresses.
 
 Suggested minimum IAM policy (correct the ARN for your real account and region;
 do not broaden permissions without explaining why the identity-scoped policy is
