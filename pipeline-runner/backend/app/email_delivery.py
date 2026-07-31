@@ -437,31 +437,50 @@ async def send_admin_report_held(rid: str, issues: list[str]) -> dict:
     rows.insert(4, ("Ongelmat", "; ".join(issues) if issues else "—"))
     return await send_admin_alert(
         f"Raportti pidätetty — {company}",
-        "Valmis ajo ei läpäissyt laatutarkistuksia, joten raporttia EI lähetetty "
-        "asiakkaalle. Tarkista ajo ja toimita raportti käsin.",
+        "Raportti ei läpäissyt laatutarkistuksia eikä sitä lähetetty — "
+        "tarkista se ja lähetä asiakkaalle käsin.",
         rows,
         tag=rid,
     )
 
 
+def _stage_failure_reason(run: dict) -> str | None:
+    """Why this run failed, in the words of the stage that failed.
+
+    The database always knows — `stage_results.error_message` — but the alert
+    used to report only `Tila: error`, so every diagnosis started by opening the
+    run. Reports the FIRST failed stage: with stop_on_failure the later ones are
+    consequences of it."""
+    for result in sorted(run.get("results") or [], key=lambda r: r.get("order", 0)):
+        if result.get("status") not in ("error", "validation_failed"):
+            continue
+        detail = (result.get("error_message") or "").strip().replace("\n", " ")
+        label = f"vaihe {result.get('order')} ({result.get('name') or '?'})"
+        if result.get("status") == "validation_failed" and not detail:
+            detail = "ei läpäissyt numero-/johdonmukaisuustarkistuksia"
+        return f"{label}: {detail[:400] or 'ei virheilmoitusta'}"
+    return None
+
+
 async def send_admin_run_failed(rid: str, reason: str | None = None) -> dict:
     """The run died. A customer paid and is waiting for nothing.
 
-    `reason` carries what the run row cannot say for itself — a run abandoned by
-    a restart records its explanation on the stage row, which nobody reading the
-    alert can see."""
+    `reason` is for causes the run row cannot express — an abandoned run records
+    its explanation on the stage row, which nobody reading the alert can see.
+    When it is not given, the failing stage speaks for itself."""
     found = _customer_run(rid)
     if isinstance(found, dict):
         return found
     run, company = found
     rows = _run_rows(rid, run)
     rows.insert(4, ("Tila", run.get("status")))
+    reason = reason or _stage_failure_reason(run)
     if reason:
         rows.insert(5, ("Syy", reason))
     return await send_admin_alert(
         f"Ajo epäonnistui — {company}",
-        "Ajo päättyi virheeseen eikä asiakas saanut raporttia. "
-        "Tarkista ajo ja toimita raportti käsin.",
+        "Automaattinen generointi epäonnistui — tee raportti käsin ja lähetä "
+        "se asiakkaalle.",
         rows,
         tag=rid,
     )
@@ -479,8 +498,7 @@ async def send_admin_delivery_failed(rid: str, result: dict) -> dict:
     rows.insert(4, ("Syy", f"{reason} {detail}".strip()))
     return await send_admin_alert(
         f"Raportin lähetys epäonnistui — {company}",
-        "Raportti valmistui, mutta sen lähettäminen asiakkaalle epäonnistui. "
-        "Toimita raportti käsin.",
+        "Raportin lähetys asiakkaalle epäonnistui — lähetä se käsin.",
         rows,
         tag=rid,
     )

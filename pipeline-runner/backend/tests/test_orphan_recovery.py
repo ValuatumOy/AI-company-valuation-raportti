@@ -122,15 +122,18 @@ def test_attempt_cap_stops_a_restart_loop_and_refunds(monkeypatch):
     # The frozen stage row is named, so the UI stops showing "missing sections".
     stage2 = [r for r in run["results"] if r["order"] == 2][0]
     assert stage2["status"] == "error"
-    assert "uudelleenkäynnisty" in (stage2["error_message"] or "")
+    assert "ei enää vastannut" in (stage2["error_message"] or "")
     # Finalization never ran, so the refund has to happen here.
     assert store.get_access_key(key)["generations_used"] == 0
     # The alert must carry WHY: the explanation lives on the stage row, which
     # nobody reading the email can see.
     assert len(alerted) == 1 and alerted[0][0] == rid
-    assert "uudelleenkäynnisty" in alerted[0][1]
+    assert "ei enää vastannut" in alerted[0][1]
     assert "yritetty jo" in alerted[0][1]
     assert "krediitti palautettu" in alerted[0][1].lower()
+    # It must not claim a cause it cannot know — a crash or a vanished host look
+    # exactly like a deploy from the sweep's side.
+    assert "uudelleenkäynnistykseen." not in alerted[0][1]
 
 
 def test_finalization_only_orphan_completes_without_paid_work(monkeypatch):
@@ -212,6 +215,84 @@ def test_expert_run_without_delivery_email_still_alerts(monkeypatch):
 
     assert result == {"sent": True}
     assert sent and "Orphan Oy" in sent[0]
+
+
+def test_ordinary_failure_explains_itself_without_a_passed_reason(monkeypatch):
+    """The DB always knew which stage broke and why; the alert used to say only
+    'Tila: error', so every diagnosis started by opening the run."""
+    from app import email_delivery, store
+
+    key = store.create_access_key("expert", 5)["key"]
+    main, _, rid = _seed(monkeypatch, access_key=key)
+    del main
+    store.upsert_result(rid, {
+        "order": 2, "name": "Raportti", "status": "error",
+        "error_message": "OpenRouter 502: upstream\ntimeout after 2700s",
+    })
+    store.set_run_status(rid, "error")
+    rows_seen = []
+
+    async def fake_alert(subject, intro, rows, **kwargs):
+        rows_seen.extend(rows)
+        return {"sent": True}
+
+    monkeypatch.setattr(email_delivery, "send_admin_alert", fake_alert)
+
+    _run(email_delivery.send_admin_run_failed(rid))  # no reason= passed
+
+    syy = dict(rows_seen)["Syy"]
+    assert syy.startswith("vaihe 2 (Raportti): ")
+    assert "OpenRouter 502" in syy
+    assert "\n" not in syy  # single table cell, not a wrapped blob
+
+
+def test_failure_reason_names_the_first_failed_stage(monkeypatch):
+    """With stop_on_failure the later failures are consequences of the first."""
+    from app import email_delivery, store
+
+    key = store.create_access_key("expert", 5)["key"]
+    main, _, rid = _seed(monkeypatch, access_key=key)
+    del main
+    store.upsert_result(rid, {"order": 1, "name": "Enrichment", "status": "error",
+                              "error_message": "ensimmäinen vika"})
+    store.upsert_result(rid, {"order": 2, "name": "Raportti", "status": "error",
+                              "error_message": "seurausvika"})
+
+    reason = email_delivery._stage_failure_reason(store.get_run(rid))
+
+    assert reason == "vaihe 1 (Enrichment): ensimmäinen vika"
+
+
+def test_failure_alerts_tell_the_operator_to_send_the_report_by_hand(monkeypatch):
+    """The customer knows nothing about credits or runs — they are waiting for a
+    report, so every failure alert names manual delivery as the action. One line:
+    the detail belongs in the metadata rows, not in a paragraph nobody reads."""
+    from app import email_delivery, store
+
+    key = store.create_access_key("expert", 5)["key"]
+    main, _, rid = _seed(monkeypatch, access_key=key)
+    del main
+    intros = {}
+
+    async def capture(subject, intro, rows, **kwargs):
+        intros[subject.split(" — ")[0]] = intro
+        return {"sent": True}
+
+    monkeypatch.setattr(email_delivery, "send_admin_alert", capture)
+
+    _run(email_delivery.send_admin_run_failed(rid))
+    _run(email_delivery.send_admin_report_held(rid, ["missing report sections: 1"]))
+    _run(email_delivery.send_admin_delivery_failed(rid, {"reason": "provider-error"}))
+
+    assert set(intros) == {"Ajo epäonnistui", "Raportti pidätetty",
+                           "Raportin lähetys epäonnistui"}
+    for intro in intros.values():
+        assert "käsin" in intro
+        assert len(intro) <= 120, "yhden rivin ohje, ei kappaletta"
+    assert intros["Ajo epäonnistui"] == (
+        "Automaattinen generointi epäonnistui — tee raportti käsin ja lähetä "
+        "se asiakkaalle."
+    )
 
 
 def test_admin_run_still_stays_out_of_the_shared_inbox(monkeypatch):

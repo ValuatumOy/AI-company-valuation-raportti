@@ -505,8 +505,14 @@ def _resume_point(run, pipeline):
 
 
 def _give_up_on_run(rid: str, reason: str) -> None:
-    """Terminal state a human can read: stage rows named, credit back, alert out."""
-    message = f"Ajo keskeytyi palvelimen uudelleenkäynnistykseen. {reason}".strip()
+    """Terminal state a human can read: stage rows named, credit back, alert out.
+
+    States only what was actually observed — the run's process stopped answering.
+    A deploy is the common cause but not the only one (a crash, an OOM kill, or a
+    host that went away look identical from here), so the message must not claim
+    to know which."""
+    message = ("Ajo jäi kesken: sen suorittanut prosessi ei enää vastannut "
+               f"(deploy, kaatuminen tai palvelimen vaihtuminen). {reason}").strip()
     info = store.fail_stale_run(rid, message)
     refunded = bool(info and info["credit_refunded"])
     print(f"orphaned run {rid} NOT resumed: {reason} "

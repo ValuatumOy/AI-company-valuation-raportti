@@ -33,10 +33,20 @@ persisted, never logged), no alert fired, and the credit was never refunded
 - **Give-up path** (`store.fail_stale_run`) when a guard trips — paused backend,
   `VALU_RESUME_MAX_ATTEMPTS` (2) exhausted, spend cap, missing pipeline: flips
   the frozen stage rows to `error` with a readable Finnish message, refunds the
-  credit under the runner's guards, logs, and fires `send_admin_run_failed` —
-  now with a `reason=` row ("Syy") so the alert states the restart and whether
-  the credit came back, instead of only `Tila: error`. This is also the fix for
-  the opaque "missing sections" message.
+  credit under the runner's guards, logs, and fires `send_admin_run_failed`.
+  This is also the fix for the opaque "missing sections" message.
+- **Every failure alert leads with the action, in one line:** "Automaattinen
+  generointi epäonnistui — tee raportti käsin ja lähetä se asiakkaalle" (and the
+  equivalents for pidätetty / lähetys epäonnistui). The customer knows nothing
+  about runs or credits; they are waiting for a report, so a refunded credit is
+  bookkeeping, not a resolution. Detail belongs in the metadata rows — a test
+  caps the intro at 120 chars so the paragraph does not grow back.
+- **Every failure alert now carries a `Syy` row.** When no reason is passed,
+  `email_delivery._stage_failure_reason` derives one from the first failed stage
+  ("vaihe 2 (Raportti): OpenRouter 502 …") — the DB always knew, the email only
+  ever said `Tila: error`. The orphan path passes its own reason and states only
+  what was observed ("prosessi ei enää vastannut"), not a cause: a crash, an OOM
+  kill or a vanished host are indistinguishable from a deploy at that point.
 - **Cost caveat:** the interrupted provider call is billed even though the row
   recorded $0, so a resume genuinely re-pays for that stage. Hence the attempt
   cap; `VALU_RUN_USD_CAP` still applies. Env knobs are in DEPLOY.md.
