@@ -68,6 +68,21 @@ Supabase provides the Postgres database; Vercel serves the static UI.
    manual-fulfilment order arrives — all of which were log-only before.
    `REPORT_EMAIL_ENABLED=0` silences internal mail too; it is the one kill switch
    for everything the backend sends.
+
+   Deploying mid-run is safe: a run interrupted by a restart is picked up on the
+   next boot and continued from the stage that did not finish. Defaults are fine
+   for everyone; the knobs exist for tuning:
+   ```
+   VALU_HEARTBEAT_SECONDS   = 30   # how often a live run stamps proof of life
+   VALU_RESUME_STALE_SECONDS= 180  # quiet for this long ⇒ its process is gone
+   VALU_RESUME_MAX_ATTEMPTS = 2    # then give up, refund the credit, alert
+   VALU_RESUME_MAX_AGE_HOURS= 6    # never resurrect older work after an outage
+   ```
+   Note the cost: the interrupted stage is re-run, and the provider has already
+   billed the call that was cut off. Two restarts through the writer stage is
+   therefore ~2× the writer cost — which is why `VALU_RESUME_MAX_ATTEMPTS`
+   exists. `VALU_RUN_USD_CAP` still applies and stops a resumed run that has
+   already spent too much.
 4. Service → **Settings** → **Generate Domain**. That URL (e.g.
    `https://valu-pipeline.up.railway.app`) is your backend.
 5. Check `…/api/health` → `{"ok":true,"auth":true}`.

@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import traceback
 from contextlib import asynccontextmanager
 
 import httpx
@@ -33,8 +34,9 @@ from valuatum_kit.config import mcp_url  # noqa: E402
 @asynccontextmanager
 async def _lifespan(app):
     seed.ensure_seeded()
-    store.reset_stale_runs()  # clear orphan 'running' rows left by the last restart
+    store.reset_stale_runs()  # an interrupted forecast import becomes retryable
     await openrouter.refresh_models()
+    await _recover_stale_runs()  # resume what the last process left mid-flight
     yield
     await valuatum.aclose_client()
 
@@ -474,6 +476,116 @@ async def _order_intake_alert(oid: str, company: str, email: str, user_input) ->
     )
 
 
+# ---- deploy / crash recovery -------------------------------------------------
+# A report takes 20–45 minutes, almost all of it inside one writer call, so any
+# restart in that window used to destroy the run: the container died mid-stage,
+# the run row was blanket-flipped to 'error', the stage row stayed 'running',
+# nothing was logged, no alert fired and the customer's credit was eaten
+# (2026-07-31, run 8dfd3918 — killed by our own deploy). Deploying should not
+# require knowing whether a run is in flight, so orphans are now resumed.
+
+RESUME_STALE_SECONDS = float(os.getenv("VALU_RESUME_STALE_SECONDS") or 180)
+RESUME_MAX_ATTEMPTS = int(os.getenv("VALU_RESUME_MAX_ATTEMPTS") or 2)
+RESUME_MAX_AGE_HOURS = float(os.getenv("VALU_RESUME_MAX_AGE_HOURS") or 6)
+
+
+def _resume_point(run, pipeline):
+    """Order of the first stage that still owes work, or one past the last stage
+    when every stage finished (the process died during finalization — resuming
+    there costs nothing and lets the normal delivery path run)."""
+    done = {r["order"]: r.get("status") for r in (run.get("results") or [])}
+    orders = []
+    for stage in sorted(pipeline["stages"], key=lambda s: s["order"]):
+        orders.append(stage["order"])
+        if not stage.get("enabled"):
+            continue
+        if done.get(stage["order"]) not in ("ok", "validation_failed", "skipped"):
+            return stage["order"], False
+    return (max(orders) + 1 if orders else 0), True
+
+
+def _give_up_on_run(rid: str, reason: str) -> None:
+    """Terminal state a human can read: stage rows named, credit back, alert out."""
+    message = f"Ajo keskeytyi palvelimen uudelleenkäynnistykseen. {reason}".strip()
+    info = store.fail_stale_run(rid, message)
+    refunded = bool(info and info["credit_refunded"])
+    print(f"orphaned run {rid} NOT resumed: {reason} "
+          f"(credit_refunded={refunded})", flush=True)
+    detail = message + (" Generointikrediitti palautettu." if refunded else "")
+    asyncio.create_task(_admin_notify(
+        email_delivery.send_admin_run_failed(rid, reason=detail),
+        rid, "orphaned-run alert",
+    ))
+
+
+def _recover_one(row: dict) -> None:
+    rid = row["id"]
+    run = store.get_run(rid)
+    pipeline = store.get_pipeline(run["pipeline_id"]) if run else None
+    if not run or not pipeline:
+        _give_up_on_run(rid, "Ajon pipelinea ei löytynyt.")
+        return
+
+    resume_from, finished = _resume_point(run, pipeline)
+    if not finished:
+        # Guards apply only when real (paid) work is left. Pure finalization is
+        # free, so it is always allowed to complete.
+        if openrouter.runs_paused():
+            _give_up_on_run(rid, "Generointi on keskeytetty (RUNS_PAUSED).")
+            return
+        attempts = int((run.get("params") or {}).get("_restart_attempts") or 0)
+        if attempts >= RESUME_MAX_ATTEMPTS:
+            _give_up_on_run(rid, f"Automaattinen jatko yritetty jo {attempts}×.")
+            return
+        cap_msg = runner._spend_cap_exceeded(rid)
+        if cap_msg:
+            _give_up_on_run(rid, cap_msg)
+            return
+        store.bump_restart_attempts(rid)
+
+    # A forecast-mode run killed before stage 0 finished must park at
+    # awaiting_forecast again, not run straight through to a report.
+    params = run.get("params") or {}
+    forecast_park = (
+        bool(params.get("forecast_mode"))
+        and resume_from == 0
+        and not any(r.get("order", 0) >= 1 for r in (run.get("results") or []))
+    )
+    # Claim it before starting: a sibling container booting a second later then
+    # sees a fresh heartbeat and leaves this run alone.
+    store.touch_heartbeat(rid)
+    if forecast_park:
+        started = _start_bg(rid, only=0, completion_status="awaiting_forecast")
+    else:
+        started = _start_bg(rid, from_order=resume_from)
+    if not started:
+        _give_up_on_run(rid, "Taustatehtävää ei voitu käynnistää.")
+        return
+    print(f"orphaned run {rid} resumed from stage {resume_from} "
+          f"(finalize_only={finished})", flush=True)
+
+
+async def _recover_stale_runs() -> None:
+    """Startup sweep: adopt runs whose heartbeat went quiet under a dead process.
+
+    Staleness, not status, is the test — during a rolling deploy the previous
+    container may still be generating, and its run must not be touched."""
+    try:
+        orphans = store.stale_running_runs(RESUME_STALE_SECONDS, RESUME_MAX_AGE_HOURS)
+    except Exception as e:
+        print(f"orphan sweep failed: {e}", flush=True)
+        return
+    if not orphans:
+        return
+    print(f"orphan sweep: {len(orphans)} run(s) left running by a dead process",
+          flush=True)
+    for row in orphans:
+        try:
+            _recover_one(row)
+        except Exception as e:
+            print(f"orphan recovery failed for {row.get('id')}: {e}", flush=True)
+
+
 # ---- website orders (public intake; operator fulfils in this UI) -------------
 
 @app.post("/api/orders")
@@ -602,6 +714,11 @@ async def _drive_run(rid: str, only=None, from_order=None, completion_status=Non
         ):
             pass
     except Exception:
+        # Never swallow this silently: an exception here is the one failure mode
+        # that leaves no stage row to explain itself, and it used to vanish
+        # completely (run marked 'error', no traceback, no alert).
+        print(f"run {rid} died in the background driver:\n"
+              f"{traceback.format_exc()}", flush=True)
         try:
             store.set_run_status(rid, "error")
         except Exception:

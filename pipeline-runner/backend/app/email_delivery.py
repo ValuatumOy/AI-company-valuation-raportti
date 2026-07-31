@@ -412,13 +412,16 @@ def _run_rows(rid: str, run: dict) -> list[tuple[str, object]]:
 def _customer_run(rid: str) -> tuple[dict, str] | dict:
     """A run with somebody waiting on it, or a sent=False reason.
 
-    The delivery_email check is what keeps admin experiments and local pipeline
-    debugging out of the shared inbox — those runs fail all the time by design,
-    and no customer is affected when they do."""
+    "Somebody" is a delivery address OR an access key. Gating on the address
+    alone silenced every expert self-serve run whose user never typed an email —
+    the /raportti address field is optional, so the most common real failure was
+    also the one nobody heard about. Admin experiments and local pipeline
+    debugging have neither and still stay out of the shared inbox; those fail all
+    the time by design."""
     run = store.get_run(rid)
     if not run:
         return {"sent": False, "reason": "run-not-found"}
-    if not _recipient(run):
+    if not _recipient(run) and not run.get("access_key"):
         return {"sent": False, "reason": "no-recipient"}
     return run, _company_name(run)
 
@@ -441,14 +444,20 @@ async def send_admin_report_held(rid: str, issues: list[str]) -> dict:
     )
 
 
-async def send_admin_run_failed(rid: str) -> dict:
-    """The run died. A customer paid and is waiting for nothing."""
+async def send_admin_run_failed(rid: str, reason: str | None = None) -> dict:
+    """The run died. A customer paid and is waiting for nothing.
+
+    `reason` carries what the run row cannot say for itself — a run abandoned by
+    a restart records its explanation on the stage row, which nobody reading the
+    alert can see."""
     found = _customer_run(rid)
     if isinstance(found, dict):
         return found
     run, company = found
     rows = _run_rows(rid, run)
     rows.insert(4, ("Tila", run.get("status")))
+    if reason:
+        rows.insert(5, ("Syy", reason))
     return await send_admin_alert(
         f"Ajo epäonnistui — {company}",
         "Ajo päättyi virheeseen eikä asiakas saanut raporttia. "
