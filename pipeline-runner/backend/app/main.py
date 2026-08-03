@@ -1542,6 +1542,37 @@ def _pick_checkout_candidate(candidates: list[dict]) -> dict | None:
     return candidates[0]
 
 
+def _checkout_candidate(candidates: list[dict], requested_fid: int | None) -> dict | None:
+    """Pick the model the buyer actually paid for.
+
+    The client site already knows the exact fid — it is what the search row the
+    buyer clicked was built from — so honour it instead of re-guessing. The
+    membership check IS the validation: `fid` reaches us through Stripe metadata,
+    i.e. from the client, and `candidates` are exactly the models `business_id`
+    resolves to, so a forged fid can never point the run at another company.
+
+    Without this, a konserni purchase fell through to `_pick_checkout_candidate`,
+    which prefers the NON-K parent row: "St1 Nordic Oy – Konserni" was bought and
+    emo figures were delivered (2026-08-03). Nothing downstream could recover —
+    `meta.level` follows the fetched model, and a round-2 refinement never
+    re-runs stage 0.
+    """
+    if requested_fid is not None:
+        for c in candidates:
+            if c.get("fid") == requested_fid:
+                return c
+        # Not fatal (fall back to the heuristic below), but it means the buyer's
+        # choice was dropped — the exact condition that produced the emo/konserni
+        # mixup, so it must be visible in the logs rather than silent.
+        print(
+            f"checkout: requested fid {requested_fid} is not among the models for "
+            f"this business_id ({[c.get('fid') for c in candidates]}) — falling "
+            "back to the heuristic pick",
+            flush=True,
+        )
+    return _pick_checkout_candidate(candidates)
+
+
 _CHECKOUT_LOCKS: dict[str, asyncio.Lock] = {}
 
 
@@ -1590,7 +1621,7 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
             raise HTTPException(e.response.status_code, e.response.text[:500])
         except RuntimeError as e:
             raise HTTPException(500, str(e))
-        candidate = _pick_checkout_candidate(candidates)
+        candidate = _checkout_candidate(candidates, body.fid)
         if not candidate:
             raise HTTPException(
                 404, f"Yritystä ({body.business_id}) ei löytynyt Valuatumista."

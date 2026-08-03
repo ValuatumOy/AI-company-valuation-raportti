@@ -1809,6 +1809,60 @@ def test_public_checkout_generate_retries_after_failed_run(monkeypatch):
     assert second_rid != first_rid  # fresh run, not the same dead one every time
 
 
+def test_public_checkout_generate_honours_requested_fid(monkeypatch):
+    """A konserni purchase must generate the konserni model.
+
+    Regression (2026-08-03, St1 Nordic): the buyer picked the K-suffixed group
+    row, but the backend re-resolved business_id (which drops the K), and
+    _pick_checkout_candidate prefers the NON-K parent — so an emo report was
+    delivered for a konserni order, and nothing downstream could recover.
+    """
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+    monkeypatch.setattr(main, "_start_bg", lambda *a, **k: True)
+
+    # What Valuatum returns for the group's y-tunnus: both the parent and the
+    # konserni company, the parent carrying the preferred "Profinder" model.
+    async def fake_search(q):
+        return [
+            {"fid": 111, "company_name": "St1 Nordic Oy", "company_code": "0956951-7",
+             "industry_text": "Oil", "industry_code": None, "industry_id": None,
+             "industry_tree": None, "analyst_name": "Profinder"},
+            {"fid": 222, "company_name": "St1 Nordic Oy", "company_code": "09569517K",
+             "industry_text": "Oil", "industry_code": None, "industry_id": None,
+             "industry_tree": None, "analyst_name": "Analyst B"},
+        ]
+
+    monkeypatch.setattr(main.valuatum, "search_company", fake_search)
+    c = TestClient(main.app)
+
+    def buy(session_id, **extra):
+        r = c.post("/api/public/checkout-generate", json={
+            "business_id": "09569517K", "company_name": "St1 Nordic Oy – Konserni",
+            "email": "buyer@example.com", "stripe_session_id": session_id, **extra,
+        })
+        assert r.status_code == 200, r.text
+        return store.get_run(r.json()["run_id"])
+
+    konserni = buy("cs_konserni", fid=222)
+    assert konserni["identifier"] == "222"
+    assert konserni["params"]["company_code"] == "09569517K"
+
+    # The parent model of the same company is still reachable — the fid decides,
+    # not the heuristic.
+    assert buy("cs_emo", fid=111)["identifier"] == "111"
+
+    # A fid that is not one of this business_id's models must not steer the run:
+    # fall back to the heuristic rather than generating an unrelated company.
+    assert buy("cs_forged", fid=999)["identifier"] == "111"
+
+    # No fid (bundled sample rows, older clients) keeps the previous behaviour.
+    assert buy("cs_nofid")["identifier"] == "111"
+
+
 def test_paid_extra_round_checkout_and_redeem(monkeypatch):
     from starlette.testclient import TestClient
     from app import main, seed, store
