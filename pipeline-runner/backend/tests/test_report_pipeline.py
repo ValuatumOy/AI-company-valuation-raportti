@@ -1976,8 +1976,8 @@ def test_derive_company_code_appends_K_for_konserni():
     # Parent model → plain dash-stripped code (Profinder returns parent statements).
     assert v._derive_company_code(
         {"meta": {"y_tunnus": "1612398-8", "level": "parent"}}, None) == "16123988"
-    # Konserni model → K-suffixed so the Profinder backfill returns consolidated
-    # statements instead of parent-level ones (verified live: 16123988K works).
+    # Konserni model → K-suffixed so the /rest/company metadata lookup lands on
+    # the consolidated row, which carries its own K-suffixed code.
     assert v._derive_company_code(
         {"meta": {"y_tunnus": "1612398-8", "level": "consolidated"}}, None) == "16123988K"
     # Operator override always wins — no forced K.

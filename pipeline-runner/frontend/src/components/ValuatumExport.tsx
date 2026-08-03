@@ -5,7 +5,6 @@ type Phase = "idle" | "running" | "ready" | "error";
 
 const STEP_LABEL: Record<string, string> = {
   fetch: "Fetching modeldata…",
-  backfill: "Backfilling actuals…",
   ready: "JSON ready",
 };
 
@@ -18,7 +17,6 @@ export function ValuatumExport({
 }) {
   const [config, setConfig] = useState<{
     token: boolean;
-    mcp: boolean;
     kit: boolean;
   } | null>(null);
   const [name, setName] = useState("");
@@ -52,7 +50,7 @@ export function ValuatumExport({
         "/api/valuatum/company-json",
         "POST",
         (e) => {
-          if (e.step === "fetch" || e.step === "backfill") {
+          if (e.step === "fetch") {
             setStatus(STEP_LABEL[e.step]);
           } else if (e.step === "ready") {
             setStatus(STEP_LABEL.ready);
@@ -117,11 +115,6 @@ export function ValuatumExport({
             :stä — haku ei toimi ilman sitä.
           </div>
         )}
-        {config && config.token && !config.mcp && (
-          <div className="text-xs text-neutral-400 mb-3">
-            VALUATUM_MCP_URL ei asetettu — actuals-backfill ohitetaan.
-          </div>
-        )}
 
         <label className="block text-xs text-neutral-400 mb-1">Company name</label>
         <input
@@ -158,7 +151,7 @@ export function ValuatumExport({
                 className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm font-mono"
               />
               <div className="text-[10px] text-neutral-500 mt-1">
-                Käytä jos backfill epäonnistuu tai companyCode näyttää väärältä.
+                Käytä jos companyCode näyttää väärältä. Konsernimallin K-pääte säilyy.
                 Teippimestarit Oy: 24388345.
               </div>
             </div>

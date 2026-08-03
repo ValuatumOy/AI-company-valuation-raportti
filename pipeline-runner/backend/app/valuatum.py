@@ -1,10 +1,11 @@
 """Valuatum JSON export: run the vendored kit scripts to produce a complete
 company modeldata JSON (the FAKTAT input_data for Stage 0).
 
-Flow (matches valuatum-json-export-kit):
-  1. /rest/modeldata by fid  → DCF / WACC / EVA / forecasts  (export script)
-  2. Profinder MCP backfill by company_code → historical actuals
-Secrets come from env only: VALUATUM_TOKEN, VALUATUM_MCP_URL.
+Flow: /rest/modeldata by fid → DCF / WACC / EVA / forecasts / actuals / credit
+risk, in one export step. Payment defaults come from GET /rest/creditrisk, the
+one thing with no fid-keyed variant.
+
+Secrets come from env only: VALUATUM_TOKEN.
 Nulls are preserved; nothing is invented.
 """
 import asyncio
@@ -22,12 +23,11 @@ from pathlib import Path
 import httpx
 
 from . import estimate_trigger
-from valuatum_kit.config import api_base_url, mcp_url
+from valuatum_kit.config import api_base_url
 
 KIT = Path(__file__).resolve().parent.parent / "valuatum_kit"
 FETCH = KIT / "fetch_modeldata.py"
 EXPORT = KIT / "export_modeldata_json.py"
-BACKFILL = KIT / "backfill_modeldata_from_profinder.py"
 
 REQUIRED_KEYS = [
     "meta", "headcount", "actuals", "forecast", "forecast_parameters",
@@ -266,6 +266,14 @@ def _run(cmd: list[str]) -> tuple[int, str, str]:
 
 
 def _derive_company_code(base: dict, override: str | None) -> str | None:
+    """Company code for the /rest/company metadata lookup (industry names).
+
+    Since the Profinder statement backfill was removed this no longer selects
+    any financial data — /modeldata is keyed by fid — so the K suffix here only
+    has to be good enough to find the company row. The suffix logic stays
+    because a konserni row IS its own /rest/company row with its own K-suffixed
+    code, so keeping it makes the lookup land on the matching entity.
+    """
     if override:
         return override.strip()
     meta = base.get("meta") or {}
@@ -275,12 +283,6 @@ def _derive_company_code(base: dict, override: str | None) -> str | None:
     code = yt.replace("-", "").strip()
     if not code:
         return None
-    # Konserni (consolidated) models need the K-suffixed company code so the
-    # Profinder backfill returns consolidated statements, not parent-level ones.
-    # Verified against live Profinder: "16123988K" returns consolidated data,
-    # the dashed form "1612398-8K" errors — so append K to the dash-stripped
-    # code. Without this a konserni FID produced konserni forecasts + a
-    # "consolidated" level label but parent-level historical actuals.
     if meta.get("level") == "consolidated" and not code.endswith("K"):
         code += "K"
     return code
@@ -335,7 +337,6 @@ async def export_stream(
     warnings: list[str] = []
     tmp = Path(tempfile.mkdtemp(prefix="valu_"))
     base = tmp / "base.json"
-    complete = tmp / "complete.json"
     try:
         if skip_estimate_generation:
             yield {"step": "estimates",
@@ -361,41 +362,19 @@ async def export_stream(
                    "message": "modeldata-haku epäonnistui:\n" + (err or out)[:1500]}
             return
         base_data = json.loads(base.read_text(encoding="utf-8"))
-
-        # 2. Profinder backfill → complete JSON
         company_code = _derive_company_code(base_data, company_code_override)
-        profinder = mcp_url()
-        if profinder and company_code:
-            yield {"step": "backfill", "label": "Backfilling actuals",
-                   "company_code": company_code}
-            rc, out, err = await asyncio.to_thread(
-                _run,
-                [
-                    sys.executable, str(BACKFILL), "--input", str(base),
-                    "--output", str(complete), "--company-code", company_code,
-                    "--limit", str(max(actuals, 10)),
-                ],
-            )
-            if rc != 0 or not complete.exists():
-                warnings.append(
-                    "Profinder-backfill epäonnistui — historialliset actualsit "
-                    "voivat olla puutteelliset. " + (err or out)[:400]
-                )
-                shutil.copyfile(base, complete)
-        else:
-            shutil.copyfile(base, complete)
-            if not profinder:
-                warnings.append(
-                    "VALUATUM_MCP_URL ei asetettu — actuals-backfill "
-                    "ohitettu (historialliset kentät voivat olla harvoja)."
-                )
-            elif not company_code:
-                warnings.append(
-                    "company_code ei johdettavissa modeldatasta — anna "
-                    "Advanced-osiossa company_code_override backfilliä varten."
-                )
 
-        data = json.loads(complete.read_text(encoding="utf-8"))
+        # There used to be a step 2 here: a Profinder MCP backfill that refilled
+        # ~14 income-statement and balance-sheet rows the export left null. Those
+        # rows were null because the exporter asked /modeldata for varNames that
+        # do not exist (personnel_costs, cash_and_equivalents, capital_loans,
+        # dep_total_nega …), which /modeldata silently drops. With the canonical
+        # cr_-prefixed names the export now fetches all of them directly —
+        # verified value-for-value against the backfill it replaced. Dropping it
+        # also removes the emo/konserni hazard it carried: the backfill was keyed
+        # by company_code (K suffix = consolidated), while /modeldata is keyed by
+        # fid, which is unambiguous by construction.
+        data = base_data
         supplied_metadata = {
             "industry_text": industry_text,
             "industry_code": industry_code,

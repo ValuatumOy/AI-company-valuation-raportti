@@ -271,12 +271,12 @@ def test_fetch_company_data_preserves_ready_warnings(monkeypatch):
         yield {
             "step": "ready",
             "json": {"meta": {"company_name": "Test Oy"}},
-            "warnings": ["backfill jäi vajaaksi"],
+            "warnings": ["testivaroitus"],
         }
 
     monkeypatch.setattr(valuatum, "export_stream", fake_export_stream)
     data = _run(company_data.fetch_company_data("42", {"company_name": "Test Oy"}))
-    assert data["fetch_warnings"] == ["backfill jäi vajaaksi"]
+    assert data["fetch_warnings"] == ["testivaroitus"]
 
 
 def test_stage_zero_generation_failure_does_not_call_llm(monkeypatch):
