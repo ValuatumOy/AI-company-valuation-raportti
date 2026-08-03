@@ -159,6 +159,13 @@ class CheckoutGenerateIn(BaseModel):
     # limit, plus idempotency on stripe_session_id (the success page can be
     # loaded more than once for the same payment).
     business_id: str = Field(min_length=5, max_length=30)
+    # The exact followed model the buyer picked in the client site's search.
+    # A company can have several models (emo vs konserni, plus sibling analyst
+    # models), and business_id alone cannot tell them apart — the K suffix is
+    # stripped during lookup. Optional: the bundled sample rows on the client
+    # site carry no fid, and older clients don't send one, so the server still
+    # falls back to its own heuristic. Validated against business_id server-side.
+    fid: int | None = Field(default=None, ge=1)
     company_name: str = Field(min_length=1, max_length=300)
     email: str = Field(min_length=5, max_length=200, pattern=r".+@.+\..+")
     user_input: str = Field(default="", max_length=4000)
