@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Run the full Valuatum JSON export flow for one company.
 
-Steps:
-1. Fetch valuation modeldata by fid and map it to the structured JSON schema.
-2. If VALUATUM_MCP_URL is set, backfill detailed actual fields from
-   Profinder MCP statement tools.
+One step: fetch valuation modeldata by fid and map it to the structured JSON
+schema. The export covers every income-statement, balance-sheet and credit-risk
+row; payment defaults come from GET /rest/creditrisk.
 
 This script uses only the Python standard library.
 """
@@ -13,21 +12,14 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-
-try:
-    from .config import mcp_url
-except ImportError:  # Direct script execution.
-    from config import mcp_url
 
 
 ROOT = Path(__file__).resolve().parent
 FETCH_SCRIPT = ROOT / "fetch_modeldata.py"
 EXPORT_SCRIPT = ROOT / "export_modeldata_json.py"
-BACKFILL_SCRIPT = ROOT / "backfill_modeldata_from_profinder.py"
 
 
 def slugify(value: str) -> str:
@@ -59,7 +51,6 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     prefix = args.file_prefix or f"{slugify(args.company_name)}_{args.fid}"
-    base_json = out_dir / f"{prefix}_modeldata_base.json"
     final_json = out_dir / f"{prefix}_modeldata_complete.json"
 
     export_cmd = [
@@ -78,27 +69,9 @@ def main() -> None:
         "--company-code-override",
         args.company_code,
         "--output",
-        str(base_json),
+        str(final_json),
     ]
     run(export_cmd)
-
-    if mcp_url():
-        backfill_cmd = [
-            sys.executable,
-            str(BACKFILL_SCRIPT),
-            "--input",
-            str(base_json),
-            "--output",
-            str(final_json),
-            "--company-code",
-            args.company_code,
-            "--limit",
-            str(max(args.actuals, 10)),
-        ]
-        run(backfill_cmd)
-    else:
-        shutil.copyfile(base_json, final_json)
-        print("VALUATUM_MCP_URL not set; skipped Profinder backfill.")
 
     print(f"Wrote {final_json}")
 

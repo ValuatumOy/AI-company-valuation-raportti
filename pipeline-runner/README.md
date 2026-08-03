@@ -52,14 +52,13 @@ Stage 0:n input_dataksi ("→ Käytä Stage 0 input_datana").
 
 Backend ajaa vendoroidun kitin (`backend/valuatum_kit/`) kahdessa vaiheessa:
 1. `/rest/modeldata` fid:llä → DCF / WACC / EVA / forecasts.
-2. MCP-backfill company_code:lla → historialliset actualsit.
+2. `GET /rest/creditrisk` company_code:lla → maksuhäiriöt (kaikki muu fid:llä).
 
 Salaisuudet vain backendin `.env`:ssä (ei koskaan frontendiin):
 
 ```bash
 VALUATUM_TOKEN=...              # pakollinen
 VALUATUM_API_BASE_URL=https://profindertest.valuatum.com/rest
-VALUATUM_MCP_URL=...            # valinnainen; API-avain sisältyy URL:iin
 ```
 
 `VALUATUM_API_BASE_URL` on yhteinen REST-pohja yrityshaulle, ennusteiden
@@ -68,9 +67,11 @@ generoinnille ja modeldatalle. Jos muuttuja puuttuu tai on tyhjä, oletuksena on
 modeldata-hakua ja odottaa jobin valmistumista. Generointivirhe tai viiden
 minuutin aikakatkaisu pysäyttää Stage 0:n ennen maksullisia LLM-vaiheita.
 
-`VALUATUM_MCP_URL` on erillinen tekninen MCP-osoite, jonka API-avain sisältyy
-URL:iin. Sillä ei siksi ole oletusarvoa. Kun se asetetaan, sen ja
-`VALUATUM_API_BASE_URL`:n täytyy osoittaa samaan Valuatum-dataympäristöön.
+Profinder-MCP:tä ei enää käytetä. Tuloslaskelma, tase ja luottoriski haetaan
+`/modeldata`:sta fid:llä, joten emo ja konserni eivät voi mennä sekaisin.
+Maksuhäiriöt tulevat `GET /rest/creditrisk`:stä company_code:lla — ainoa kohta
+ilman fid-avainta, joten oikea rivi valitaan `followedModelId`:n perusteella.
+Actualseja saadaan enintään 9 vuotta (Y-10 → HTTP 400).
 
 - Oletukset `actuals=5`, `estimates=10` (Advanced-osiossa muutettavissa).
 - Peruskäytössä company_code johdetaan modeldata-vastauksen y-tunnuksesta.

@@ -323,7 +323,6 @@ function Stage0Fetcher({
         "POST",
         (e) => {
           if (e.step === "fetch") setStatus("Fetching modeldata from Valuatum…");
-          else if (e.step === "backfill") setStatus(`Backfilling actuals (${e.company_code ?? ""})…`);
           else if (e.step === "ready") {
             setStatus("Done");
             setPhase("done");

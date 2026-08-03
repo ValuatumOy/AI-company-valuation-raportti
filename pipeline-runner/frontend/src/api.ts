@@ -163,7 +163,7 @@ export const api = {
 
   valuatumConfig: () =>
     req("/api/valuatum/config").then((r) =>
-      j<{ token: boolean; mcp: boolean; kit: boolean }>(r)
+      j<{ token: boolean; kit: boolean }>(r)
     ),
 
   runReadiness: (rid: string) =>

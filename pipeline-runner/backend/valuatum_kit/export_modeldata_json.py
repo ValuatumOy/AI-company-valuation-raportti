@@ -14,15 +14,16 @@ import json
 import os
 import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 try:
-    from .config import mcp_url
+    from .config import api_base_url
 except ImportError:  # Direct script execution.
-    from config import mcp_url
+    from config import api_base_url
 
 
 EXTRA_VARS = [
@@ -37,31 +38,57 @@ EXTRA_VARS = [
     "cr_employee_expenses_per_employee",
     "cr_ebitda_per_employee",
     "cr_net_earnings_per_employee",
-    "other_operating_income",
+    # Statement rows. Valuatum's canonical names for these are cr_-prefixed;
+    # only a handful (ns, ebit, gross_profit, interest_expenses, net_earnings,
+    # inventories) also resolve unprefixed. The un-prefixed spellings for
+    # everything else — personnel_costs, cash_and_equivalents, capital_loans,
+    # dep_total_nega, non_interest_bearing_debt … — are not Valuatum variables
+    # at all: /modeldata silently drops unknown varNames, so they came back
+    # empty on every model and the holes were filled by a second Profinder MCP
+    # integration. Each name below was verified value-for-value against that
+    # MCP backfill (fid 184362, 9 years) before it replaced it.
+    "cr_other_operating_income",
+    "cr_gross_profit",
     "gross_profit",
-    "personnel_costs",
-    "other_operating_costs",
-    "dep_total_nega",
+    "cr_employee_expenses",
+    "cr_other_oper_expenses",
+    "cr_depreciation",
     "ebitda",
     "ebit_without_extras",
     "extras_in_ebit",
+    "cr_interest_expenses",
     "interest_expenses",
+    "cr_net_earnings",
     "net_earnings",
-    "development_costs",
-    "intangibles_total",
+    "cr_development_expenditure",
+    "cr_intangible_assets_total",
     "other_intangible_rights",
+    "cr_tangibles_assets_total",
     "inventories",
-    "trade_receivables",
-    "cash_and_equivalents",
-    "cash",
+    "cr_curr_trade_debtors",
+    "cr_cash_and_bank_deposits",
+    # Y+0 only — the DCF bridge's cash figure, not an actuals series.
     "cash_prev_year",
-    "equity_incl_capital_loans",
-    "capital_loans",
-    "loans_from_fin_institutions",
-    "loans_from_associated",
-    "advances_received",
-    "trade_payables",
-    "non_interest_bearing_debt",
+    "fundu_equity_incl_cap_loans",
+    "cr_capital_loan_lt",
+    "cr_capital_loan_st",
+    "cr_non_current_loans_from_credit_ins",
+    "cr_current_loans_from_credit_ins",
+    "cr_non_current_owed_to_participating",
+    "cr_current_owed_to_participating",
+    "cr_non_current_advances_received",
+    "cr_current_advances_received",
+    "cr_current_trade_creditors",
+    "non_interest_bearing_liabilities_calc",
+    # Credit risk. Fetched per fid like everything else — the Profinder MCP this
+    # replaced was keyed by company code and returned the KONSERNI figures
+    # whenever a group existed, so emo reports carried group risk (verified:
+    # "16123988" and "16123988K" returned the same companyId and the same
+    # bankruptcyRisk for every year).
+    "brm_ValuBooster2",
+    "industryRiskBankruptcy",
+    "text_brc_Kirjain_luokitus_front-brm_ValuBooster2",
+    "cr_credit_score_vb2",
     "gearing_percent",
     "market_value_of_associated",
     "market_value_of_minorities_nega",
@@ -102,6 +129,24 @@ def roundish(value: float | int | None) -> float | int | None:
     if rounded.is_integer():
         return int(rounded)
     return rounded
+
+
+def apply_level_suffix(override: str, model_code: str) -> str:
+    """Keep a consolidated model's K suffix when the operator overrides the code.
+
+    The override exists to correct a wrong company code, not to change WHICH
+    model was fetched. Its value becomes meta.level (K = consolidated) and keys
+    the credit-risk lookup, so a K-stripped override relabels a konserni report
+    as emo and fetches parent-level credit risk — while the forecasts stay
+    consolidated. The suffix therefore follows the fetched model, never the
+    override. (This is how a saved-companies round trip broke konserni runs:
+    upsert_company stores meta.y_tunnus, which has the K stripped, and feeds it
+    straight back as an override on the next fetch.)
+    """
+    code = override.strip()
+    if model_code.strip().upper().endswith("K") and not code.upper().endswith("K"):
+        return code + "K"
+    return code
 
 
 def y_tunnus(code: str | None) -> str | None:
@@ -147,6 +192,45 @@ def arr(
     return out
 
 
+def arr_sum(
+    data_map: dict[str, dict[str, Any]],
+    years: list[int],
+    vars_: list[str],
+    *,
+    money: bool = False,
+) -> list[Any]:
+    """Sum several variables per year, for rows Valuatum splits in two.
+
+    Capital loans and loans from credit institutions are each stored as a
+    current + non-current pair; the report wants the combined figure. A year
+    stays None only when EVERY component is missing, so a company that has
+    only the current half still gets a value.
+    """
+    out = []
+    for year in years:
+        values = [as_num(raw(data_map, year, var)) for var in vars_]
+        values = [v for v in values if isinstance(v, (int, float))]
+        if not values:
+            out.append(None)
+            continue
+        total = sum(values)
+        out.append(roundish(total * 1000 if money else total))
+    return out
+
+
+def text_arr(data_map: dict[str, dict[str, Any]], years: list[int], var: str) -> list[Any]:
+    """Per-year values that are text, not numbers (the credit rating letter).
+
+    arr() runs everything through as_num, which turns "BBB" into None — most
+    /modeldata variables are numeric, but the rating varname returns a string.
+    """
+    out = []
+    for year in years:
+        value = raw(data_map, year, var)
+        out.append(str(value) if isinstance(value, str) and value.strip() else None)
+    return out
+
+
 def scalar(
     data_map: dict[str, dict[str, Any]],
     year: int | None,
@@ -168,90 +252,88 @@ def coalesce(*values: Any) -> Any:
     return None
 
 
-def mcp_credit_risk(company_code: str, period_type: str = "annual", limit: int = 10) -> dict[str, Any] | None:
-    url = mcp_url()
-    if not url:
-        return None
+def _creditrisk_rows(company_code: str, token: str) -> list[dict[str, Any]]:
+    """GET /creditrisk?companyCode=… — one entry per company in the hierarchy.
 
-    def post(payload: dict[str, Any]) -> dict[str, Any]:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-            headers={
-                "accept": "application/json, text/event-stream",
-                "content-type": "application/json",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-
+    Payment defaults are a nice-to-have, so a failure here degrades to an empty
+    list rather than failing the export: everything else in credit_risk already
+    came back from /modeldata.
+    """
+    if not company_code or not token:
+        return []
+    url = f"{api_base_url()}/creditrisk?companyCode={urllib.parse.quote(company_code)}"
+    req = urllib.request.Request(
+        url,
+        headers={"accept": "application/json", "authorization": f"Bearer {token}"},
+    )
     try:
-        post(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-03-26",
-                    "capabilities": {},
-                    "clientInfo": {"name": "modeldata-json-export", "version": "1.0.0"},
-                },
-            }
-        )
-        response = post(
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "valu_creditrisk",
-                    "arguments": {
-                        "companyCode": company_code,
-                        "period_type": period_type,
-                        "limit": limit,
-                    },
-                },
-            }
-        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            rows = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
-        return None
-
-    result = response.get("result", {})
-    if result.get("isError"):
-        return None
-    text = result.get("structuredContent", {}).get("result")
-    if text is None:
-        content = result.get("content") or []
-        text = content[0].get("text") if content else None
-    if not text:
-        return None
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return None
+        return []
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
 
 
-def credit_risk_payload(credit: dict[str, Any] | None) -> dict[str, Any]:
-    if not credit or not credit.get("creditHistory"):
+def rest_payment_defaults(company_code: str, token: str) -> list[dict[str, Any]]:
+    """Payment defaults (maksuhäiriöt) from GET /creditrisk.
+
+    This is the ONLY thing taken from this endpoint, and the only Valuatum call
+    still keyed by company code rather than fid. That is safe here specifically
+    because payment defaults are a property of the company code itself: the emo
+    and konserni entries carry identical ones, so which entry we read does not
+    matter. Everything else in credit_risk comes from /modeldata by fid, where
+    emo and konserni genuinely differ.
+
+    So: first entry that actually has defaults wins. Do NOT filter by fid —
+    when the company is not in the database the API still returns a minimal
+    entry with the defaults and a null followedModelId (openapi.yaml:1229), and
+    matching on fid would silently drop exactly those.
+    """
+    for row in _creditrisk_rows(company_code, token):
+        defaults = row.get("paymentDefaults")
+        if isinstance(defaults, list):
+            cleaned = [d for d in defaults if isinstance(d, dict)]
+            if cleaned:
+                return cleaned
+    return []
+
+
+def credit_risk_payload(
+    data_map: dict[str, dict[str, Any]],
+    years: list[int],
+    payment_defaults: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Credit risk for the actual years, straight from the model's own data.
+
+    Both risk variables come back as fractions (0.00964645), so pct=True scales
+    them to the percent the schema and the prompts expect. The series is capped
+    at /modeldata's 9 actual years, where the Profinder MCP reached back 20 —
+    the tradeoff for figures that belong to THIS fid instead of whichever
+    company in the group the MCP decided to answer with.
+    """
+    company = arr(data_map, years, "brm_ValuBooster2", pct=True)
+    industry = arr(data_map, years, "industryRiskBankruptcy", pct=True)
+    rating = text_arr(data_map, years, "text_brc_Kirjain_luokitus_front-brm_ValuBooster2")
+    score = arr(data_map, years, "cr_credit_score_vb2")
+    available = any(v is not None for v in company + industry + rating + score)
+    if not available:
         return {
             "available": False,
             "years": [],
             "company_bankruptcy_risk_pct": [],
             "industry_bankruptcy_risk_pct": [],
             "rating": [],
+            "credit_score": [],
+            "payment_defaults": payment_defaults or [],
         }
-
-    rows = sorted(credit["creditHistory"], key=lambda item: item.get("year", 0))
     return {
         "available": True,
-        "years": [item.get("year") for item in rows],
-        "company_bankruptcy_risk_pct": [
-            roundish(item.get("bankruptcyRisk") * 100) if item.get("bankruptcyRisk") is not None else None
-            for item in rows
-        ],
-        "industry_bankruptcy_risk_pct": [None for _ in rows],
-        "rating": [item.get("creditRating") for item in rows],
+        "years": list(years),
+        "company_bankruptcy_risk_pct": company,
+        "industry_bankruptcy_risk_pct": industry,
+        "rating": rating,
+        "credit_score": score,
+        "payment_defaults": payment_defaults or [],
     }
 
 
@@ -295,7 +377,7 @@ def build_flags(data_map: dict[str, dict[str, Any]], years: list[int]) -> list[d
     return flags
 
 
-def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[str, Any]:
+def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     data_map = model.get("dataMap", {})
     years = sorted((int(year) for year in data_map), key=int)
     current_year = int(model.get("currentYear") or min(years))
@@ -349,35 +431,55 @@ def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[
             "unit": "tEUR",
             "income_statement": {
                 "net_sales": arr(data_map, actual_years, "ns", money=True),
-                "other_operating_income": arr(data_map, actual_years, "other_operating_income", money=True),
-                "gross_profit": arr(data_map, actual_years, "gross_profit", money=True),
-                "personnel_costs": arr(data_map, actual_years, "personnel_costs", money=True),
-                "other_operating_costs": arr(data_map, actual_years, "other_operating_costs", money=True),
-                "depreciation_total": arr(data_map, actual_years, "dep_total_nega", money=True),
+                "other_operating_income": arr(data_map, actual_years, "cr_other_operating_income", money=True),
+                "gross_profit": arr(data_map, actual_years, ["cr_gross_profit", "gross_profit"], money=True),
+                # cr_employee_expenses is the absolute figure (= wages and
+                # salaries + social security expenses). Do NOT derive it from
+                # per_employee x headcount: headcount_efficiency.py uses this
+                # row to sanity-check headcount, which that derivation would
+                # make circular.
+                "personnel_costs": arr(data_map, actual_years, "cr_employee_expenses", money=True),
+                "other_operating_costs": arr(data_map, actual_years, "cr_other_oper_expenses", money=True),
+                "depreciation_total": arr(data_map, actual_years, "cr_depreciation", money=True),
                 "ebitda": arr(data_map, actual_years, ["cr_ebitda_xml", "ebitda"], money=True),
                 "ebit": arr(data_map, actual_years, "ebit", money=True),
                 "ebit_without_extras": arr(data_map, actual_years, "ebit_without_extras", money=True),
                 "extras_in_ebit": arr(data_map, actual_years, "extras_in_ebit", money=True),
-                "interest_expenses": arr(data_map, actual_years, "interest_expenses", money=True),
-                "net_earnings": arr(data_map, actual_years, "net_earnings", money=True),
+                "interest_expenses": arr(data_map, actual_years, ["cr_interest_expenses", "interest_expenses"], money=True),
+                "net_earnings": arr(data_map, actual_years, ["cr_net_earnings", "net_earnings"], money=True),
             },
             "balance_sheet": {
-                "development_costs": arr(data_map, actual_years, "development_costs", money=True),
-                "intangibles_total": arr(data_map, actual_years, ["intangibles_total", "other_intangible_rights"], money=True),
-                "tangible_assets": arr(data_map, actual_years, "tangible_ass", money=True),
+                "development_costs": arr(data_map, actual_years, "cr_development_expenditure", money=True),
+                "intangibles_total": arr(data_map, actual_years, ["cr_intangible_assets_total", "other_intangible_rights"], money=True),
+                "tangible_assets": arr(data_map, actual_years, ["cr_tangibles_assets_total", "tangible_ass"], money=True),
                 "inventories": arr(data_map, actual_years, "inventories", money=True),
-                "trade_receivables": arr(data_map, actual_years, ["trade_receivables", "cr_curr_trade_debtors"], money=True),
-                "cash_and_equivalents": arr(data_map, actual_years, ["cash_and_equivalents", "cash"], money=True),
+                "trade_receivables": arr(data_map, actual_years, "cr_curr_trade_debtors", money=True),
+                "cash_and_equivalents": arr(data_map, actual_years, "cr_cash_and_bank_deposits", money=True),
                 "total_assets": arr(data_map, actual_years, "bs_total_assets", money=True),
                 "equity_excl_capital_loans": arr(data_map, actual_years, "cr_shareholders_equity", money=True),
-                "equity_incl_capital_loans": arr(data_map, actual_years, "equity_incl_capital_loans", money=True),
-                "capital_loans": arr(data_map, actual_years, "capital_loans", money=True),
-                "loans_from_fin_institutions": arr(data_map, actual_years, "loans_from_fin_institutions", money=True),
-                "loans_from_associated": arr(data_map, actual_years, "loans_from_associated", money=True),
-                "advances_received": arr(data_map, actual_years, "advances_received", money=True),
-                "trade_payables": arr(data_map, actual_years, ["trade_payables", "cr_current_trade_creditors"], money=True),
+                "equity_incl_capital_loans": arr(data_map, actual_years, "fundu_equity_incl_cap_loans", money=True),
+                "capital_loans": arr_sum(
+                    data_map, actual_years, ["cr_capital_loan_lt", "cr_capital_loan_st"], money=True),
+                "loans_from_fin_institutions": arr_sum(
+                    data_map, actual_years,
+                    ["cr_non_current_loans_from_credit_ins", "cr_current_loans_from_credit_ins"],
+                    money=True),
+                "loans_from_associated": arr_sum(
+                    data_map, actual_years,
+                    ["cr_non_current_owed_to_participating", "cr_current_owed_to_participating"],
+                    money=True),
+                "advances_received": arr_sum(
+                    data_map, actual_years,
+                    ["cr_non_current_advances_received", "cr_current_advances_received"],
+                    money=True),
+                "trade_payables": arr(data_map, actual_years, "cr_current_trade_creditors", money=True),
+                # liab_ib_total EXCLUDES capital loans; interest_bearing_liabilities_calc
+                # is the same series plus them. The valuation engine treats a capital
+                # loan as equity-like (singlewriter.txt rule 25), so the debt line must
+                # be the excluding one or the net-debt bridge double-counts it.
                 "interest_bearing_debt": arr(data_map, actual_years, "liab_ib_total", money=True),
-                "non_interest_bearing_debt": arr(data_map, actual_years, "non_interest_bearing_debt", money=True),
+                "non_interest_bearing_debt": arr(
+                    data_map, actual_years, "non_interest_bearing_liabilities_calc", money=True),
             },
             # Per-employee ratios the engine already computes, in tEUR/employee —
             # confirmed live: unscaled values rounded to 0/-0 across every year
@@ -483,7 +585,7 @@ def build_payload(model: dict[str, Any], credit: dict[str, Any] | None) -> dict[
             "capital_turnover": arr(data_map, years, "asset_turnover"),
             "eva": arr(data_map, years, "eva", money=True),
         },
-        "credit_risk": credit_risk_payload(credit),
+        "credit_risk": credit_risk_payload(data_map, actual_years, payment_defaults),
         "peers": [],
         "client_reported_signals": [],
         "flags": build_flags(data_map, years),
@@ -509,11 +611,13 @@ def main() -> None:
     if args.company_code_override or args.company_name_override:
         model = dict(model)
         if args.company_code_override:
-            model["companyCode"] = args.company_code_override
+            model["companyCode"] = apply_level_suffix(
+                args.company_code_override, str(model.get("companyCode") or "")
+            )
         if args.company_name_override:
             model["companyName"] = args.company_name_override
-    credit = mcp_credit_risk(str(model.get("companyCode") or ""))
-    payload = build_payload(model, credit)
+    payment_defaults = rest_payment_defaults(str(model.get("companyCode") or ""), token)
+    payload = build_payload(model, payment_defaults)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

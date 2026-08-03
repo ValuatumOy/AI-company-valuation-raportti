@@ -268,10 +268,9 @@ def build_var_poses(actuals, estimates):
     Estimates: Y+0 (first estimate) .. Y+<estimates-1>
 
     The modeldata API only accepts SINGLE-DIGIT relative positions
-    (pattern Y[+-][0-9]); Y-10+/Y+10+ return HTTP 400. So cap the requested
-    positions at 9 here. Deeper history (10-15+ years) is not fetched from
-    modeldata — it comes from the separate Profinder backfill, which is driven
-    by the full `actuals` value via its own --limit.
+    (pattern Y[+-][0-9]); Y-10+/Y+10+ return HTTP 400 (verified live). So cap
+    the requested positions at 9 here — 9 years of actuals is the hard ceiling
+    for every /modeldata-sourced field.
     """
     rel_poses = [f"Y-{i}" for i in range(1, min(actuals, 9) + 1)]
     rel_poses += [f"Y+{i}" for i in range(0, min(estimates, 10))]
