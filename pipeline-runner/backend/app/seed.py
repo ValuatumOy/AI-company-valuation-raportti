@@ -263,64 +263,45 @@ def _placeholder_stage(stage):
 
 def _pipeline_needs_auto_reseed(pipeline):
     by_order = {s["order"]: s for s in pipeline.get("stages", [])}
-    if any(order not in by_order for order in range(0, 7)):
+    if any(order not in by_order for order in (0, 1, 2)):
         return True
     return any(_placeholder_stage(s) for s in by_order.values())
 
 
+def _single_writer_pipeline():
+    return next((p for p in store.list_pipelines()
+                 if p.get("name") == SINGLE_WRITER_PIPELINE_NAME), None)
+
+
 def ensure_current_defaults():
-    """Repair stale default pipelines before the UI reads them."""
+    """Repair the default (single-writer) pipeline before the UI reads it."""
     db.init_db()
-    pipelines = store.list_pipelines()
-    if not pipelines:
+    pipeline = _single_writer_pipeline()
+    if pipeline is None or _pipeline_needs_auto_reseed(pipeline):
         return reseed_defaults(force=True)
-
-    pipeline = next(
-        (p for p in pipelines if p.get("name") == DEFAULT_PIPELINE_NAME),
-        pipelines[0],
-    )
-    if _pipeline_needs_auto_reseed(pipeline):
-        return reseed_defaults(force=True)
-
     return {"ok": True, "created": 0, "updated": 0, "pipeline": pipeline}
 
 
 def reseed_defaults(force=False):
-    """Create or refresh the default stage set.
+    """Create or refresh the single-writer stage set.
 
     Without force this is conservative: it updates placeholder stages and adds
     missing default orders. The explicit API endpoint passes force=True to
     restore the vendored prompts.
+
+    The retired 6-stage pipeline is deliberately NOT created or refreshed here.
+    It stays in the database only because 16 historical runs reference it, and
+    main._assert_generation_pipeline refuses to execute anything through it.
     """
     db.init_db()
-    pipelines = store.list_pipelines()
-    if pipelines:
-        pipeline = next(
-            (p for p in pipelines if p.get("name") == DEFAULT_PIPELINE_NAME),
-            pipelines[0],
-        )
-    else:
-        pipeline = store.create_pipeline(DEFAULT_PIPELINE_NAME)
-
-    updated = 0
-    created = 0
-    by_order = {s["order"]: s for s in pipeline.get("stages", [])}
-    for desired in _stages():
-        current = by_order.get(desired["order"])
-        if current is None:
-            store.add_stage(pipeline["id"], desired)
-            created += 1
-            continue
-        if force or _placeholder_stage(current):
-            store.update_stage(current["id"], desired)
-            updated += 1
-
-    _ensure_single_writer_pipeline(force)
+    before = _single_writer_pipeline()
+    pipeline = _ensure_single_writer_pipeline(force)
+    stage_count = len(pipeline.get("stages", []))
     return {
         "ok": True,
-        "created": created,
-        "updated": updated,
-        "pipeline": store.get_pipeline(pipeline["id"]),
+        "created": stage_count if before is None else 0,
+        "updated": stage_count if (before is not None and force) else 0,
+        "pipeline": pipeline,
     }
 
 
@@ -330,30 +311,8 @@ def sync_code_and_limits():
     This is how validator improvements reach an existing pipeline without a full
     reseed (which would also reset prompts). Only pushes seeded validators; never
     clears a validator the operator added."""
-    pipelines = store.list_pipelines()
-    if not pipelines:
-        return
-    pipeline = next(
-        (p for p in pipelines if p.get("name") == DEFAULT_PIPELINE_NAME), pipelines[0]
-    )
-    by_order = {s["order"]: s for s in pipeline.get("stages", [])}
-    for desired in _stages():
-        cur = by_order.get(desired["order"])
-        if not cur:
-            continue
-        patch = {}
-        dv = desired.get("validator_code")
-        if dv and (cur.get("validator_code") or "") != dv:
-            patch["validator_code"] = dv
-        dmax = desired.get("max_tokens")
-        if dmax and cur.get("max_tokens") != dmax:
-            patch["max_tokens"] = dmax
-        if patch:
-            store.update_stage(cur["id"], {**cur, **patch})
-
-    # Same code/limits sync for the single-writer pipeline (validator + tokens).
-    sw = next((p for p in pipelines
-               if p.get("name") == SINGLE_WRITER_PIPELINE_NAME), None)
+    # Single-writer only: the retired 6-stage pipeline is never written to.
+    sw = _single_writer_pipeline()
     if sw:
         sw_by_order = {s["order"]: s for s in sw.get("stages", [])}
         for desired in _single_writer_stages():
@@ -483,15 +442,19 @@ def _patch_prompt_text(order, text):
 
 
 def sync_prompt_patches():
-    """Apply narrow prompt text migrations to the persisted default pipeline."""
-    pipelines = store.list_pipelines()
-    if not pipelines:
+    """Apply narrow prompt text migrations to the persisted default pipeline.
+
+    Order 1 (grounded enrichment) only: it is the sole stage the single-writer
+    pipeline shares with the retired 6-stage one, and prompt bodies are
+    operator-editable so we self-heal rather than overwrite wholesale. The
+    orders 2-6 patches below belong to the retired pipeline and are no longer
+    applied — nothing runs through it (main._assert_generation_pipeline).
+    """
+    pipeline = _single_writer_pipeline()
+    if not pipeline:
         return
-    pipeline = next(
-        (p for p in pipelines if p.get("name") == DEFAULT_PIPELINE_NAME), pipelines[0]
-    )
     for cur in pipeline.get("stages", []):
-        if cur.get("order") not in (1, 2, 3, 4, 5, 6):
+        if cur.get("order") != 1:
             continue
         patched = _patch_prompt_text(cur["order"], cur.get("prompt_template"))
         if patched != cur.get("prompt_template"):
@@ -500,14 +463,10 @@ def sync_prompt_patches():
 
 def ensure_seeded():
     db.init_db()
-    row = db.query_one("SELECT id FROM pipelines LIMIT 1")
-    if row:
-        pipeline = store.get_pipeline(row["id"])
-        if pipeline and _pipeline_needs_auto_reseed(pipeline):
-            reseed_defaults(force=True)
-        sync_code_and_limits()
-        sync_prompt_patches()
+    pipeline = _single_writer_pipeline()
+    if pipeline is None or _pipeline_needs_auto_reseed(pipeline):
+        reseed_defaults(force=True)
+    else:
         _ensure_single_writer_pipeline()
-        return
-    reseed_defaults(force=True)
+    sync_code_and_limits()
     sync_prompt_patches()

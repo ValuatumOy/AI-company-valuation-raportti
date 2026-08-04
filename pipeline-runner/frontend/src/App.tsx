@@ -55,7 +55,10 @@ export default function App() {
 
   function init() {
     api.pipelines()
-      .then((ps) => {
+      .then((all) => {
+        // Retired pipelines (the 6-stage one) are never offered: the backend
+        // refuses to run them, so listing them here is a pure footgun.
+        const ps = all.filter((p) => !p.retired);
         setPipelines(ps);
         // Default to the canonical single-writer pipeline by EXACT name — a
         // startsWith match also hit the archived "…— ARKISTO" duplicate (older,
@@ -63,7 +66,6 @@ export default function App() {
         const def =
           ps.find((p) => p.name === "Yhden kirjoittajan raportti (oletus)") ??
           ps.find((p) => p.name.startsWith("Yhden kirjoittajan raportti (oletus)")) ??
-          ps.find((p) => p.name.startsWith("Valuaatio-pipeline")) ??
           ps[0];
         setPipeline(def);
         setSelectedId(def?.stages[0]?.id ?? null);
@@ -340,7 +342,9 @@ export default function App() {
     if (!pipeline) return;
     if (!confirm("Reset all stage prompts to repo defaults?")) return;
     const res = await api.reseedDefaults();
-    api.pipelines().then(setPipelines).catch(() => {});
+    api.pipelines()
+      .then((all) => setPipelines(all.filter((p) => !p.retired)))
+      .catch(() => {});
     setPipeline(res.pipeline);
     setSelectedId((id) =>
       id && res.pipeline.stages.some((s) => s.id === id)

@@ -23,6 +23,9 @@ export interface Pipeline {
   created_at: string;
   updated_at: string;
   stages: Stage[];
+  // Set by the backend for pipelines nothing may run through (the retired
+  // 6-stage one, kept only because old runs reference it).
+  retired?: boolean;
 }
 
 export interface ValidatorCheck {

@@ -1561,17 +1561,19 @@ def test_self_heal_retries_failed_stage(monkeypatch):
     run = store.get_run(rid)
 
     async def drive():
-        async for _ in runner.run_stages(run, p["stages"], only=3):
+        # order 2 = the single-writer report stage (the seeded pipeline has
+        # orders 0/1/2; the retired 6-stage pipeline is no longer seeded)
+        async for _ in runner.run_stages(run, p["stages"], only=2):
             pass
 
     asyncio.run(drive())
     assert calls["n"] == 2  # failed once, retried
     # the retry was feedback-driven: it received the failing check as correction
     assert calls["correction"] and "missing X" in calls["correction"]["feedback"]
-    s3 = [r for r in store.get_run(rid)["results"] if r["order"] == 3][0]
-    assert s3["status"] == "ok"  # self-healed
+    s2 = [r for r in store.get_run(rid)["results"] if r["order"] == 2][0]
+    assert s2["status"] == "ok"  # self-healed
     # the auto-fix is recorded in the checklist
-    names = [c["name"] for c in (s3.get("validator_report") or {}).get("checks", [])]
+    names = [c["name"] for c in (s2.get("validator_report") or {}).get("checks", [])]
     assert any("Automaattinen korjaus" in n for n in names)
 
 
@@ -2302,6 +2304,36 @@ def test_round2_cap_bites_across_a_refinement_chain(monkeypatch):
     # while the newest run itself carries no redirect hint.
     assert c.get(f"/api/runs/{r1}").json()["latest_run_id"] == r3
     assert "latest_run_id" not in c.get(f"/api/runs/{r3}").json()
+
+
+def test_retired_six_stage_pipeline_cannot_reach_production(monkeypatch):
+    # The 6-stage pipeline is retired. It survives in the DB only because old
+    # runs reference it, and list_pipelines() is oldest-first so it is
+    # pipelines[0] — every "just take the first pipeline" path used to land on
+    # it. Nothing may create or execute a run through it.
+    from starlette.testclient import TestClient
+    from app import main, seed, store
+
+    seed.ensure_seeded()
+    monkeypatch.setattr(main, "_APP_TOKEN", "admintok")
+    c = TestClient(main.app)
+    hdr = {"Authorization": "Bearer admintok"}
+
+    # Seeding no longer creates it at all...
+    assert not any(p["name"] == seed.DEFAULT_PIPELINE_NAME
+                   for p in store.list_pipelines())
+    # ...and a hand-made one (as prod still has) is refused at every gate.
+    retired = store.create_pipeline(seed.DEFAULT_PIPELINE_NAME)
+    assert c.post("/api/runs", headers=hdr,
+                  json={"pipeline_id": retired["id"],
+                        "stop_on_failure": False}).status_code == 400
+    # including an existing run that already points at it (restart / round 2)
+    rid = store.create_run(retired["id"], {"meta": {}}, False)
+    assert c.post(f"/api/runs/{rid}/start", headers=hdr).status_code == 400
+    body = {"clarifications": [], "clarifications_free_text": ""}
+    assert c.post(f"/api/runs/{rid}/round2", json=body, headers=hdr).status_code == 400
+    # the self-serve default never falls back to it
+    assert main._default_pipeline_id(None) != retired["id"]
 
 
 def test_round2_cap_skipped_for_unlimited_key(monkeypatch):

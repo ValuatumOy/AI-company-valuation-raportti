@@ -201,7 +201,11 @@ def health():
 @app.get("/api/pipelines")
 def get_pipelines():
     seed.ensure_current_defaults()
-    return store.list_pipelines()
+    # `retired` marks a pipeline nothing may run through (the 6-stage one kept
+    # for old runs) so the admin UI can hide it instead of offering it as a
+    # choice that 400s on start.
+    return [{**p, "retired": not str(p.get("name") or "").startswith(
+        seed.SINGLE_WRITER_PIPELINE_PREFIX)} for p in store.list_pipelines()]
 
 
 @app.post("/api/pipelines")
@@ -641,9 +645,7 @@ def post_validate(body: ValidateIn):
 
 @app.post("/api/runs")
 def post_run(body: RunIn, request: Request):
-    p = store.get_pipeline(body.pipeline_id)
-    if not p:
-        raise HTTPException(404, "pipeline not found")
+    _assert_generation_pipeline(body.pipeline_id)
     _check_not_paused()
     # A new round-1 report is where an expert's quota is spent. Claim it before
     # creating the run (a bad pipeline_id 404s above, before any unit is spent).
@@ -796,6 +798,12 @@ async def _drive_run(rid: str, only=None, from_order=None, completion_status=Non
 
 
 def _start_bg(rid: str, only=None, from_order=None, completion_status=None) -> bool:
+    # Last line of defence for the retired 6-stage pipeline: every execution
+    # path (start, round2 — which clones the PARENT's pipeline_id — forecast
+    # import, scoped rerun) funnels through here, so one check covers them all,
+    # including restarts of the 16 historical runs that still point at it.
+    run = store.get_run(rid)
+    _assert_generation_pipeline((run or {}).get("pipeline_id"))
     task = _RUN_TASKS.get(rid)
     if task and not task.done():
         return False
@@ -1454,15 +1462,39 @@ def expert_me(request: Request):
     }
 
 
+def _assert_generation_pipeline(pipeline_id: str) -> str:
+    """Only single-writer pipelines may start a NEW report run.
+
+    The retired 6-stage pipeline still exists in the database (16 historical
+    runs reference it), and list_pipelines() is oldest-first — so it is
+    pipelines[0]. Any silent fallback to "the first pipeline", or an explicit
+    pipeline_id from a caller, could put it back in front of a paying customer.
+    It is retired: refuse rather than generate through it.
+    """
+    p = store.get_pipeline(pipeline_id) if pipeline_id else None
+    if not p:
+        raise HTTPException(404, "pipeline not found")
+    if not str(p.get("name") or "").startswith(seed.SINGLE_WRITER_PIPELINE_PREFIX):
+        raise HTTPException(
+            400,
+            f"Pipeline {p.get('name')!r} on poistettu käytöstä eikä sillä voi "
+            "ajaa uusia raportteja. Käytä yhden kirjoittajan pipelineä.",
+        )
+    return pipeline_id
+
+
 def _default_pipeline_id(pipeline_id: str | None) -> str:
-    # Self-serve defaults to the single-writer "koeajo" pipeline (FAKTAT +
-    # enrichment + one writer), not the 6-stage default. Callers can still
-    # pass an explicit pipeline_id (the admin/operator UI does).
+    # Self-serve runs go through the single-writer pipeline (FAKTAT +
+    # enrichment + one writer). Callers may pass an explicit pipeline_id (the
+    # admin/operator UI does), but it is validated the same way — and there is
+    # deliberately NO "first pipeline" fallback (see _assert_generation_pipeline).
     if pipeline_id:
-        return pipeline_id
-    pls = store.list_pipelines() or []
-    sw = next((p for p in pls if p.get("name") == seed.SINGLE_WRITER_PIPELINE_NAME), None)
-    return (sw or (pls[0] if pls else {})).get("id")
+        return _assert_generation_pipeline(pipeline_id)
+    sw = next((p for p in store.list_pipelines() or []
+               if p.get("name") == seed.SINGLE_WRITER_PIPELINE_NAME), None)
+    if not sw:
+        raise HTTPException(503, "Oletuspipelineä ei löydy — aja /api/reseed.")
+    return sw["id"]
 
 
 def _create_generation_run(
