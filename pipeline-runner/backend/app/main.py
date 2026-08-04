@@ -833,9 +833,10 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     parent = _require_run_access(rid, request)
     # Round-2 is credit-free, so cap refinements per report — otherwise one key
     # can spam unlimited Opus-priced full-report rewrites ($6-runs incident).
-    # Depth-based, not a per-node child count: refining round 2's own result
-    # again would otherwise reset the count (a fresh run always has 0
-    # children of its own) and the cap would never actually bite.
+    # Family-wide count, not path depth or per-node children: the emailed
+    # link targets the ROOT run (path depth 0 forever), and a fresh run has
+    # 0 children of its own — either narrower measure lets rounds restart
+    # uncounted from an older run in the same report family.
     max_r2 = int(os.getenv("ROUND2_MAX_PER_RUN") or 2)
     # Unlimited expert keys (generations_limit <= 0) skip the cap: they're
     # ours/CEO's, iterate-until-good is the point, and the per-run + daily
@@ -845,7 +846,7 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     uncapped = key_row is not None and (key_row["generations_limit"] or 0) <= 0
     # The cap gates BOTH branches before any import runs: a forecast edit must not
     # trigger a (paid, uncancellable) ValuBuild import if the round isn't free/paid.
-    if not uncapped and store.lineage_depth(rid) >= max_r2:
+    if not uncapped and store.refinement_count(rid) >= max_r2:
         raise HTTPException(
             429, f"Tarkennuskierrosten enimmäismäärä ({max_r2}) on jo käytetty "
                  "tälle raportille."
@@ -1393,7 +1394,14 @@ def get_runs():
 
 @app.get("/api/runs/{rid}")
 def get_run(rid: str, request: Request):
-    return _require_run_access(rid, request)
+    run = _require_run_access(rid, request)
+    # Emailed links target the run that finished when the mail was sent; after
+    # a browser-side refinement that's stale. Tell the client where the newest
+    # family member is so it can jump there instead of re-showing an old report.
+    latest = store.latest_family_run_id(rid)
+    if latest and latest != rid:
+        run = {**run, "latest_run_id": latest}
+    return run
 
 
 # ---- expert access keys -----------------------------------------------------

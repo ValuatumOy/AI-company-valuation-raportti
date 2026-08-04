@@ -314,7 +314,7 @@ def test_forecast_import_failure_starts_no_round(monkeypatch):
 
     pid = store.list_pipelines()[0]["id"]
     parent = _parent_with_forecast(store, pid)
-    before = store.lineage_depth(parent)
+    before = store.refinement_count(parent)
     with pytest.raises(HTTPException) as exc:
         _run(main._start_forecast_import_round(
             parent,
@@ -324,7 +324,7 @@ def test_forecast_import_failure_starts_no_round(monkeypatch):
     assert exc.value.status_code == 502
     assert "ValuBuild kaatui" in str(exc.value.detail)
     # No child run was created → no quota/lineage consumed.
-    assert store.lineage_depth(parent) == before
+    assert store.refinement_count(parent) == before
 
 
 def test_round2_forecast_edit_rejects_bad_varname(monkeypatch):

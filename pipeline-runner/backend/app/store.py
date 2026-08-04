@@ -190,18 +190,53 @@ def clone_run(parent_id, params=None, identifier=None):
     return rid
 
 
-def lineage_depth(rid):
-    """How many round-2 refinements already led to `rid`, walking
-    parent_run_id back to the root round-1 run. Used to cap total
-    refinements per purchased report — counting only rid's OWN children
-    would miss a chain (refine round 2's result, then round 3's, ...), since
-    each new run starts with zero children of its own."""
-    depth = 0
+def _family_ids(rid):
+    """(root_id, descendant_ids) for `rid`'s report family: walk parent_run_id
+    up to the root round-1 run, then BFS over children."""
     row = get_run(rid)
     while row and row.get("parent_run_id"):
-        depth += 1
         row = get_run(row["parent_run_id"])
-    return depth
+    if not row:
+        return None, []
+    descendants = []
+    frontier = [row["id"]]
+    while frontier:
+        children = [r["id"] for r in db.query(
+            "SELECT id FROM runs WHERE parent_run_id IN (%s)"
+            % ",".join("?" * len(frontier)),
+            tuple(frontier),
+        )]
+        descendants += children
+        frontier = children
+    return row["id"], descendants
+
+
+def refinement_count(rid):
+    """How many refinement runs already exist in `rid`'s report FAMILY (every
+    descendant of the root round-1 run). Used to cap total refinements per
+    purchased report. Counting only the parent PATH to `rid` (the old
+    lineage_depth) left a hole: the emailed report link always points at the
+    run that just finished — for round 1 that's the root, whose path depth is
+    forever 0, so reopening the email let a customer start unlimited fresh
+    rounds off the root while each browser-side round chained normally."""
+    _root, descendants = _family_ids(rid)
+    return len(descendants)
+
+
+def latest_family_run_id(rid):
+    """Newest run in `rid`'s family by created_at. After a browser-side
+    refinement the emailed link still targets an older run — the UI uses this
+    to jump to the current version instead of re-showing a stale report."""
+    root, descendants = _family_ids(rid)
+    if not root:
+        return None
+    ids = [root] + descendants
+    rows = db.query(
+        "SELECT id FROM runs WHERE id IN (%s) ORDER BY created_at DESC, id DESC"
+        % ",".join("?" * len(ids)),
+        tuple(ids),
+    )
+    return rows[0]["id"] if rows else root
 
 
 def set_run_status(rid, status):

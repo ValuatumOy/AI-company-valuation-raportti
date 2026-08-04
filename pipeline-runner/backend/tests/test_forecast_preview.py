@@ -133,7 +133,7 @@ def test_preview_returns_edits_and_teur_rows_without_import(monkeypatch):
         lambda *args, **kwargs: pytest.fail("preview ei saa käynnistää importtia"),
     )
 
-    before_depth = store.lineage_depth(rid)
+    before_count = store.refinement_count(rid)
     response = c.post(
         f"/api/runs/{rid}/forecast-preview",
         json={"text": "Nosta liikevaihto 5,8 miljoonaan vuonna 2026"},
@@ -146,7 +146,7 @@ def test_preview_returns_edits_and_teur_rows_without_import(monkeypatch):
         "rows": [{"varname": "ns", "year": 2026, "old": 5300, "value": 5800.0}],
         "notes": ["Käyttäjän antama absoluuttinen tavoite."],
     }
-    assert store.lineage_depth(rid) == before_depth
+    assert store.refinement_count(rid) == before_count
     assert store.get_run(rid)["identifier"] == "42"
 
 

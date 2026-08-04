@@ -427,7 +427,10 @@ def _patch_prompt_text(order, text):
         if "LÄHDEMERKINNÄT (jäljitettävyys)" not in text:
             return _load_prompt("6_tiivistelma.txt")
         out = text
-        cover_marker = "Kannen pääluku = realistinen base case"
+        # 2026-08-04: cover hero flipped to the scenario expected value (CEO
+        # decision) — any persisted prompt without the new directive (including
+        # the old base-case-hero text) is reloaded wholesale from the repo.
+        cover_marker = "Kannen pääluku = skenaarioiden odotusarvo"
         if cover_marker not in out:
             return _load_prompt("6_tiivistelma.txt")
 

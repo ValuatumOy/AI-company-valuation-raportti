@@ -459,6 +459,33 @@ def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
     assert "nykyarvorivi" in callout["text"]
 
 
+def test_dcf_detail_scales_large_caps_to_meur():
+    # Supercell-class numbers (9-digit tEUR) overflowed the fixed-layout wide
+    # table; the section re-expresses itself in the cover's unit for the
+    # magnitude (here mrd. €), consistently across table, bridge and waterfall.
+    data = _engine_input_data()
+    dcf = data["valuation_engine"]["dcf"]
+    for k, v in dcf.items():
+        if isinstance(v, list) and all(isinstance(x, (int, float)) for x in v):
+            dcf[k] = [x * 10_000 for x in v]
+        elif isinstance(v, (int, float)):
+            dcf[k] = v * 10_000
+    dcf["bridge"] = {k: v * 10_000 for k, v in dcf["bridge"].items()}
+    blocks = dcf_detail.build_dcf_detail_blocks(data)
+    table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
+    assert table["unit"] == "mrd. €"
+    # 4 000 000 tEUR EV -> "4,00" mrd. €
+    bridge = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_equity_bridge")
+    assert ["Yritysarvo (EV)", "4,00"] in bridge["rows"]
+    wf = next(b for b in blocks if b.get("chart_id") == "deterministic_ev_equity_waterfall")
+    assert wf["unit"] == "mrd. €"
+    assert wf["steps"][0]["value"] == 4.0
+    # small caps stay in tEUR, formatting unchanged
+    small = dcf_detail.build_dcf_detail_blocks(_engine_input_data())
+    assert next(b for b in small if b.get("table_id")
+                == "deterministic_dcf_fcff_drivers")["unit"] == "tEUR"
+
+
 def test_cumulative_discounted_fcff_row_is_a_true_forward_running_sum():
     blocks = dcf_detail.build_dcf_detail_blocks(_engine_input_data())
     table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
@@ -2265,6 +2292,17 @@ def test_round2_cap_bites_across_a_refinement_chain(monkeypatch):
     resp4 = c.post(f"/api/runs/{r3}/round2", json=body)
     assert resp4.status_code == 429
 
+    # Regression (email-link bypass): the emailed round-1 link points at the
+    # ROOT run, whose path depth is forever 0 — a fresh round started from it
+    # must still count the whole family and hit the same cap.
+    resp_root = c.post(f"/api/runs/{r1}/round2", json=body)
+    assert resp_root.status_code == 429
+
+    # ...and GET on the stale root points the UI at the family's newest run,
+    # while the newest run itself carries no redirect hint.
+    assert c.get(f"/api/runs/{r1}").json()["latest_run_id"] == r3
+    assert "latest_run_id" not in c.get(f"/api/runs/{r3}").json()
+
 
 def test_round2_cap_skipped_for_unlimited_key(monkeypatch):
     # An unlimited expert key (generations_limit <= 0, i.e. the CEO's
@@ -3436,17 +3474,22 @@ def test_method_scoring_surfaced_from_hidden_section7():
     assert len(tables) == 1
 
 
-def test_cover_hierarchy_base_value_primary_expected_labeled_unconfirmed():
+def test_cover_hierarchy_expected_value_primary_base_case_alongside():
+    # 2026-08-04 CEO decision: the scenario expected value is the cover hero;
+    # the conservative base case rides along in the bridge line and bar chart,
+    # and the expected value's probabilities are labeled as editable AI
+    # assumptions.
     fx = _json.load(open(_os.path.join(_FIXTURE_DIR, "virnex.json")))
     run = {"results": [
         {"order": 0, "status": "ok", "parsed_json": fx["input_data"]},
         {"order": 2, "status": "ok", "parsed_json": fx["writer_output"]},
     ]}
     html = render.render_html(assemble.assemble(run))
-    assert "konservatiivinen perusskenaario" in \
+    assert "skenaarioiden odotusarvo" in \
         html.split('class="hero-lab"')[1][:120].lower()
-    assert "käyttäjän vahvistamaton" in html
+    assert "muokattavia oletuksia" in html
     assert "raportin pääluku" not in html.lower()
-    # downside/upside bridge names both scenario effects
+    # downside/upside bridge starts from the base case and names both effects
+    assert "konservatiivisesta perusskenaariosta" in html
     assert "pessimistisen skenaarion vaikutus" in html
     assert "optimistisen skenaarion vaikutus" in html
