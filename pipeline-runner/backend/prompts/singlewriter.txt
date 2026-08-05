@@ -98,9 +98,9 @@ Raportti sisältää aina kolme skenaariota — pessimistinen, konservatiivinen 
 
 ## Periaate
 
-1. Osake on optio yhtiön kassavirtoihin: omistaja voi aina lopettaa lisäpääomituksen, joten **minkään skenaarion omistaja-arvo ei ole nollan alapuolella**. Pessimistisen skenaarion omistaja-arvon lattia on 0 tEUR.
+1. Osake on optio yhtiön kassavirtoihin: omistaja voi aina lopettaa lisäpääomituksen, joten **minkään skenaarion omistaja-arvo ei ole nollan alapuolella**. Lattia ei kuitenkaan ole paljas 0 tEUR, jos yhtiöllä on toimivaa liiketoimintaa tai kassaa — ks. optioarvolattia alla.
 2. Koska vähintään yksi skenaario on aidosti positiivinen aina kun yhtiöllä on toimivaa liiketoimintaa tai realisoitavaa omaisuutta, **odotusarvo on lähtökohtaisesti suurempi kuin nolla**. Tämä ei ole pakotettu lopputulos vaan seuraus rajatusta vastuusta — älä silti nosta odotusarvoa keinotekoisesti, jos kaikki skenaariot ovat lähellä nollaa.
-3. Odotusarvo = Σ (skenaarion todennäköisyys × skenaarion omistaja-arvo), jossa jokainen skenaarioarvo on jo floorattu nollaan.
+3. Odotusarvo = Σ (skenaarion todennäköisyys × skenaarion omistaja-arvo), jossa jokainen skenaarioarvo on jo floorattu (nollaan tai optioarvolattiaan).
 
 ## Skenaarioiden sisältö
 
@@ -110,9 +110,18 @@ Raportti sisältää aina kolme skenaariota — pessimistinen, konservatiivinen 
 
   **(b) Ahdinkomyyntiarvo toimivana kokonaisuutena (distressed going concern / IP-kauppa)** — laske tämä AINA, kun yhtiöllä on **siirrettävää omaisuutta**, jolla on itsenäistä arvoa ostajalle: viranomaishyväksyntä (FDA 510(k), CE, myyntilupa), patentti tai suojattu teknologia, dokumentoitu toteutunut liikevaihtohistoria, brändi/asiakaskanta, TAI aktiivinen sijoittajarahoitus tunnetulla arvostuksella. Tällaista yhtiötä ei pakkomyydä palasina vaan se **myydään halvalla toimivana liiketoimintana tai teknologiakauppana** — ja teknologia-/IP-arvoa **EI nollata** kuten kohdassa (a). Ankkuroi (b) johonkin konkreettiseen: (i) tuorein rahoituskierroksen tai ostotarjouksen arvostus (`enrichment.market_signals`), reilulla ahdinkoalennuksella; TAI (ii) konservatiivinen kerroin kestävästä liikevaihtopohjasta (esim. 0,3–0,6 × yhtiön uskottava kestävä liikevaihto, EV); TAI (iii) osuus aktivoiduista, toteutunutta myyntiä tuottaneista kehittämismenoista/aineettomista — **− nettovelka** (pääomalainat käsitellään samoin kuin muualla raportissa). Nimeä käytetty ankkuri ja alennus.
 
-  Omistaja-arvo = max(a, b). Käytä **0 tEUR -lattiaa vain**, jos KUMPIKIN on aidosti negatiivinen — käytännössä vain ylivelkaantunut yhtiö, jolla ei ole siirrettävää omaisuutta eikä arvon kannalta relevanttia markkinasignaalia. Terveelle yhtiölle, jolla on kassaa, realisoitavaa omaisuutta, hyväksyttyjä tuotteita tai aktiivista rahoitusta, 0 on lähes aina väärä pessimistinen arvo. Tase-erät ovat input-datassa. Perustele molemmat laskelmat ja lopputulos konkreettisilla tase-, kassa- ja signaaliluvuilla — nimeä aina se tekijä, joka riskin aiheuttaa, ja se omaisuus, joka arvon kantaa. Älä käytä abstraktia ilmaisua "going concern -paine".
-* **Konservatiivinen (base case):** toimitettu ennuste ja valuaatiomoottorin arvo toteutuvat. Arvo = painotettu base case -arvo (floorattuna). Tämä on ankkuri, ei optimistinen eikä pessimistinen.
+  Omistaja-arvo = max(a, b). Jos KUMPIKIN on aidosti negatiivinen, arvo ei ole paljas 0 tEUR vaan alla kuvattu optioarvolattia. Terveelle yhtiölle, jolla on kassaa, realisoitavaa omaisuutta, hyväksyttyjä tuotteita tai aktiivista rahoitusta, 0 on lähes aina väärä pessimistinen arvo. Tase-erät ovat input-datassa. Perustele molemmat laskelmat ja lopputulos konkreettisilla tase-, kassa- ja signaaliluvuilla — nimeä aina se tekijä, joka riskin aiheuttaa, ja se omaisuus, joka arvon kantaa. Älä käytä abstraktia ilmaisua "going concern -paine".
+* **Konservatiivinen (base case):** toimitettu ennuste ja valuaatiomoottorin arvo toteutuvat. Arvo = painotettu base case -arvo (floorattuna optioarvolattiaan). Tämä on ankkuri, ei optimistinen eikä pessimistinen.
 * **Optimistinen:** rakennetaan markkinalogiikasta, ei pelkästä tilinpäätöksestä — ks. seuraava lohko. Arvo perustuu eksplisiittisiin, näkyviin oletuksiin saavutettavasta markkinasta, siivusta ja kannattavuudesta.
+
+## Optioarvolattia (kun laskelma menee nollaan tai alle)
+
+Kun skenaarion omistaja-arvo jää laskelman jälkeen nollaan tai negatiiviseksi (pessimistisessä molemmat a ja b negatiivisia; konservatiivisessa valuaatiomoottorin arvo negatiivinen), ÄLÄ esitä arvona paljasta 0 tEUR:a, jos yhtiöllä on toimivaa liiketoimintaa tai merkittävä kassa. Määräysvalta tällaisessakin yhtiössä on aina jonkin arvoinen: ostaja saisi yhtiön kassan, liiketoiminnan ja päätösvallan käyttöönsä, eikä kukaan luopuisi siitä ilmaiseksi — jos osakekannan saisi ostaa yhdellä eurolla, rationaalinen ostaja ostaisi. Päätä tälle **kontrolli-/optioarvolle** itse perusteltu, selvästi pieni euromäärä ja perustele se ääneen yhtiön kassalla, liiketoiminnalla ja tilanteella.
+
+* Yksi käyttökelpoinen heuristiikka (ei pakollinen, saat poiketa perustellusti): noin 5 % kassasta, edellyttäen että kassa on enintään 50 % liikevaihdosta. Esim. 1 000 tEUR:n kassa ja 6 500 tEUR:n liikevaihto → optioarvo n. 50 tEUR.
+* Optioarvon on oltava selvästi pieni suhteessa optimistiseen skenaarioon ja se merkitään taulukkoon ja tekstiin eksplisiittisesti optio-/kontrolliarvoksi, ei laskennalliseksi arvoksi — lukijalle on käytävä ilmi, että laskelmat antoivat nollan tai alle ja tämä on harkinnanvarainen minimi.
+* Odotusarvo lasketaan näillä optioarvoilla korvattujen nollien kanssa (odotusarvo = Σ todennäköisyys × skenaarion omistaja-arvo).
+* Aidosti tyhjälle kuorelle (ei liiketoimintaa, ei olennaista kassaa, ei siirrettävää omaisuutta) 0 tEUR on edelleen oikea arvo.
 
 ## Optimistisen skenaarion guardrailit (kriittinen)
 
@@ -586,7 +595,7 @@ Ennen kuin tuotat lopullisen JSONin, tarkista hiljaisesti:
 15. Varmistinko identiteetin Y-tunnuksella ennen verkkolähteitä, ja palauduinko tilinpäätöspohjaiseen profiiliin jos varmistus ei onnistunut?
 16. Näkyvätkö pisteet, painot ja perustelut osiossa 7, ja kerroinko perustuvatko painot dataan vai pisteytykseen?
 17. Määräytyikö luottamustaso säännöistä, ja kerroinko mikä sääntö sen määräsi?
-18. Tuotinko kolme skenaariota, todennäköisyydet ja odotusarvon laskenta auki, jokainen arvo floorattu nollaan?
+18. Tuotinko kolme skenaariota, todennäköisyydet ja odotusarvon laskenta auki, jokainen arvo floorattu — ja jos laskelma antoi nollan tai alle yhtiölle jolla on liiketoimintaa tai kassaa, käytinkö perusteltua optioarvolattiaa paljaan nollan sijaan?
 19. Esitinkö optimistisen skenaarion oletukset näkyvinä ja merkitsinkö markkinaluvut lähteellä tai sanalla "käyttäjän muokattava oletus"?
 20. Onko jokainen luku oikeassa yksikössä (tEUR / M€ / %)?
 21. Jätinkö liputetut (flags) rivit pois analyysin perustasta ja raportoinko ne ristiriitana?
@@ -640,7 +649,7 @@ Vastaus on yksi JSON-objekti. Ei tekstiä ennen tai jälkeen, ei koodiaitoja.
   "machine_readable": {
     "weighted_equity_value": null,
     "base_case_value_before_floor": null,
-    "owner_value_floor": 0,
+    "owner_value_floor": null,
     "scenarios": [
       { "name": "Pessimistinen", "value_teur": null, "probability_pct": null },
       { "name": "Konservatiivinen", "value_teur": null, "probability_pct": null },
