@@ -70,6 +70,85 @@ def test_unpriced_model_never_reports_net_debt_as_a_multiple(monkeypatch):
         assert field not in peer
 
 
+def test_implied_multiples_come_off_the_model_value_not_a_price(monkeypatch):
+    """Asiakastieto's move: P/E and P/BV from a model value, so unlisted peers
+    still get multiples. Guards mirror the writer's reject rules."""
+    model = {"companyName": "Gofore Oyj", "companyCode": "17101289",
+             "currentYear": 2026,
+             "dataMap": {"2025": {"ns": 191.382, "cr_ebitda_xml": 20.335,
+                                  "ebit": 11.659, "cr_net_earnings": 9.248,
+                                  "cr_shareholders_equity": 110.2,
+                                  "net_debt": 10.641},
+                         # Engine output sits on the first forecast year.
+                         "2026": {"value_of_equity_fcff": 211.672, "wacc": 0.0946}}}
+    out = _run(
+        {"competitors": [{"name": "Gofore Oyj"}]},
+        lambda q: _rows(("Gofore Oyj", "17101289", 292148)),
+        {292148: model},
+        monkeypatch=monkeypatch,
+    )
+    peer = out[0]
+    assert peer["fiscal_year"] == 2025            # forecast year never wins
+    assert peer["model_equity_value_teur"] == 211672
+    assert peer["implied_pe"] == 22.89            # 211672 / 9248
+    assert peer["implied_pbv"] == 1.92            # 211672 / 110200
+    assert peer["implied_ev_sales"] == 1.16       # (211672 + 10641) / 191382
+    assert peer["wacc_pct"] == 9.46
+    assert "pörssikurssi" in peer["multiples_basis"]
+
+    loss_making = dict(model)
+    loss_making["dataMap"] = {**model["dataMap"],
+                              "2025": {**model["dataMap"]["2025"],
+                                       "cr_net_earnings": -2.0,
+                                       "cr_shareholders_equity": -5.0}}
+    out = _run(
+        {"competitors": [{"name": "Gofore Oyj"}]},
+        lambda q: _rows(("Gofore Oyj", "17101289", 292148)),
+        {292148: loss_making},
+        monkeypatch=monkeypatch,
+    )
+    assert "implied_pe" not in out[0] and "implied_pbv" not in out[0]
+
+
+def test_target_is_measured_on_the_same_basis_as_the_peers():
+    """Both sides off the Valuatum engine, or the comparison means nothing.
+    EV − equity value = net debt, matching the DCF bridge."""
+    target = peers.target_figures({
+        "valuation_engine": {
+            "dcf": {"equity_value_before_floor": 316.38765,
+                    "cumulative_discounted_fcff": [471.38765, 457.93847]},
+            "wacc_parameters": {"wacc_pct": 9.46, "cost_of_equity_pct": 11.8},
+        },
+        "actuals": {
+            "years": [2024, 2025],
+            "income_statement": {"net_sales": [380, 421], "ebitda": [12, -29],
+                                 "ebit": [8, -46], "net_earnings": [5, -57]},
+            "balance_sheet": {"equity_excl_capital_loans": [159, 90]},
+        },
+    })
+    assert target["net_debt_teur"] == 155         # 471.39 − 316.39, = 202 − 47
+    assert target["implied_pbv"] == 3.52          # 316.39 / 90
+    assert target["implied_ev_sales"] == 1.12     # (316.39 + 155) / 421
+    assert "implied_pe" not in target             # net earnings negative
+    assert target["fiscal_year"] == 2025
+
+
+def test_summary_medians_carry_sample_size_and_period(monkeypatch):
+    out = _run(
+        {"competitors": [{"name": "Gofore Oyj"}, {"name": "Solteq Oyj"}]},
+        lambda q: _rows(("Gofore Oyj", "17101289", 1), ("Solteq Oyj", "04904840", 2)),
+        {1: _model("Gofore Oyj", "17101289", ns=191.382, ebit_percent=0.061),
+         2: _model("Solteq Oyj", "04904840", ns=46.735, ebit_percent=0.016)},
+        monkeypatch=monkeypatch,
+    )
+    summary = peers.summarize(out)
+    assert summary["n"] == 2
+    assert summary["fiscal_years"] == [2025]
+    assert summary["medians"]["ebit_pct"] == 3.85      # (6.1 + 1.6) / 2
+    assert summary["revenue_teur_min"] == 46735
+    assert summary["revenue_teur_max"] == 191382
+
+
 def test_stale_peer_is_dropped(monkeypatch):
     """Nixu's model stops at 2022 — delisted after the 2023 acquisition."""
     stale = {"companyName": "Nixu Oyj", "companyCode": "07218117",

@@ -75,6 +75,51 @@ company (Nixu had one stopping at 2022 next to a live 2025 one), so a peer's
 candidate models are all fetched and the freshest wins, and any peer whose
 newest actual is more than `MAX_PEER_AGE_YEARS` (3) old is dropped.
 
+### Asiakastieto Arvoraportti teardown → what we copied
+
+Read the official sample report (`scratchpad/asiakastieto-arvoraportti-malli.pdf`,
+Suomen Asiakastieto Oy, 9.7.2020). Their peer data is an **anonymous sector
+aggregate** — "60 yritystä toimialaluokasta 82910, tilikaudelta 2019" — with the
+TOL code, n and period always stated, medians for volume/margins/liquidity/
+solvency, the industry median drawn as a line on *every* time-series chart, and a
+programmatic verdict word per ratio ("erittäin hyvä" vs the median).
+
+**The thing worth stealing: their P/E 6,2 (toimialan mediaani 7,1) and P/B 22,3
+(mediaani 2,1) are not market multiples.** They are Asiakastieto's own model
+value over net income and over book equity, with the sector median computed the
+same way. That is how a report full of unlisted Finnish companies publishes
+multiples at all. We can do it too — a peer's Valuatum model carries
+`value_of_equity_fcff`, and the target's engine value is already in input_data:
+
+- `VALUATION_FIELDS` (model equity value, wacc, cost of equity) read from the
+  first forecast year, `_actual_years` keeps forecasts out of the actual figures.
+- `_implied_multiples` → `implied_pe`, `implied_pbv`, `implied_ev_sales`,
+  `implied_ev_ebitda`, `implied_ev_ebit`, guarded exactly like the writer's
+  reject rules (no P/E on a loss, no P/BV on negative equity).
+- `peers.target_figures` puts the target on the identical basis; EV comes from
+  `cumulative_discounted_fcff[0]` and EV − equity = net debt, checked against the
+  DCF bridge on the Valuatum fixture (471.39 − 316.39 = 202 − 47).
+- `peers.summarize` → n, companies, fiscal years, revenue range and a median per
+  field, computed in code. A median the writer works out in prose is a number
+  nobody can check.
+- Prompt rules 7 + 8 make the writer use them, state n and period, flag the size
+  gap, and always carry the "malliarvo, ei pörssikurssi" caveat.
+
+Live (Enento / Solteq / Vincit / Loihde / Gofore, tilikausi 2025): P/E 19–42,
+P/BV 0,76–1,92, EV/S 0,44–2,65, EV/EBITDA 8,6–16,2; medians 22,89 / 0,99 / 0,74
+/ 10,93.
+
+**Also found, and it is not a peer problem:** Valuatum returns the *same* WACC
+9,46 % and cost of equity 11,8 % for every company — target and all five peers.
+The discount rate is not company-risk-adjusted in this environment. Asiakastieto
+derives its cost of equity from company risk (8,1 % vs sector 7,25 %) and says
+so. Ours is a constant, which is a real credibility gap in the DCF itself; worth
+raising with Valuatum.
+
+Still theirs, not ours: sector-wide coverage (n=60 anonymous beats 5 named
+large-caps for a small target — Niklas' toimialamediaani task), industry median
+lines on the charts, and the ratio-by-ratio verdict wording.
+
 **Prod reseed done 2026-08-05** (`ok=true, created=0, updated=3`; writer prompt
 +633 chars, models unchanged, 6-stage untouched; backups in
 `scratchpad/pipelines-{before,after}-reseed-0805.json`). The rule-2 rewrite

@@ -544,6 +544,9 @@ async def _run_stages(run, stages, only=None, from_order=None):
                         and out.get("peers")
                         and isinstance(context.get("input_data"), dict)):
                     context["input_data"]["peers"] = out["peers"]
+                    context["input_data"]["peers_summary"] = (
+                        out.get("peers_summary")
+                        or peers.summarize(out["peers"], context["input_data"]))
 
     halted = False
     for s in stages:
@@ -637,9 +640,12 @@ async def _run_stages(run, stages, only=None, from_order=None):
                 ((context["input_data"].get("meta") or {}).get("company_name")),
             )
             if found:
+                summary = peers.summarize(found, context["input_data"])
                 context["input_data"]["peers"] = found
+                context["input_data"]["peers_summary"] = summary
                 if isinstance(res.get("parsed_json"), dict):
                     res["parsed_json"]["peers"] = found
+                    res["parsed_json"]["peers_summary"] = summary
 
         store.upsert_result(rid, res)
 
