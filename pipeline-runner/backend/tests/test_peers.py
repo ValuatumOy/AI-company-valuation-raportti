@@ -226,6 +226,41 @@ def test_subsidiary_never_stands_in_for_the_named_peer(monkeypatch):
     assert [p["fid"] for p in out] == [157749]
 
 
+def test_finnish_candidates_lead_and_foreign_competitors_never_resolve(monkeypatch):
+    """Singa Oy's first prod run returned peers: 0/3 — its competitors are
+    KaraFun (FR), Smule and StarMaker (US), none of which exist in Valuatum's
+    Finnish data. The comparison set comes from the industry list first."""
+    seen_queries = []
+
+    def search(q):
+        seen_queries.append(q)
+        return _rows(("Solteq Oyj", "04904840", 157749)) if "solteq" in q.lower() else []
+
+    out = _run(
+        {"finnish_peer_candidates": [{"name": "Solteq Oyj", "segment": "ohjelmisto"}],
+         "competitors": [{"name": "Smule Inc"}, {"name": "KaraFun (Recisio)"}]},
+        search,
+        {157749: _model("Solteq Oyj", "04904840", ns=46.735)},
+        monkeypatch=monkeypatch,
+    )
+    assert [p["name"] for p in out] == ["Solteq Oyj"]
+    assert seen_queries[0] == "solteq"          # the Finnish list goes first
+
+
+def test_y_tunnus_resolves_without_the_name_check(monkeypatch):
+    """An exact business id beats name matching — /company resolves it directly,
+    so a peer whose registered name differs from the one the model wrote still
+    lands."""
+    out = _run(
+        {"finnish_peer_candidates": [
+            {"name": "Singa karaoke", "y_tunnus": "2790230-3"}]},
+        lambda q: _rows(("Singa Oy", "27902303", 290829)) if q.startswith("2790230") else [],
+        {290829: _model("Singa Oy", "27902303", ns=6.505)},
+        monkeypatch=monkeypatch,
+    )
+    assert [p["name"] for p in out] == ["Singa Oy"]
+
+
 def test_near_namesake_is_dropped_not_reported_as_a_peer(monkeypatch):
     out = _run(
         {"competitors": [{"name": "Valuatum Oy"}]},

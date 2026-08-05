@@ -341,7 +341,12 @@ def _patch_prompt_text(order, text):
         return text
 
     prompt_markers = {
-        1: ("LIIKEVAIHDON POIKKEAMAN LISÄHAKU", "1_enrichment.txt"),
+        # 2026-08-05: the enrichment must name Finnish same-industry peer
+        # candidates, not just competitors — peer resolution reads Valuatum's
+        # Finnish data, so a foreign competitor never resolves (Singa Oy's
+        # first run: peers 0/3). Any persisted prompt without the new search
+        # is reloaded wholesale from the repo.
+        1: ("SUOMALAISET VERROKKIEHDOKKAAT", "1_enrichment.txt"),
         4: ("LIIKEVAIHDON POIKKEAMA", "4_skenaariot.txt"),
         5: ("liikevaihtopoikkeaman mahdollinen selitys", "5_analyysi_osiot.txt"),
     }

@@ -172,24 +172,35 @@ def _figure(cells: dict, varnames: tuple[str, ...], kind: str):
     return None
 
 
-def _candidates(enrichment: dict, own_name: str | None) -> list[tuple[str, str]]:
-    """(name, segment) for each competitor the enrichment stage named."""
-    out: list[tuple[str, str]] = []
+def _candidates(enrichment: dict, own_name: str | None) -> list[tuple[str, str, str]]:
+    """(name, y-tunnus, segment) for each peer candidate the enrichment named.
+
+    `finnish_peer_candidates` leads and `competitors` only fills the rest,
+    because Valuatum's data is Finnish and a foreign competitor can never
+    resolve: Singa Oy's real rivals are KaraFun (FR), Smule and StarMaker (US),
+    which is why its first run produced "peers: 0/3" and a report saying no
+    industry comparison could be made. The comparison set has to be built from
+    the industry — the same call Asiakastieto makes when it prints a
+    "vertailutoimiala" on its cover rather than a competitor list."""
+    out: list[tuple[str, str, str]] = []
     seen: set[str] = set()
-    for comp in (enrichment or {}).get("competitors") or []:
-        if not isinstance(comp, dict):
-            continue
-        name = str(comp.get("name") or "").strip()
-        key = _norm(name)
-        if not key or key in seen:
-            continue
-        # The target company is not its own peer; enrichment sometimes lists it.
-        if own_name and _same_company(name, own_name):
-            continue
-        seen.add(key)
-        out.append((name, str(comp.get("segment") or "").strip()))
-        if len(out) >= MAX_PEERS:
-            break
+    enrichment = enrichment or {}
+    for key_name in ("finnish_peer_candidates", "competitors"):
+        for row in enrichment.get(key_name) or []:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or "").strip()
+            key = _norm(name)
+            if not key or key in seen:
+                continue
+            # The target is not its own peer; enrichment sometimes lists it.
+            if own_name and _same_company(name, own_name):
+                continue
+            seen.add(key)
+            out.append((name, str(row.get("y_tunnus") or "").strip(),
+                        str(row.get("segment") or "").strip()))
+            if len(out) >= MAX_PEERS:
+                return out
     return out
 
 
@@ -214,14 +225,25 @@ def _rank(query: str, rows: list[dict]) -> list[dict]:
     return ranked[:2]
 
 
-async def _resolve(name: str) -> list[dict]:
+async def _resolve(name: str, y_tunnus: str = "") -> list[dict]:
     """Peer name → the Valuatum models that really are this company.
 
-    Searching the name without its legal form casts a wider net (Valuatum
-    registers "Enento Oyj", the model writes "Enento Group Oyj"). The search is
-    fuzzy enough to return unrelated companies — "Solteq" also returns "Fortum
-    Battery Recycling Oy" — so the name check throws away everything it dragged
-    in; a near-namesake is dropped rather than silently reported as a peer."""
+    A y-tunnus, when the enrichment knows one, is exact: /company resolves it
+    without any name guessing, so it is tried first and the name check is
+    skipped for its hits. Otherwise search the name without its legal form,
+    which casts a wider net (Valuatum registers "Enento Oyj", the model writes
+    "Enento Group Oyj"). That search is fuzzy enough to return unrelated
+    companies — "Solteq" also returns "Fortum Battery Recycling Oy" — so the
+    name check throws away everything it dragged in; a near-namesake is dropped
+    rather than silently reported as a peer."""
+    if y_tunnus:
+        try:
+            rows = await valuatum.search_company(y_tunnus)
+        except Exception as e:
+            print(f"peers: y-tunnus lookup '{y_tunnus}' failed: {e}", flush=True)
+            rows = []
+        if rows:
+            return _rank(rows[0].get("company_name") or name, rows)
     query = _norm(name) or name
     if len(query) < valuatum.MIN_QUERY_LENGTH:
         return []
@@ -428,8 +450,9 @@ async def resolve(enrichment: dict, own_name: str | None = None) -> list[dict]:
         wanted = _candidates(enrichment, own_name)
         if not wanted:
             return []
-        resolved = await asyncio.gather(*(_resolve(name) for name, _ in wanted))
-        pairs = [(rows, seg) for rows, (_, seg) in zip(resolved, wanted) if rows]
+        resolved = await asyncio.gather(
+            *(_resolve(name, y_tunnus) for name, y_tunnus, _ in wanted))
+        pairs = [(rows, seg) for rows, (_, _y, seg) in zip(resolved, wanted) if rows]
         if not pairs:
             print(f"peers: 0/{len(wanted)} names resolved to a Valuatum model",
                   flush=True)

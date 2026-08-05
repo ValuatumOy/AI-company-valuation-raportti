@@ -75,6 +75,32 @@ company (Nixu had one stopping at 2022 next to a live 2025 one), so a peer's
 candidate models are all fetched and the freshest wins, and any peer whose
 newest actual is more than `MAX_PEER_AGE_YEARS` (3) old is dropped.
 
+### First prod run with peers: Singa Oy — and the anchor was wrong
+
+Run `037775e1` (Singa Oy, fid 290829, 2790230-3), status ok, **$1.03, 7 min**,
+all three stages ok. The report itself is right: cover hero = the scenario
+expected value (1 694 tEUR), confidence "Matala" with the reason stated
+("optimistinen skenaario tuottaa koko odotusarvon"), and a loss-making company
+with −8,1 M€ equity handled correctly — base case 0 tEUR, upside described as
+option value, not as company value.
+
+**Peers: 0.** Railway log: `peers: 0/3 names resolved to a Valuatum model`.
+Enrichment named Singa's real competitors — KaraFun (Recisio, FR), Smule and
+StarMaker (US) — and Valuatum's data is Finnish, so none can ever resolve. The
+report degraded honestly ("Toimialavertailua ei voida muodostaa…") and invented
+nothing, so the guards work; the result was simply empty.
+
+This is not a Singa quirk. It hits every software company whose rivals are
+global. Building peer resolution on *competitors* was the wrong anchor:
+Asiakastieto never uses competitors either, it prints a **vertailutoimiala** on
+its cover. Fix: `1_enrichment.txt` now has a mandatory search 5b producing
+`finnish_peer_candidates` — 3–8 Finnish-registered companies from the same TOL
+class, **closest in size** (explicitly: if the target does 6 M€, look for
+2–20 M€, not the largest listed names), with an optional y-tunnus. `_candidates`
+reads that list first and only then falls back to `competitors`; a y-tunnus, when
+given, resolves exactly and skips name matching. Seed marker for order 1 is now
+`SUOMALAISET VERROKKIEHDOKKAAT` so any stale persisted prompt reloads.
+
 ### Asiakastieto Arvoraportti teardown → what we copied
 
 Read the official sample report (`scratchpad/asiakastieto-arvoraportti-malli.pdf`,
