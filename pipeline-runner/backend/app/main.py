@@ -918,7 +918,7 @@ def _start_refinement_round(rid, parent, clarifications, clarifications_free_tex
 
 # Variables a user may edit in v1 — mirrors the ValuBuild server-side allowlist
 # (EstimateController.ALLOWED_VARNAMES). Kept in sync manually for now.
-FORECAST_ALLOWED_VARNAMES = {"ns", "ebit"}
+FORECAST_ALLOWED_VARNAMES = {"ns", "ebit", "cr_raw_materials_pct"}
 _FORECAST_LABELS = {"ns": "Liikevaihto", "ebit": "EBIT"}
 
 
@@ -999,7 +999,8 @@ def _extract_stage0_forecast(run) -> dict | None:
 
 def _forecast_value_teur(forecast: dict, varname: str, year: int):
     years = forecast.get("years") or []
-    series_name = {"ns": "net_sales", "ebit": "ebit"}.get(varname)
+    series_name = {"ns": "net_sales", "ebit": "ebit",
+                   "cr_raw_materials_pct": "raw_materials_pct"}.get(varname)
     values = forecast.get(series_name) or [] if series_name else []
     if year not in years:
         return None

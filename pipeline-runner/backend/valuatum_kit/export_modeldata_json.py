@@ -397,6 +397,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         "ebitda": arr(data_map, forecast_years, ["cr_ebitda_xml", "ebitda"], money=True),
         "ebit": arr(data_map, forecast_years, "ebit", money=True),
         "ebit_pct": arr(data_map, forecast_years, "ebit_percent", pct=True),
+        "raw_materials_pct": arr(data_map, forecast_years, "cr_raw_materials_pct", pct=True),
         "free_cash_flow_to_firm": arr(data_map, forecast_years, "free_cash_flow_to_firm", money=True),
         "interest_bearing_debt": arr(data_map, forecast_years, "liab_ib_total", money=True),
         "equity_excl_capital_loans": arr(data_map, forecast_years, "cr_shareholders_equity", money=True),
