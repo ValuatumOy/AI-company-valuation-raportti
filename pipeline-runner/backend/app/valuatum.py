@@ -40,6 +40,10 @@ def company_url() -> str:
     return api_base_url() + "/company"
 
 
+def modeldata_url() -> str:
+    return api_base_url() + "/modeldata"
+
+
 def _slug(value: str) -> str:
     cleaned = "".join(c.lower() if c.isalnum() else "_" for c in value)
     return "_".join(p for p in cleaned.split("_") if p) or "company"
@@ -221,6 +225,30 @@ async def search_company(query: str) -> list[dict]:
                 "analyst_name": m.get("analystName"),
             })
     return out
+
+
+async def modeldata(fids: list[int], var_poses: list[dict]) -> dict:
+    """POST /modeldata for one or more followed models at once.
+
+    The kit's fetch script does the same call for the stage-0 export, but it is
+    a synchronous CLI keyed to a single fid. Peer resolution asks for several
+    models with a short varlist, so it reads them here through the shared async
+    client instead of shelling out once per peer. Response: {"<fid>": model}."""
+    token = os.environ.get("VALUATUM_TOKEN")
+    if not token:
+        raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
+    resp = await _client().post(
+        modeldata_url(),
+        json={
+            "fids": list(fids),
+            "varPoses": var_poses,
+            "includeHistoryData": True,
+            "includeEstimates": True,
+        },
+        headers={"accept": "application/json", "authorization": f"Bearer {token}"},
+    )
+    resp.raise_for_status()
+    return resp.json() or {}
 
 
 async def lookup_company_metadata(

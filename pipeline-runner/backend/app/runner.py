@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from . import openrouter, revenue_anomalies, store, validators
+from . import openrouter, peers, revenue_anomalies, store, validators
 from .models import DATA_FETCHER_MODEL
 from fetchers.company_data import fetch_company_data
 
@@ -535,7 +535,15 @@ async def _run_stages(run, stages, only=None, from_order=None):
         if not in_scope(s["order"]) and s["order"] in existing:
             prev = existing[s["order"]]
             if prev.get("status") in ("ok", "validation_failed"):
-                _contribute(context, s, _output_value(prev))
+                out = _output_value(prev)
+                _contribute(context, s, out)
+                # A writer-only rerun skips enrichment, and with it the peer
+                # resolution below — so take the peers that run already
+                # resolved rather than regenerating the report without them.
+                if (s["order"] == 1 and isinstance(out, dict)
+                        and out.get("peers")
+                        and isinstance(context.get("input_data"), dict)):
+                    context["input_data"]["peers"] = out["peers"]
 
     halted = False
     for s in stages:
@@ -617,6 +625,21 @@ async def _run_stages(run, stages, only=None, from_order=None):
                 })
                 retry["validator_report"] = vr
                 res = retry
+
+        # Verrokit: enrichment is the only stage that knows who the competitors
+        # ARE, and Valuatum is the only source allowed to say what they are
+        # worth — so the two are joined here, between the two stages, and the
+        # writer reads them through `input_data.peers` like any other fact.
+        if (s["order"] == 1 and res["status"] in ("ok", "validation_failed")
+                and isinstance(context.get("input_data"), dict)):
+            found = await peers.resolve(
+                _output_value(res),
+                ((context["input_data"].get("meta") or {}).get("company_name")),
+            )
+            if found:
+                context["input_data"]["peers"] = found
+                if isinstance(res.get("parsed_json"), dict):
+                    res["parsed_json"]["peers"] = found
 
         store.upsert_result(rid, res)
 

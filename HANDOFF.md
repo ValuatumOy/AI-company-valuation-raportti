@@ -1,4 +1,73 @@
-# Handoff — 2026-07-31 (read this first)
+# Handoff — 2026-08-05 (read this first)
+
+## 2026-08-05 — `peers` is no longer empty: named peers from Valuatum's own REST
+
+The single biggest report gap (analysis doc #12) is closed in code. `peers`
+was hardcoded `[]` by the exporter, so every report printed "toimialavertailua
+ei voida muodostaa" and the whole multiple-method machinery shipped dark.
+Niklas' call: don't wait for sector medians from the data team — fetch NAMED
+peers over REST, which is what the osakeanalyysi engine already does
+(`pdf-report-engine/src/reports/osakeanalyysi/data/peerValuationPack.ts`, worth
+reading before touching this).
+
+- **`app/peers.py`** — enrichment (stage 1) already must name competitors;
+  each name is resolved through `/company` and the model's figures read from
+  `/modeldata`. The LLM contributes only the NAME and the segment; every
+  number, its fiscal year and its source are Valuatum's. That is what the
+  writer's "kertoimet vain toimitetusta peers-datasta" rule requires.
+- **`runner`** joins the two stages: after stage 1 the peers land in
+  `context["input_data"]["peers"]` (writer reads them like any other fact) and
+  on the enrichment result (persisted → a writer-only rerun still has them,
+  and it is auditable in the admin UI). `valuatum.modeldata()` is a new async
+  batched POST — one call for every peer, not one subprocess per peer.
+- **The name filter is the load-bearing part.** `/company` is fuzzy: "Solteq"
+  also returns *Fortum Battery Recycling Oy* and the Solteq subsidiaries;
+  "Asiakastieto" returns *Enento Group Oyj*. Exact normalized-name matches win
+  outright, prefix matches are the fallback, everything else is dropped rather
+  than reported as a peer. Verified against live `/api/company-search`.
+- **Consolidated model first, parent as fallback** (both fetched, first
+  populated one wins) — a listed peer is comparable at group level and the
+  parent row of a group can be a near-empty holding company.
+- **Sentinels.** Valuatum writes ~1e8 into unpopulated cells and it leaks
+  through REST verbatim (that is where "P/S 70244862x" comes from). Anything
+  ≥1e7 is treated as missing, which is also what makes an unpriced peer come
+  out `listed: false` — growth and EBIT-% only, no invented multiple.
+- Money ×1000 (M€ → tEUR) and percentages ×100, same convention as the stage-0
+  exporter, so peers are in report units.
+- Prompt: `singlewriter.txt` VERROKIT rule 7 — every peer figure carries its
+  `fiscal_year` + `source`, undated multiples are unusable, no mixing years,
+  and these are model-period figures, not live market prices.
+- Never raises: any REST failure logs and returns `[]`, which leaves the old
+  "no peer data" wording in place. A peer table must not fail a paid report.
+- Tests: `tests/test_peers.py` (units + the real Solteq/Enento cases),
+  `tests/test_peers_pipeline.py` (peers actually reach the writer's prompt —
+  a wrong context key here would fail silently). 263 passed.
+
+**Needs a prod reseed to take effect** — `singlewriter.txt` changed, and the
+writer prompt lives in the DB (`sync_prompt_patches` only self-heals order 1).
+`app/peers.py` + the runner wiring are runtime code and go live on deploy.
+**Not yet seen on a real report**: no run has been made with peers populated.
+
+Not done (deliberate): toimialamediaanit / TOL-level sector figures. Niklas
+opens a separate task for a REST endpoint; named peers cover the gap until
+then.
+
+## 2026-08-04/05 — Shipped but never written up here
+
+- `0fab859` + client `52305bc`: refinement cap counts the whole run family
+  (`store.refinement_count`) — the round-1 email link pointed at the root,
+  whose path depth is permanently 0, so it handed out unlimited free rounds;
+  `latest_run_id` so a stale email link follows the family; DCF detail scales
+  units (tEUR / M€ / mrd. €); cover hero = scenario expected value (CEO
+  decision, reverses `b8497d8`), prompts corrected on both sides.
+- `bc8340a`: the 6-stage pipeline is locked out of production —
+  `main._assert_generation_pipeline` gates `POST /api/runs`,
+  `_default_pipeline_id` and `_start_bg` (every execution path funnels
+  through the last one); seed no longer creates or writes to it; `retired:
+  true` in `GET /api/pipelines` and filtered out of the admin UI. The row
+  stays (16 runs reference it); `seed._stages()`, `_patch_prompt_text` orders
+  2–6 and `prompts/2…6_*.txt` are now dead code, left in place.
+- Prod reseeded with approval: `ok=true, created=0, updated=7`.
 
 ## 2026-07-31 (cont.) — Runs survive a deploy: orphan heartbeat + auto-resume
 
