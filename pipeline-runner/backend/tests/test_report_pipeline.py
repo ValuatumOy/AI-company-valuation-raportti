@@ -3422,7 +3422,7 @@ def test_checkout_generate_requires_paid_stripe_session_when_configured(monkeypa
     main = _checkout_env(monkeypatch)
     monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "sk_test_x")
 
-    async def unpaid(session_id):
+    async def unpaid(session_id, **kw):
         return {"payment_status": "unpaid"}
 
     monkeypatch.setattr(main, "_stripe_get_checkout_session", unpaid)
@@ -3433,12 +3433,54 @@ def test_checkout_generate_requires_paid_stripe_session_when_configured(monkeypa
     r = c.post("/api/public/checkout-generate", json=body)
     assert r.status_code == 402
 
-    async def paid(session_id):
-        return {"payment_status": "paid"}
+    async def paid(session_id, **kw):
+        return {"payment_status": "paid",
+                "metadata": {"product": main.VALUATION_PRODUCT_TAG}}
 
     monkeypatch.setattr(main, "_stripe_get_checkout_session", paid)
     r2 = c.post("/api/public/checkout-generate", json=body)
     assert r2.status_code == 200 and r2.json().get("run_id")
+
+
+def test_checkout_generate_rejects_paid_session_for_another_product(monkeypatch):
+    """A paid session from a SIBLING product in the same Stripe account must not
+    start a run. Stripe fans checkout.session.completed out to every endpoint on
+    the account, and luottoriskit.fi's credit-report metadata carries the same
+    businessId/fid/companyName field names — so it looked like an arvonmääritys
+    purchase to the client webhook, and "payment_status == paid" was the only
+    thing standing between it and a ~$3 run for the wrong buyer (2026-08-05)."""
+    from starlette.testclient import TestClient
+    main = _checkout_env(monkeypatch)
+    monkeypatch.setattr(main, "STRIPE_SECRET_KEY", "sk_test_x")
+
+    async def foreign(session_id, **kw):
+        # Exactly the shape create-checkout.js (ficompanydirectoryastro) writes.
+        return {
+            "payment_status": "paid",
+            "metadata": {"reportType": "ai_credit_risk", "businessId": "1612398-8",
+                         "fid": "184362", "companyName": "X Oy"},
+            "line_items": {"data": [{"price": {"id": "price_someoneelses"}}]},
+        }
+
+    monkeypatch.setattr(main, "_stripe_get_checkout_session", foreign)
+    c = TestClient(main.app)
+    body = {"business_id": "1612398-8", "company_name": "X Oy",
+            "email": "a@b.fi", "user_input": "",
+            "stripe_session_id": "cs_live_credit_report"}
+    assert c.post("/api/public/checkout-generate", json=body).status_code == 403
+
+    # Our own price id (no marker — sessions created before the tag shipped)
+    # is still honoured, so the fix can deploy ahead of the client site.
+    async def ours_by_price(session_id, **kw):
+        return {
+            "payment_status": "paid",
+            "metadata": {"kind": "existing", "businessId": "1612398-8"},
+            "line_items": {"data": [{"price": {"id": sorted(main.VALUATION_PRICE_IDS)[0]}}]},
+        }
+
+    monkeypatch.setattr(main, "_stripe_get_checkout_session", ours_by_price)
+    r = c.post("/api/public/checkout-generate", json=body)
+    assert r.status_code == 200 and r.json().get("run_id")
 
 
 def test_checkout_generate_demo_mode_skips_stripe_verification(monkeypatch):

@@ -57,7 +57,7 @@ app.add_middleware(
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-07-29-report-path-emails"
+BUILD = "2026-08-05-checkout-product-check"
 
 # Round-2 refinement writer. Preserve-and-patch is an editing task, not creative
 # writing — Sonnet 5 ($2/$10) does it at 1/2.5 of Opus 4.8's price; round-1
@@ -73,6 +73,26 @@ ROUND2_WRITER_MODEL = (
 STRIPE_SECRET_KEY = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
 EXTRA_ROUND_PRICE_CENTS = int(os.getenv("EXTRA_ROUND_PRICE_CENTS") or 500)
 _STRIPE_API = "https://api.stripe.com/v1"
+
+# Which paid Stripe sessions may start a run here. Stripe delivers an event to
+# EVERY webhook endpoint registered on the account, and the sibling products on
+# luottoriskit.fi put the very same field names (businessId/fid/companyName)
+# in their checkout metadata — so a 10 € credit-report purchase looked exactly
+# like an arvonmääritys purchase to the client site's webhook, which called
+# this endpoint, which only asked "is it paid?" and spent ~$3 generating the
+# wrong product for that buyer (2026-08-05). A session must now prove it bought
+# THIS product: either the client site's marker, or a known price id.
+VALUATION_PRODUCT_TAG = "arvonmaaritys_ai_raportti"
+# Mirrors STRIPE_AI_REPORT_PRICE_ID on the client site (same default), so the
+# check holds even for sessions created before the marker shipped. Comma-
+# separated; extend it when the price is rotated or for a test-mode price.
+VALUATION_PRICE_IDS = {
+    p.strip()
+    for p in (
+        os.getenv("STRIPE_VALUATION_PRICE_IDS") or "price_1Ty8Pt2FVkKDgcuUD2fzJ8Fk"
+    ).split(",")
+    if p.strip()
+}
 
 
 async def _stripe_create_checkout_session(*, success_url, cancel_url, metadata, amount_cents, name):
@@ -94,13 +114,28 @@ async def _stripe_create_checkout_session(*, success_url, cancel_url, metadata, 
     return resp.json()
 
 
-async def _stripe_get_checkout_session(session_id: str):
+async def _stripe_get_checkout_session(session_id: str, *, with_line_items: bool = False):
+    params = {"expand[]": "line_items"} if with_line_items else None
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.get(
-            f"{_STRIPE_API}/checkout/sessions/{session_id}", auth=(STRIPE_SECRET_KEY, "")
+            f"{_STRIPE_API}/checkout/sessions/{session_id}",
+            params=params,
+            auth=(STRIPE_SECRET_KEY, ""),
         )
     resp.raise_for_status()
     return resp.json()
+
+
+def _is_valuation_session(session: dict) -> bool:
+    """Did this paid session buy the arvonmääritys report, or another product
+    sold from the same Stripe account? See VALUATION_PRODUCT_TAG."""
+    if (session.get("metadata") or {}).get("product") == VALUATION_PRODUCT_TAG:
+        return True
+    for item in (session.get("line_items") or {}).get("data") or []:
+        price = item.get("price") or {}
+        if price.get("id") in VALUATION_PRICE_IDS:
+            return True
+    return False
 
 
 # Paths a capped expert key (`exp_`) may reach. DENY-BY-DEFAULT: everything not
@@ -1637,11 +1672,24 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
     # Stripe key) deliberately skips this: the whole flow is a free demo then.
     if STRIPE_SECRET_KEY:
         try:
-            session = await _stripe_get_checkout_session(body.stripe_session_id)
+            session = await _stripe_get_checkout_session(
+                body.stripe_session_id, with_line_items=True
+            )
         except httpx.HTTPStatusError:
             raise HTTPException(402, "Maksua ei voitu vahvistaa.")
         if session.get("payment_status") != "paid":
             raise HTTPException(402, "Maksua ei voitu vahvistaa.")
+        # Paid, but paid for WHAT? Every product in the Stripe account produces
+        # paid sessions, and this endpoint is unauthenticated — "paid" alone let
+        # a luottoriskit.fi credit-report purchase start an arvonmääritys run.
+        if not _is_valuation_session(session):
+            print(
+                "checkout-generate: refusing session "
+                f"{body.stripe_session_id[:20]} — paid, but not an arvonmääritys "
+                f"purchase (metadata={json.dumps(session.get('metadata') or {})[:300]})",
+                flush=True,
+            )
+            raise HTTPException(403, "Tämä maksu ei koske arvonmääritysraporttia.")
     # Serialize per session id: two identical requests racing past the
     # check-then-insert used to be able to start two paid runs.
     # ponytail: in-process lock — single-instance deploy; a DB claim if we scale out.
