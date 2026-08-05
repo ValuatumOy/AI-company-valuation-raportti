@@ -180,6 +180,39 @@ def test_generate_with_edits_rebinds_same_run_and_restarts_stage0(monkeypatch):
     assert "6 200" in run["params"]["forecast_changes"]
 
 
+def test_full_grid_imports_every_cell_but_summarises_only_the_changed_one(monkeypatch):
+    """The client submits the whole forecast grid (ValuBuild's import drops years
+    after a gap), so every cell must reach ValuBuild — while the writer's
+    forecast_changes block still lists only what the user actually moved."""
+    c, main, store, rid = _seed_run(monkeypatch)  # baseline ns 5000/5500, ebit 200/300
+    store.set_run_status(rid, "awaiting_forecast")
+
+    sent = {}
+
+    async def fake_import(base_fid, values):
+        sent["values"] = values
+        return 4243
+
+    monkeypatch.setattr(main.forecast_import, "import_and_wait", fake_import)
+    monkeypatch.setattr(main, "_start_bg", lambda run_id, **kwargs: True)
+
+    grid = [
+        {"varname": "ns", "year": 2026, "value": 5.0},    # unchanged
+        {"varname": "ebit", "year": 2026, "value": 0.2},  # unchanged
+        {"varname": "ns", "year": 2027, "value": 6.2},    # changed
+        {"varname": "ebit", "year": 2027, "value": 0.3},  # unchanged
+    ]
+    response = c.post(f"/api/runs/{rid}/generate-forecast", json={"forecast_edits": grid})
+
+    assert response.status_code == 200
+    # Nothing is dropped on the way to ValuBuild: the import stays contiguous.
+    assert sent["values"] == grid
+    params = store.get_run(rid)["params"]
+    assert params["forecast_edits"] == grid
+    # ...but the baseline cells never reach the writer as "changes".
+    assert params["forecast_changes"] == "- Liikevaihto 2027: 5 500 → 6 200 tEUR"
+
+
 def test_generate_import_failure_restores_awaiting_state(monkeypatch):
     c, main, store, rid = _seed_run(monkeypatch)
     store.set_run_status(rid, "awaiting_forecast")

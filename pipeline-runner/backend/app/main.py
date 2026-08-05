@@ -944,10 +944,21 @@ def _validate_forecast_edits(edits):
             raise HTTPException(400, "Liikevaihdon (ns) on oltava positiivinen.")
 
 
+# A cell counts as changed only past this tEUR delta — the client applies the
+# same threshold, so both ends agree on what "the user changed this" means.
+_FORECAST_CHANGE_EPSILON_TEUR = 0.5
+
+
 def _forecast_change_summary(parent, edits) -> str:
     """Human-readable 'old → new' list for the writer context. Old values come
     from the parent run's stage-0 forecast block (tEUR); the edits are in millions
-    (modeldata unit), so ×1000 to compare in the report's tEUR."""
+    (modeldata unit), so ×1000 to compare in the report's tEUR.
+
+    The client submits the WHOLE forecast grid (untouched cells at their baseline
+    value) because ValuBuild's import drops years after a gap — so cells equal to
+    the baseline are filtered out here. The prompts promise the writer that this
+    block lists ONLY what changed; a grid of "60 000 → 60 000" lines would have it
+    rewrite prose around forecasts nobody touched."""
     forecast = _extract_stage0_forecast(parent) or {}
     years = forecast.get("years") or []
     old_by_var = {"ns": forecast.get("net_sales") or [], "ebit": forecast.get("ebit") or []}
@@ -968,6 +979,9 @@ def _forecast_change_summary(parent, edits) -> str:
             idx = years.index(e.year)
             if idx < len(arr):
                 old_teur = arr[idx]
+        if (isinstance(old_teur, (int, float)) and not isinstance(old_teur, bool)
+                and abs(new_teur - old_teur) <= _FORECAST_CHANGE_EPSILON_TEUR):
+            continue  # baseline cell resent to keep the import contiguous
         lines.append(f"- {label} {e.year}: {fmt(old_teur)} → {fmt(new_teur)} tEUR")
     return "\n".join(lines) if lines else "(Ennusteita ei muutettu.)"
 
