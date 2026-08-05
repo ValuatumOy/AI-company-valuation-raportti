@@ -101,6 +101,26 @@ reads that list first and only then falls back to `competitors`; a y-tunnus, whe
 given, resolves exactly and skips name matching. Seed marker for order 1 is now
 `SUOMALAISET VERROKKIEHDOKKAAT` so any stale persisted prompt reloads.
 
+**Rerun after the fix — run `c3b46aec` (same Singa), ok, $1.10, 10 min,
+validator passed.** Log: `peers: 2/5 named competitors resolved`. Enrichment
+named Musopia Oy (2390728-9, 6,5 M€ — near-identical size to Singa's 6,5 M€)
+and Yousician Oy (2374364-0, 53 M€); both resolved by y-tunnus, all three
+foreign competitors did not, exactly as designed. §15 now carries what the
+Arvoraportti carries: an "Operatiivinen verrokkivertailu, n = 2" table (target +
+peers + median row, source column with the fid), a "Mallipohjaiset
+verrokkikertoimet" table (P/E, P/BV, EV/Sales, EV/EBITDA, EV/EBIT + median), the
+mandatory caveat, and prose comparing Singa's 4,2 % EBITDA margin against the
+peers' 12,9 % median. Singa's own multiple row is dashes and the report says why
+(negative model equity value, EBIT, net earnings and equity) — the code guards,
+not the writer, made that call.
+
+Still thin: the prompt asks for 3–8 Finnish candidates and got 2, so the
+"median" is an average of two, and Musopia's P/E 104,78x drags it to 61,62x.
+Both peers unlisted, so there is still no market cross-check — that is honest,
+not a bug. Sector medians remain the real fix. Also note run-to-run variance on
+the same input: the cover expected value came out 1 694 tEUR on the first run
+and 1 266 tEUR on the second.
+
 ### Asiakastieto Arvoraportti teardown → what we copied
 
 Read the official sample report (`scratchpad/asiakastieto-arvoraportti-malli.pdf`,
