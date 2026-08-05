@@ -4,6 +4,7 @@ backend/pipeline.db
 backend/pipeline.db-wal
 backend/pipeline.db-shm
 backend/_reports/
+backend/_fixtures/
 backend/__pycache__/
 backend/app/__pycache__/
 backend/fetchers/__pycache__/

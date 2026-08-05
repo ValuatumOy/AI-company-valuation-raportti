@@ -1834,10 +1834,17 @@ def render_html(report):
     # system sans stack — no webfont needed.
     font_block = ('<style>@import url("https://fonts.googleapis.com/css2?'
                   'family=Gelasio:wght@400;500;700;800&display=swap");</style>')
+    banner = ""
+    if (report.get("_provenance") or {}).get("fake_llm"):
+        banner = ('<div style="position:fixed;top:0;left:0;right:0;z-index:9999;'
+                  'background:#C0504D;color:#fff;font:700 12px/1.6 sans-serif;'
+                  'text-align:center;padding:4px">'
+                  'TESTIRAPORTTI — sisältö toistettu tallenteesta (FAKE_LLM), '
+                  'ei oikea arvonmääritys</div>')
     return ("<!doctype html><html lang=\"fi\"><head><meta charset=\"utf-8\">"
             f"<title>{title}</title>{font_block}"
             f"<style>{_STATIC_CSS}{_page_css(report)}</style></head>"
-            f"<body>{body}</body></html>")
+            f"<body>{banner}{body}</body></html>")
 
 
 def render_pdf(report, out_path):

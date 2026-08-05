@@ -193,6 +193,7 @@ def health():
         "auth": bool(_APP_TOKEN),
         "db": "postgres" if db.IS_PG else "sqlite",
         "build": BUILD,
+        "fake_llm": openrouter.fake_llm_enabled(),
     }
 
 

@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import re
+from pathlib import Path
 
 import httpx
 
@@ -14,6 +15,9 @@ BASE = "https://openrouter.ai/api/v1"
 GOOGLE_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _models_cache: list[dict] = []
 _price_index: dict[str, dict] = {}
+
+_FAKE_DIR_DEFAULT = Path(__file__).resolve().parent.parent / "_fixtures"
+_FAKE_FALLBACK_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "runs"
 
 _DIRECT_GOOGLE_MODELS = [
     {
@@ -138,6 +142,68 @@ def runs_paused() -> bool:
     return bool(os.getenv("APP_TOKEN"))
 
 
+def fake_llm_enabled() -> bool:
+    if os.getenv("FAKE_LLM", "").strip().lower() not in ("1", "true", "yes"):
+        return False
+    if os.getenv("DATABASE_URL", "").strip():
+        raise RuntimeError(
+            "FAKE_LLM on päällä mutta DATABASE_URL osoittaa tuotantokantaan. "
+            "Fixture-toisto on tarkoitettu vain paikalliseen kehitykseen."
+        )
+    return True
+
+
+def _fake_dir() -> Path:
+    configured = os.getenv("FAKE_LLM_DIR", "").strip()
+    return Path(configured) if configured else _FAKE_DIR_DEFAULT
+
+
+def _fake_fixture() -> dict:
+    company = os.getenv("FAKE_LLM_COMPANY", "").strip()
+    names = [f"{company}.json"] if company else []
+    for directory in (_fake_dir(), _FAKE_FALLBACK_DIR):
+        if not directory.is_dir():
+            continue
+        for name in names:
+            path = directory / name
+            if path.is_file():
+                return json.loads(path.read_text(encoding="utf-8"))
+        available = sorted(directory.glob("*.json"))
+        if available:
+            return json.loads(available[0].read_text(encoding="utf-8"))
+    raise RuntimeError(
+        f"FAKE_LLM on päällä mutta fixtureita ei löytynyt hakemistoista "
+        f"{_fake_dir()} / {_FAKE_FALLBACK_DIR}."
+    )
+
+
+async def _fake_chat(model: str, prompt: str, expects_json: bool) -> dict:
+    fixture = _fake_fixture()
+    writer_output = fixture.get("writer_output")
+    if _is_writer_prompt(prompt) and writer_output is not None:
+        text = json.dumps(writer_output, ensure_ascii=False)
+    elif expects_json:
+        text = json.dumps(
+            {"_fake": True, "notes": [], "sources": []}, ensure_ascii=False
+        )
+    else:
+        text = "(FAKE_LLM: tallenteesta toistettu vaihe, ei oikeaa mallikutsua.)"
+    await asyncio.sleep(0)
+    return {
+        "text": text,
+        "finish_reason": "stop",
+        "tokens_prompt": 0,
+        "tokens_completion": 0,
+        "request_payload": {"model": model, "fake_llm": True,
+                            "fixture_company": fixture.get("company")},
+    }
+
+
+def _is_writer_prompt(prompt: str) -> bool:
+    p = (prompt or "").lower()
+    return "machine_readable" in p or "sections" in p
+
+
 async def chat(
     model: str,
     prompt: str,
@@ -148,6 +214,8 @@ async def chat(
     web_search: bool = False,
 ) -> dict:
     """One-shot completion. Returns dict with text, usage, finish_reason, payload."""
+    if fake_llm_enabled():
+        return await _fake_chat(model, prompt, expects_json)
     if runs_paused():
         raise RuntimeError(
             "Ajot on väliaikaisesti keskeytetty ylläpidon toimesta (RUNS_PAUSED)."

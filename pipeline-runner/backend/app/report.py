@@ -1,7 +1,7 @@
 """Connect a finished run to the assembled JSON -> HTML/PDF renderer."""
 import os
 
-from . import render
+from . import openrouter, render
 
 _BACKEND = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 REPORTS_DIR = os.path.join(_BACKEND, "_reports")
@@ -22,7 +22,10 @@ def generator_available() -> bool:
 def _with_provenance(rid: str, report_json: dict) -> dict:
     """Attach the run id so the rendered cover can stamp an auditable Raportti-ID."""
     if isinstance(report_json, dict):
-        report_json.setdefault("_provenance", {})["run_id"] = rid
+        provenance = report_json.setdefault("_provenance", {})
+        provenance["run_id"] = rid
+        if openrouter.fake_llm_enabled():
+            provenance["fake_llm"] = True
     return report_json
 
 
