@@ -43,9 +43,43 @@ reading before touching this).
   `tests/test_peers_pipeline.py` (peers actually reach the writer's prompt —
   a wrong context key here would fail silently). 263 passed.
 
-**Needs a prod reseed to take effect** — `singlewriter.txt` changed, and the
-writer prompt lives in the DB (`sync_prompt_patches` only self-heals order 1).
-`app/peers.py` + the runner wiring are runtime code and go live on deploy.
+### 🚨 The live probe finding: this Valuatum environment has NO price data
+
+Probed `arvonmaaritys-fi.valuatum.com` directly (Railway token, read-only, zero
+cost — `scratchpad/peers_probe.py`, `raw_probe.py`) on Innofactor 208280 and
+Siili 241299, both listed: `market_cap_ye`, `pe`, `p_per_bv`, `p_per_s`,
+`share_price`, `book_value_ps`, `dividend_yield` and 16 further spellings all
+come back absent. **With no market cap, Valuatum's `enterprise_value`
+degenerates to plain net debt** — numerically identical to `net_debt` on every
+peer and year — so `ev_per_ns` / `ev_per_ebitda` / `ev_per_ebit` are net-debt
+ratios wearing multiple names. The first probe run happily printed "Innofactor
+EV/EBITDA 1.10x". That would have been worse than an empty peer table.
+
+So `MARKET_GATED` fields (every ev_*, pe, p_per_*, and `ev_teur` itself) are
+emitted only behind a real `market_cap_teur`, and `listed` follows the same
+gate. What peers deliver today is the operational benchmark — and it is real:
+
+```
+yhtiö               v.   liikevaihto  EBIT-%  kasvu-%  omavar-%  nettovelka
+Enento Group Oyj   2025      152 671    16,6      1,5       5,1     144 588
+Solteq Oyj         2025       46 735     1,6     -8,1       2,7      23 308
+Vincit Oyj         2025       69 075    -1,9    -18,4      -0,1         426
+Loihde Oyj         2025      144 370     2,1      3,3      20,8      -4 041
+```
+
+Multiples come back the day Valuatum exposes prices — the code path is already
+there and gated, nothing to rewrite. Sector medians over REST are Niklas' task.
+
+Also from the probe: Valuatum keeps **stale duplicate models** for the same
+company (Nixu had one stopping at 2022 next to a live 2025 one), so a peer's
+candidate models are all fetched and the freshest wins, and any peer whose
+newest actual is more than `MAX_PEER_AGE_YEARS` (3) old is dropped.
+
+**Prod reseed done 2026-08-05** (`ok=true, created=0, updated=3`; writer prompt
++633 chars, models unchanged, 6-stage untouched; backups in
+`scratchpad/pipelines-{before,after}-reseed-0805.json`). The rule-2 rewrite
+below it (operational comparison is a full comparison, not a footnote) landed
+after that reseed — **reseed again before the next paid run.**
 **Not yet seen on a real report**: no run has been made with peers populated.
 
 Not done (deliberate): toimialamediaanit / TOL-level sector figures. Niklas

@@ -49,6 +49,40 @@ def _model(name, code, **cells):
             "dataMap": {"2025": cells, "2024": {}}}
 
 
+def test_unpriced_model_never_reports_net_debt_as_a_multiple(monkeypatch):
+    """Valuatum's enterprise_value IS net debt when the model has no market
+    cap, so ev_per_* are net-debt ratios wearing multiple names. Live probe
+    2026-08-05: no Finnish model in this environment carries a price."""
+    out = _run(
+        {"competitors": [{"name": "Innofactor Oyj", "segment": "palvelu"}]},
+        lambda q: _rows(("Innofactor Oyj", "16049320", 208280)),
+        {208280: _model("Innofactor Oyj", "16049320", ns=77.576,
+                        cr_ebitda_xml=6.338, ebit=3.386, ebit_percent=0.043647,
+                        net_debt=6.979, enterprise_value=6.979,
+                        ev_per_ebitda=1.101136, ev_per_ns=0.089963)},
+        monkeypatch=monkeypatch,
+    )
+    peer = out[0]
+    assert peer["listed"] is False
+    assert peer["revenue_teur"] == 77576 and peer["ebitda_teur"] == 6338
+    assert peer["net_debt_teur"] == 6979          # honest name for the figure
+    for field in ("ev_teur", "ev_per_ebitda", "ev_per_sales", "pe"):
+        assert field not in peer
+
+
+def test_stale_peer_is_dropped(monkeypatch):
+    """Nixu's model stops at 2022 — delisted after the 2023 acquisition."""
+    stale = {"companyName": "Nixu Oyj", "companyCode": "07218117",
+             "dataMap": {"2022": {"ns": 60.222}, "2021": {"ns": 51.8}}}
+    out = _run(
+        {"competitors": [{"name": "Nixu Oyj"}]},
+        lambda q: _rows(("Nixu Oyj", "07218117", 209170)),
+        {209170: stale},
+        monkeypatch=monkeypatch,
+    )
+    assert out == []
+
+
 def _run(enrichment, search, models, own_name=None, monkeypatch=None):
     async def fake_search(query):
         return search(query)

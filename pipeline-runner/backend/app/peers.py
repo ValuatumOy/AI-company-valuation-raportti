@@ -13,6 +13,20 @@ A peer outside Valuatum's covered universe simply does not resolve and is
 dropped. An unlisted peer resolves but has no market value, so it carries
 growth and margin only — the writer's rule 2 already knows to use those and
 not to invent a multiple for it.
+
+WHAT THIS ENVIRONMENT ACTUALLY HAS (probed live 2026-08-05 against
+arvonmaaritys-fi.valuatum.com, Innofactor 208280 + Siili 241299, both listed):
+NO price data whatsoever. `market_cap_ye`, `pe`, `p_per_bv`, `p_per_s`,
+`share_price`, `book_value_ps`, `dividend_yield` and 16 other spellings all
+come back absent. And with no market cap, Valuatum's `enterprise_value`
+degenerates to plain net debt — verified numerically identical to `net_debt`
+on every peer and year — which makes `ev_per_ns` / `ev_per_ebitda` /
+`ev_per_ebit` net-debt ratios wearing multiple names (Innofactor "EV/EBITDA
+1.10x"). Publishing those as peer multiples would be worse than an empty peer
+table, so market-based fields are emitted ONLY behind a real market cap. Until
+Valuatum exposes prices, peers deliver the operational benchmark — size,
+growth, margin, leverage — and the writer keeps saying that no market
+cross-check was available.
 """
 import asyncio
 import re
@@ -33,16 +47,21 @@ REL_POSES = ("Y-1", "Y-2")
 # (peer field, varnames in priority order, kind). Money comes back in millions
 # and percentages as fractions — the same convention the stage-0 exporter
 # scales for, so peers land in tEUR/% like every other figure in the report.
+# `cr_ebitda_xml` before `ebitda` is not cosmetic: the plain `ebitda` variable
+# mirrors EBIT on these models (Innofactor 2024: 3.386 for both).
 FIELDS: list[tuple[str, tuple[str, ...], str]] = [
     ("revenue_teur", ("ns",), "money"),
     ("ebitda_teur", ("cr_ebitda_xml", "ebitda"), "money"),
     ("ebit_teur", ("ebit",), "money"),
-    ("ev_teur", ("enterprise_value",), "money"),
-    ("market_cap_teur", ("market_cap_ye",), "money"),
+    ("net_debt_teur", ("net_debt",), "money"),
     ("revenue_growth_pct", ("ns_growth",), "pct"),
     ("ebit_pct", ("ebit_percent",), "pct"),
     ("equity_ratio_pct", ("equity_ratio",), "pct"),
     ("roe_pct", ("roe_percent",), "pct"),
+    # Everything below is meaningless without a market price — see the module
+    # docstring. MARKET_GATED drops them unless a market cap actually exists.
+    ("market_cap_teur", ("market_cap_ye",), "money"),
+    ("ev_teur", ("enterprise_value",), "money"),
     ("ev_per_sales", ("ev_per_ns",), "ratio"),
     ("ev_per_ebitda", ("ev_per_ebitda",), "ratio"),
     ("ev_per_ebit", ("ev_per_ebit",), "ratio"),
@@ -51,10 +70,18 @@ FIELDS: list[tuple[str, tuple[str, ...], str]] = [
     ("p_per_sales", ("p_per_s",), "ratio"),
 ]
 
-# Market-based multiples only exist for a peer with a market value; their
-# presence is what makes a peer "listattu" for the writer's rule 2.
-MARKET_FIELDS = ("market_cap_teur", "ev_per_sales", "ev_per_ebitda",
-                 "ev_per_ebit", "pe", "p_per_bv", "p_per_sales")
+# Fields that are only true with a market price behind them. `ev_teur` is in
+# here because Valuatum's enterprise value IS net debt when no market cap
+# exists, so an "EV" without one is a mislabelled balance-sheet figure.
+MARKET_GATED = ("ev_teur", "ev_per_sales", "ev_per_ebitda", "ev_per_ebit",
+                "pe", "p_per_bv", "p_per_sales")
+
+# A peer whose newest actual year is older than this is history, not a
+# comparison: Nixu's model stops at 2022 (delisted after the 2023 acquisition)
+# and its 2022 margins say nothing about the target's market today.
+# ponytail: calendar-year cutoff, not fiscal-calendar aware — widen if a
+# legitimately slow-reporting peer starts getting dropped.
+MAX_PEER_AGE_YEARS = 3
 
 # Valuatum writes a ~1e8 "no data" sentinel (9.99999999999999E7) into
 # unpopulated model cells and it leaks through REST verbatim, so an unpriced
@@ -178,10 +205,11 @@ def _best_year(data_map: dict) -> str | None:
     return None
 
 
-def _entry(model: dict, resolved: dict, segment: str, fetched: str) -> dict | None:
+def _entry(model: dict, resolved: dict, segment: str, fetched: str,
+           min_year: int) -> dict | None:
     data_map = model.get("dataMap") or {}
     year = _best_year(data_map)
-    if not year:
+    if not year or int(year) < min_year:
         return None
     cells = data_map.get(year) or {}
     figures = {}
@@ -189,6 +217,10 @@ def _entry(model: dict, resolved: dict, segment: str, fetched: str) -> dict | No
         value = _figure(cells, varnames, kind)
         if value is not None:
             figures[field] = value
+    priced = "market_cap_teur" in figures
+    if not priced:
+        for field in MARKET_GATED:
+            figures.pop(field, None)
     if not figures:
         return None
     fid = resolved["fid"]
@@ -197,7 +229,7 @@ def _entry(model: dict, resolved: dict, segment: str, fetched: str) -> dict | No
         "y_tunnus": y_tunnus(str(model.get("companyCode") or "") or None),
         "fid": fid,
         "segment": segment or None,
-        "listed": any(f in figures for f in MARKET_FIELDS),
+        "listed": priced,
         "fiscal_year": int(year),
         "source": f"Valuatum /modeldata (fid {fid})",
         "fetched": fetched,
@@ -229,15 +261,23 @@ async def resolve(enrichment: dict, own_name: str | None = None) -> list[dict]:
         ]
         fids = [row["fid"] for rows, _ in pairs for row in rows]
         models = await valuatum.modeldata(fids, var_poses)
-        fetched = datetime.now(timezone.utc).date().isoformat()
+        today = datetime.now(timezone.utc).date()
+        fetched = today.isoformat()
+        min_year = today.year - MAX_PEER_AGE_YEARS
         out = []
         for rows, segment in pairs:
-            for row in rows:
-                model = models.get(str(row["fid"]))
-                entry = _entry(model, row, segment, fetched) if model else None
-                if entry:
-                    out.append(entry)
-                    break
+            # Valuatum keeps stale duplicate models alongside the live one for
+            # the same company (Nixu: one stopping at 2022, one current), so
+            # take the freshest — ties keep the rank order, i.e. konserni.
+            entries = [
+                e for e in (
+                    _entry(models.get(str(row["fid"])), row, segment, fetched,
+                           min_year)
+                    for row in rows if models.get(str(row["fid"]))
+                ) if e
+            ]
+            if entries:
+                out.append(max(entries, key=lambda e: e["fiscal_year"]))
         print(f"peers: {len(out)}/{len(wanted)} named competitors resolved to "
               f"Valuatum figures", flush=True)
         return out
