@@ -42,12 +42,17 @@ def get_pipeline(pid, light=False):
         # Everything except the two big text columns, plus the one fact the
         # boot check needs from `prompt_template` (is it still a placeholder?)
         # computed in SQL so the body never crosses the wire.
+        # The LIKE pattern is bound, not inlined: psycopg parses % in the SQL
+        # text as a placeholder marker, so a literal '%PROMPTI TÄHÄN%' raises
+        # "only '%s', '%b', '%t' are allowed as placeholders, got '%P'" on
+        # Postgres while passing silently on SQLite.
         stages = db.query(
             'SELECT id, pipeline_id, "order", name, enabled, model, temperature,'
             ' max_tokens, reasoning_effort, expects_json, web_search,'
             ' input_mapping,'
-            " (prompt_template LIKE '%PROMPTI TÄHÄN%') AS is_placeholder"
-            ' FROM stages WHERE pipeline_id=? ORDER BY "order"', (pid,)
+            ' (prompt_template LIKE ?) AS is_placeholder'
+            ' FROM stages WHERE pipeline_id=? ORDER BY "order"',
+            ("%PROMPTI TÄHÄN%", pid),
         )
         p["stages"] = [{**_stage_row_to_dict({**s, "prompt_template": None,
                                               "validator_code": None}),
