@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, getToken, setToken } from "./api";
 import type {
   ClarificationRequest, ModelInfo, Pipeline, Run, Stage, StageResult,
@@ -55,6 +55,8 @@ export default function App() {
   const [showRuns, setShowRuns] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [needToken, setNeedToken] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
+  const initRetries = useRef(0);
   const [tokenDraft, setTokenDraft] = useState("");
 
   function loadRuns() {
@@ -76,6 +78,7 @@ export default function App() {
   }
 
   function init() {
+    setInitError(null);
     api.pipelines()
       .then((all) => {
         // Retired pipelines (the 6-stage one) are never offered: the backend
@@ -95,6 +98,10 @@ export default function App() {
       .catch((e) => {
         if (String(e).includes("401") || String(e).includes("unauthorized"))
           setNeedToken(true);
+        // Anything else (a network blip, a backend restart) used to leave the
+        // app on "Loading…" forever with an empty console: the pipeline list is
+        // what the whole UI renders from, and nothing ever retried it.
+        else setInitError(String(e));
       });
     api.models().then(setModels).catch(() => {});
     loadRuns();
@@ -126,6 +133,17 @@ export default function App() {
       })
       .catch(() => init());
   }, []);
+
+  // A flaky moment at page load shouldn't need a manual reload: retry the boot
+  // a few times on its own, then leave the error on screen with the button.
+  useEffect(() => {
+    if (!initError || initRetries.current >= 3) return;
+    const t = setTimeout(() => {
+      initRetries.current += 1;
+      init();
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [initError]);
 
   // Tick a clock once a second while a run is in flight, for the elapsed timer.
   useEffect(() => {
@@ -462,6 +480,38 @@ export default function App() {
           >
             Save and continue
           </button>
+        </div>
+      </div>
+    );
+
+  if (initError)
+    return (
+      <div className="h-full flex items-center justify-center p-8">
+        <div className="bg-neutral-900 border border-red-800 rounded-lg p-6 w-[32rem]">
+          <div className="font-semibold text-red-200 mb-2">
+            Taustapalveluun ei saatu yhteyttä
+          </div>
+          <div className="text-xs text-neutral-400 mb-1">
+            Pipeline-listaa ei voitu ladata, joten käyttöliittymää ei voi
+            piirtää. Yleensä tämä on hetkellinen verkkokatko — yritä uudelleen.
+          </div>
+          <div className="text-xs text-neutral-500 font-mono break-all mb-4">
+            {initError}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={init}
+              className="px-3 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-sm"
+            >
+              Yritä uudelleen
+            </button>
+            <button
+              onClick={() => setNeedToken(true)}
+              className="px-3 py-2 rounded bg-neutral-800 hover:bg-neutral-700 text-sm"
+            >
+              Vaihda token
+            </button>
+          </div>
         </div>
       </div>
     );
