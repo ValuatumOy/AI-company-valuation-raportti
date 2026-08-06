@@ -34,9 +34,29 @@ uudelleen" / "Vaihda token"), and every run-list load swallowed its error
 on `_EXPERT_GET`). `api.ts` retries GETs three times on a thrown fetch; POSTs
 never retry, since starting a run twice costs real money.
 
+5. **Opening a run from the history did nothing** — panel said "not run",
+   header said $0,0000, as if the run were empty. `GET /api/runs/{rid}` was
+   603 kB / 6,0 s because `latest_family_run_id()` → `_family_ids()` called
+   `get_run()` just to read one `parent_run_id`, loading and JSON-decoding every
+   stage result a second time (and once more per ancestor). It selects two id
+   columns now: 6,0 s → 3,2 s. `loadRun` also had no catch, so a failed fetch
+   left the run id set and the screen half-built — it reports the failure now.
+
 Watch out: the test suite runs on SQLite, so a `LIKE '%PROMPTI TÄHÄN%'` inlined
 in SQL passed 272 tests and 500'd on Postgres (psycopg reads `%P` as a
 placeholder). Bind patterns as parameters.
+
+Unresolved: inside an instrumented browser (Claude-in-Chrome tab, Browser pane)
+only ~19 % of `/api/*` requests complete — 91 attempts, 17 successes, failing as
+bare `TypeError: Failed to fetch` with no status, while curl from the same
+machine is 100 % and a 218 kB static asset from the CDN edge always arrives.
+The operator's ordinary window does render the app, so this looks like an
+artifact of the automation surfaces rather than the network, but it means
+browser-side verification from here is not trustworthy. `api.ts` retries GETs
+six times because of it. The reliable fallback is running the UI locally with
+the API proxied same-origin:
+`VITE_PROXY_TARGET=https://valu-pipeline-production-88f2.up.railway.app npm run dev`
+— verified rendering all 95 runs.
 
 ## 2026-08-06 — small-sample peer guards + the empty-history mystery
 
