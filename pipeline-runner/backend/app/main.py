@@ -233,14 +233,30 @@ def health():
 
 # ---- pipelines / stages -----------------------------------------------------
 
+# Prompt bodies and validator sources dominate the pipeline list: with them it
+# is 474 kB and ~8 s over a proxied link, and a connection that drops mid-flight
+# never finishes it — which is exactly how the admin UI came to hang on boot.
+# The picker never renders a prompt; the stage editor fetches the pipeline by id
+# and gets the full bodies from GET /api/pipelines/{pid}.
+_LIST_OMITTED_STAGE_FIELDS = ("prompt_template", "validator_code")
+
+
 @app.get("/api/pipelines")
 def get_pipelines():
     seed.ensure_current_defaults()
     # `retired` marks a pipeline nothing may run through (the 6-stage one kept
     # for old runs) so the admin UI can hide it instead of offering it as a
     # choice that 400s on start.
-    return [{**p, "retired": not str(p.get("name") or "").startswith(
-        seed.SINGLE_WRITER_PIPELINE_PREFIX)} for p in store.list_pipelines()]
+    out = []
+    for p in store.list_pipelines():
+        stages = [
+            {k: v for k, v in s.items() if k not in _LIST_OMITTED_STAGE_FIELDS}
+            for s in p.get("stages") or []
+        ]
+        out.append({**p, "stages": stages,
+                    "retired": not str(p.get("name") or "").startswith(
+                        seed.SINGLE_WRITER_PIPELINE_PREFIX)})
+    return out
 
 
 @app.post("/api/pipelines")

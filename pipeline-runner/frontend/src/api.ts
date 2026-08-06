@@ -2,8 +2,9 @@ import type {
   ModelInfo, Pipeline, Run, SavedCompany, Stage, ValidatorReport,
 } from "./types";
 
-// Empty in dev (Vite proxies /api → :8000). On Vercel set VITE_API_BASE to the
-// hosted backend origin, e.g. https://valu-pipeline.fly.dev
+// Empty by default: Vite proxies /api → :8000 in dev, and on Vercel a rewrite
+// in vercel.json forwards /api/* to the backend, so every request is
+// same-origin. Set VITE_API_BASE only to talk to a backend cross-origin.
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 const TOKEN_KEY = "app_token";
@@ -16,11 +17,25 @@ export function authHeaders(): Record<string, string> {
 }
 
 async function req(path: string, init: RequestInit = {}): Promise<Response> {
-  const r = await fetch(API_BASE + path, {
-    ...init,
-    headers: { ...authHeaders(), ...(init.headers || {}) },
-  });
-  return r;
+  const send = () =>
+    fetch(API_BASE + path, {
+      ...init,
+      headers: { ...authHeaders(), ...(init.headers || {}) },
+    });
+  // A dropped connection rejects fetch outright (TypeError, no status). On a
+  // flapping link that killed whole screens — the boot never recovered. Only
+  // GETs retry: they are idempotent, a POST could double-charge a run.
+  if ((init.method ?? "GET") !== "GET") return send();
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await send();
+    } catch (e) {
+      lastError = e;
+      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+    }
+  }
+  throw lastError;
 }
 
 async function j<T>(r: Response): Promise<T> {

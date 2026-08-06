@@ -92,8 +92,14 @@ export default function App() {
           ps.find((p) => p.name === "Yhden kirjoittajan raportti (oletus)") ??
           ps.find((p) => p.name.startsWith("Yhden kirjoittajan raportti (oletus)")) ??
           ps[0];
-        setPipeline(def);
-        setSelectedId(def?.stages[0]?.id ?? null);
+        if (!def) return;
+        // The list carries no prompt bodies (it would be ~470 kB). Fetch the
+        // chosen pipeline in full before rendering, so the stage editor never
+        // shows — or saves — an empty prompt.
+        return api.pipeline(def.id).then((full) => {
+          setPipeline(full);
+          setSelectedId(full.stages[0]?.id ?? null);
+        });
       })
       .catch((e) => {
         if (String(e).includes("401") || String(e).includes("unauthorized"))
@@ -194,15 +200,18 @@ export default function App() {
   // Switch report mode (6-stage pipeline vs single-writer). Resets the run so
   // stages/results from the other mode don't linger.
   function switchPipeline(id: string) {
-    const p = pipelines.find((x) => x.id === id);
-    if (!p) return;
-    setPipeline(p);
-    setRunId(null);
-    setResults({});
-    setTotalCost(0);
-    setRunStartAt(null);
-    setInputData(null);
-    setSelectedId(p.stages.find((s) => s.order === 0)?.id ?? p.stages[0]?.id ?? null);
+    // Refetch: the cached list entry has no prompt bodies.
+    api.pipeline(id).then((p) => {
+      setPipeline(p);
+      setRunId(null);
+      setResults({});
+      setTotalCost(0);
+      setRunStartAt(null);
+      setInputData(null);
+      setSelectedId(
+        p.stages.find((s) => s.order === 0)?.id ?? p.stages[0]?.id ?? null,
+      );
+    }).catch((e) => setInitError(String(e)));
   }
 
   // Resolve a report URL, honouring the backend deliver-gate: on 409 the report
