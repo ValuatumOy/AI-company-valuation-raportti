@@ -34,30 +34,36 @@ def _stage_row_to_dict(r):
     }
 
 
+# Everything a stage row carries except the two big text columns, plus the one
+# fact the boot check needs from `prompt_template` — is it still a placeholder —
+# computed in SQL so the body never crosses the wire. The LIKE pattern is bound,
+# not inlined: psycopg parses % in the SQL text as a placeholder marker, so a
+# literal '%PROMPTI TÄHÄN%' raises "only '%s', '%b', '%t' are allowed as
+# placeholders, got '%P'" on Postgres while passing silently on SQLite.
+_LIGHT_COLUMNS = (
+    'SELECT id, pipeline_id, "order", name, enabled, model, temperature,'
+    ' max_tokens, reasoning_effort, expects_json, web_search, input_mapping,'
+    ' (prompt_template LIKE ?) AS is_placeholder FROM stages'
+)
+_PLACEHOLDER_LIKE = "%PROMPTI TÄHÄN%"
+
+
+def _light_stage(row):
+    return {**_stage_row_to_dict({**row, "prompt_template": None,
+                                  "validator_code": None}),
+            "is_placeholder": bool(row["is_placeholder"])}
+
+
 def get_pipeline(pid, light=False):
     p = db.query_one("SELECT * FROM pipelines WHERE id=?", (pid,))
     if not p:
         return None
     if light:
-        # Everything except the two big text columns, plus the one fact the
-        # boot check needs from `prompt_template` (is it still a placeholder?)
-        # computed in SQL so the body never crosses the wire.
-        # The LIKE pattern is bound, not inlined: psycopg parses % in the SQL
-        # text as a placeholder marker, so a literal '%PROMPTI TÄHÄN%' raises
-        # "only '%s', '%b', '%t' are allowed as placeholders, got '%P'" on
-        # Postgres while passing silently on SQLite.
         stages = db.query(
-            'SELECT id, pipeline_id, "order", name, enabled, model, temperature,'
-            ' max_tokens, reasoning_effort, expects_json, web_search,'
-            ' input_mapping,'
-            ' (prompt_template LIKE ?) AS is_placeholder'
-            ' FROM stages WHERE pipeline_id=? ORDER BY "order"',
-            ("%PROMPTI TÄHÄN%", pid),
+            _LIGHT_COLUMNS + ' WHERE pipeline_id=? ORDER BY "order"',
+            (_PLACEHOLDER_LIKE, pid),
         )
-        p["stages"] = [{**_stage_row_to_dict({**s, "prompt_template": None,
-                                              "validator_code": None}),
-                        "is_placeholder": bool(s["is_placeholder"])}
-                       for s in stages]
+        p["stages"] = [_light_stage(s) for s in stages]
         return p
     stages = db.query(
         'SELECT * FROM stages WHERE pipeline_id=? ORDER BY "order"', (pid,)
@@ -71,13 +77,27 @@ def list_pipelines(light=False):
     # (single-writer) pipeline is added. Consumers that want a specific pipeline
     # select by name; this only fixes the "primary is first" assumption.
     #
-    # `light` leaves the prompt bodies in the database. They are ~470 kB across
-    # the stage set and pulling them over the Supabase link is the whole cost of
-    # this call (6.8 s → 0.3 s without them), which matters because every
-    # /api/pipelines request pays it twice: once for the boot check, once for
-    # the response.
-    return [get_pipeline(p["id"], light=light)
-            for p in db.query("SELECT id FROM pipelines ORDER BY created_at, id")]
+    # Two queries total, never one per pipeline: a round trip to Supabase costs
+    # ~1 s from this region, so the old 1+2N pattern made /api/pipelines a ~6 s
+    # call that a flaky connection could never finish. `light` additionally
+    # leaves the ~470 kB of prompt bodies in the database — the picker and the
+    # boot check both work without them.
+    pipelines = db.query("SELECT * FROM pipelines ORDER BY created_at, id")
+    if not pipelines:
+        return []
+    if light:
+        rows = db.query(_LIGHT_COLUMNS + ' ORDER BY "order"',
+                        (_PLACEHOLDER_LIKE,))
+        to_dict = _light_stage
+    else:
+        rows = db.query('SELECT * FROM stages ORDER BY "order"')
+        to_dict = _stage_row_to_dict
+    by_pipeline = {}
+    for row in rows:
+        by_pipeline.setdefault(row["pipeline_id"], []).append(to_dict(row))
+    for p in pipelines:
+        p["stages"] = by_pipeline.get(p["id"], [])
+    return pipelines
 
 
 def create_pipeline(name):
