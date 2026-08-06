@@ -1,5 +1,43 @@
 # Handoff — 2026-08-06 (read this first)
 
+## 2026-08-06 — the admin UI would not open: four causes, all fixed
+
+Reported as "nothing opens at all". It was never Supabase, CORS or auth — the
+database answered every query in 50–380 ms throughout. Verified fixed in the
+operator's own Chrome at the production URL: `— historia (95) —`, a Singa run
+opens ($1,0954), Vaihe 0 shows its Parsed JSON.
+
+1. **`db.init_db()` ran on every request** (`28bbd3a`). `ensure_current_defaults()`
+   calls it first, and it issues ~25 CREATE/ALTER statements — each a round trip
+   to Supabase. That was ~3 s of the 3.6 s any pipeline request took. Now once
+   per process; a deploy starts a new one.
+2. **The boot check re-verified the stage set every request** (`572c72e`). Cached
+   for five minutes, Postgres only — SQLite (dev, tests) still reads live.
+3. **`list_pipelines` ran 1 + 2N queries and shipped every prompt body**
+   (`b4ec583`, `71d33b1`, `c72ad66`). Two queries now, and the list omits `prompt_template`
+   / `validator_code` (474 kB → 6,5 kB). `App.tsx` fetches the selected pipeline
+   in full from `/api/pipelines/{id}` so the stage editor still gets real
+   bodies — it must never save an empty one. Net: `/api/pipelines` 6,8 s → 0,6 s,
+   detail 5,3 s → 0,7 s.
+4. **Cross-origin API calls** (`c72ad66`, `e5edef4`). `/api/*` is rewritten to
+   Railway from **both** `vercel.json` files — the root one is what a git push
+   builds (Root Directory "."), the inner one what `vercel --prod` from
+   `pipeline-runner/frontend` uses. Miss the root one and the next push silently
+   reverts the fix. `VITE_API_BASE` is removed from the Vercel project; the app
+   now calls its own origin.
+
+Two silent failures on the same screen made this hard to see, and both are gone:
+`api.pipelines()` handled only 401 and left the app on "Loading…" forever for
+anything else (`e56a992` — three auto-retries, then an error card with "Yritä
+uudelleen" / "Vaihda token"), and every run-list load swallowed its error
+(`790a168` — a 403 from an `exp_` expert key now says so; `GET /api/runs` is not
+on `_EXPERT_GET`). `api.ts` retries GETs three times on a thrown fetch; POSTs
+never retry, since starting a run twice costs real money.
+
+Watch out: the test suite runs on SQLite, so a `LIKE '%PROMPTI TÄHÄN%'` inlined
+in SQL passed 272 tests and 500'd on Postgres (psycopg reads `%P` as a
+placeholder). Bind patterns as parameters.
+
 ## 2026-08-06 — small-sample peer guards + the empty-history mystery
 
 **Peer guards, shipped and reseeded to prod (`129fb83`).** Singa's rerun
