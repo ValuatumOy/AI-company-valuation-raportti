@@ -41,6 +41,10 @@ export default function App() {
   const [nowTick, setNowTick] = useState(Date.now());
   const [totalCost, setTotalCost] = useState(0);
   const [runs, setRuns] = useState<any[]>([]);
+  // A failed run-list load used to be swallowed, so an expert key (`exp_`),
+  // which the backend forbids from GET /api/runs, showed an empty history with
+  // no error and no token prompt — indistinguishable from "no runs yet".
+  const [runsError, setRunsError] = useState<string | null>(null);
   const [cmp, setCmp] = useState<{ order: number; results: any[] } | null>(null);
   const [showCosts, setShowCosts] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
@@ -52,6 +56,24 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [needToken, setNeedToken] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
+
+  function loadRuns() {
+    return api
+      .runs()
+      .then((rs) => {
+        setRuns(rs);
+        setRunsError(null);
+        return rs;
+      })
+      .catch((e) => {
+        setRunsError(
+          String(e).includes("forbidden")
+            ? "Ajohistoria on estetty tälle avaimelle: selaimeen tallennettu token on asiantuntija-avain (exp_), ei admin-token. Vaihda token nähdäksesi kaikki ajot."
+            : `Ajohistorian lataus epäonnistui: ${String(e)}`,
+        );
+        return [] as any[];
+      });
+  }
 
   function init() {
     api.pipelines()
@@ -75,7 +97,7 @@ export default function App() {
           setNeedToken(true);
       });
     api.models().then(setModels).catch(() => {});
-    api.runs().then(setRuns).catch(() => {});
+    loadRuns();
     api.reportCapabilities().then(setReportCaps).catch(() => {});
     api.orders()
       .then((os) => setOpenOrders(os.filter((o: any) => o.status === "open").length))
@@ -129,7 +151,7 @@ export default function App() {
         setTotalCost(run.total_cost_usd);
         if (run.status !== "running") {
           setBusy(false);
-          api.runs().then(setRuns).catch(() => {});
+          loadRuns();
         }
       } catch {
         /* transient — keep polling */
@@ -404,8 +426,7 @@ export default function App() {
         alert("Poisto epäonnistui:\n" + (e?.message || e));
       }
     }
-    const fresh = await api.runs().catch(() => []);
-    setRuns(fresh);
+    const fresh = await loadRuns();
     if (runId && ids.includes(runId)) newRun();
   }
 
@@ -537,6 +558,19 @@ export default function App() {
         {/* run context: cost + history */}
         {hasRun && (
           <span className="text-xs text-emerald-300 font-mono">${totalCost.toFixed(4)}</span>
+        )}
+        {runsError && (
+          <span className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-red-900/60 text-red-200 max-w-[420px]">
+            <span className="truncate" title={runsError}>
+              ⚠ {runsError}
+            </span>
+            <button
+              onClick={() => setNeedToken(true)}
+              className="shrink-0 px-2 py-0.5 rounded bg-red-800 hover:bg-red-700 text-red-50"
+            >
+              Vaihda token
+            </button>
+          </span>
         )}
         <select
           onChange={(e) => e.target.value && loadRun(e.target.value)}
@@ -778,6 +812,7 @@ export default function App() {
       {showRuns && (
         <RunsOverlay
           runs={runs}
+          error={runsError}
           currentId={runId}
           onLoad={(id) => {
             setShowRuns(false);
@@ -813,12 +848,14 @@ function MenuItem({
 
 function RunsOverlay({
   runs,
+  error,
   currentId,
   onLoad,
   onDelete,
   onClose,
 }: {
   runs: any[];
+  error: string | null;
   currentId: string | null;
   onLoad: (id: string) => void;
   onDelete: (ids: string[]) => void;
@@ -853,7 +890,12 @@ function RunsOverlay({
           </div>
         </div>
         <div className="overflow-auto px-2 py-2">
-          {runs.length === 0 && (
+          {error && (
+            <div className="text-xs bg-red-950/60 border border-red-800 text-red-200 rounded p-3 m-2">
+              ⚠ {error}
+            </div>
+          )}
+          {runs.length === 0 && !error && (
             <div className="text-xs text-neutral-500 italic p-4">Ei ajoja.</div>
           )}
           {runs.map((r) => (
