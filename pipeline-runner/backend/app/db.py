@@ -16,6 +16,9 @@ import threading
 DATABASE_URL = os.getenv("DATABASE_URL")
 IS_PG = bool(DATABASE_URL)
 
+# Set by init_db() after the schema has been applied in this process.
+_initialized = False
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pipelines (
     id TEXT PRIMARY KEY,
@@ -142,6 +145,14 @@ if IS_PG:
         return sql.replace("?", "%s")
 
     def init_db():
+        # Once per process. The schema DDL plus the migrations below are ~25
+        # statements, and every one is a round trip to Supabase: running them on
+        # each request is where /api/pipelines lost ~3 of its 3.6 s. Nothing
+        # here can go stale within a process — the schema only changes on
+        # deploy, which starts a new one.
+        global _initialized
+        if _initialized:
+            return
         with _pool.connection() as conn:
             for stmt in _STATEMENTS:
                 conn.execute(stmt)
@@ -167,6 +178,7 @@ if IS_PG:
                     conn.execute(mig)
                 except Exception:
                     pass
+        _initialized = True
 
     def query(sql, params=()):
         with _pool.connection() as conn:
@@ -195,6 +207,9 @@ else:
         return c
 
     def init_db():
+        global _initialized
+        if _initialized:
+            return
         c = _conn()
         c.executescript(SCHEMA)
         c.commit()
@@ -218,6 +233,7 @@ else:
                 c.commit()
             except Exception:
                 pass  # column already exists
+        _initialized = True
 
     def query(sql, params=()):
         cur = _conn().execute(sql, params)
