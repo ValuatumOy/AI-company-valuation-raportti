@@ -22,17 +22,19 @@ async function req(path: string, init: RequestInit = {}): Promise<Response> {
       ...init,
       headers: { ...authHeaders(), ...(init.headers || {}) },
     });
-  // A dropped connection rejects fetch outright (TypeError, no status). On a
-  // flapping link that killed whole screens — the boot never recovered. Only
-  // GETs retry: they are idempotent, a POST could double-charge a run.
+  // A dropped connection rejects fetch outright (TypeError, no status). Six
+  // attempts, not one: on the operator's link roughly half of all /api/*
+  // requests die this way (static assets from the CDN edge do not), so a
+  // single failure used to take out a whole screen. Only GETs retry — they are
+  // idempotent, and retrying a POST could start a paid run twice.
   if ((init.method ?? "GET") !== "GET") return send();
   let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     try {
       return await send();
     } catch (e) {
       lastError = e;
-      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
     }
   }
   throw lastError;
