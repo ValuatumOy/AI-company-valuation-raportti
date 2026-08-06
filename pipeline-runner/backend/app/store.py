@@ -239,10 +239,20 @@ def clone_run(parent_id, params=None, identifier=None):
 
 def _family_ids(rid):
     """(root_id, descendant_ids) for `rid`'s report family: walk parent_run_id
-    up to the root round-1 run, then BFS over children."""
-    row = get_run(rid)
+    up to the root round-1 run, then BFS over children.
+
+    Only ids are needed, so this must never call get_run(): that pulls every
+    stage result and JSON-decodes it, and GET /api/runs/{rid} calls this on the
+    run it has already loaded — a 600 kB run was fetched and parsed twice per
+    request, which is where its 6 s went."""
+    row = db.query_one("SELECT id, parent_run_id FROM runs WHERE id=?", (rid,))
     while row and row.get("parent_run_id"):
-        row = get_run(row["parent_run_id"])
+        parent = db.query_one(
+            "SELECT id, parent_run_id FROM runs WHERE id=?", (row["parent_run_id"],)
+        )
+        if not parent:
+            break
+        row = parent
     if not row:
         return None, []
     descendants = []

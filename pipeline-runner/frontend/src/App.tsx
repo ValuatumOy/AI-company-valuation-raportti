@@ -459,7 +459,14 @@ export default function App() {
 
   async function loadRun(rid: string) {
     setRunId(rid);
-    await refreshRun(rid);
+    try {
+      await refreshRun(rid);
+      setRunsError(null);
+    } catch (e) {
+      // Silent before: the run id was set, the fetch died, and the screen said
+      // "not run" / $0.0000 as if the run itself were empty.
+      setRunsError(`Ajon ${rid.slice(0, 8)} lataus epäonnistui: ${String(e)}`);
+    }
   }
 
   function saveToken() {
