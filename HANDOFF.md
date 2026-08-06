@@ -1,4 +1,38 @@
-# Handoff — 2026-08-05 (read this first)
+# Handoff — 2026-08-06 (read this first)
+
+## 2026-08-06 — small-sample peer guards + the empty-history mystery
+
+**Peer guards, shipped and reseeded to prod (`129fb83`).** Singa's rerun
+resolved 2 of 5 candidates and the code called the average of two a "median",
+with Musopia's implied P/E 104,78x dragging it to 61,62x — and nothing stopped
+the writer from carrying that into section 7 as a weighted method. Two new
+writer rules in `singlewriter.txt` (VERROKIT 10 and 11): below n = 3 the word
+"mediaani" is banned, no method value may be formed from the peer set, the
+comparison stays a directional §15 observation with the confidence level
+adjusted; a multiple more than 3x its peers is named an outlier and may not
+anchor the target. `1_enrichment.txt` 5b now asks for at least 5 Finnish
+candidates (was 3–8, delivered 2), explains why the count matters and how to
+widen — adjacent TOL classes, a 0,2–10x revenue band, then the same business
+model from another industry. Reseed: `ok, updated=3`, both texts verified live
+in the prod prompts. **Not yet exercised by a run** — these are prompt rules,
+not code gates, so the first Singa rerun should check §15 and the section-7
+weights. The option-value floor (`b697869`) is also still unverified.
+
+**"I can't see any old runs" was an expert key, not Supabase.** The admin UI
+loaded normally, showed no token prompt, and listed zero runs while 95 sat in
+the database. Cause: an `exp_` key in localStorage (from an `/asiantuntija`
+magic link) — `GET /api/runs` is not on `_EXPERT_GET`, so it 403s, while
+`/api/pipelines` IS allowed, so no 401 ever fired the token screen. Every run-
+list call site then swallowed the error with `.catch(() => {})`. `790a168`
+routes all three through one `loadRuns()` that names a 403 for what it is and
+offers a "Vaihda token" button (previously the only exit was devtools);
+`RunsOverlay` no longer claims "Ei ajoja." when the list simply failed.
+Deployed to Vercel prod and verified in the live bundle.
+
+Getting back in without devtools: open
+`https://frontend-one-phi-77.vercel.app/?token=<APP_TOKEN>` — the app stores
+the token and strips it from the address bar. `APP_TOKEN` lives in Railway
+(`railway variables list --kv -s valu-pipeline`).
 
 ## 2026-08-05 — `peers` is no longer empty: named peers from Valuatum's own REST
 
