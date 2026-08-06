@@ -4,6 +4,7 @@ Validators are loaded from backend/validators_seed/*.py so they live as real,
 runnable source, not placeholder strings.
 """
 import os
+import time
 
 from . import db, store
 from .models import DATA_FETCHER_MODEL
@@ -277,15 +278,30 @@ def _single_writer_pipeline(light=False):
                  if p.get("name") == SINGLE_WRITER_PIPELINE_NAME), None)
 
 
+# A Supabase round trip from the Railway region costs ~1 s, and this check runs
+# on every /api/pipelines and /api/pipelines/{id} request — it was half the
+# 4.2 s the admin UI waited for on boot. The stage set only stops being current
+# when this process reseeds it, so re-verifying more often than this buys
+# nothing. Postgres only: on SQLite (dev, tests) each call must still see the
+# database it was just handed.
+_DEFAULTS_TTL_S = 300
+_defaults_checked_at = None
+
+
 def ensure_current_defaults():
     """Repair the default (single-writer) pipeline before the UI reads it."""
+    global _defaults_checked_at
     db.init_db()
-    # Light: this runs on every /api/pipelines and /api/pipelines/{id} request,
-    # and it only checks which orders exist and whether any stage is still a
+    now = time.monotonic()
+    if (db.IS_PG and _defaults_checked_at is not None
+            and now - _defaults_checked_at < _DEFAULTS_TTL_S):
+        return {"ok": True, "created": 0, "updated": 0, "cached": True}
+    # Light: only which orders exist and whether any stage is still a
     # placeholder — never the prompt text itself.
     pipeline = _single_writer_pipeline(light=True)
     if pipeline is None or _pipeline_needs_auto_reseed(pipeline):
         return reseed_defaults(force=True)
+    _defaults_checked_at = now
     return {"ok": True, "created": 0, "updated": 0, "pipeline": pipeline}
 
 
