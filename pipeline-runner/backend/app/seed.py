@@ -257,6 +257,10 @@ def _ensure_single_writer_pipeline(force=False):
 
 
 def _placeholder_stage(stage):
+    # A light stage (store.get_pipeline(light=True)) carries the answer as a
+    # SQL-computed flag instead of the prompt body it was derived from.
+    if "is_placeholder" in stage:
+        return bool(stage["is_placeholder"])
     prompt = stage.get("prompt_template") or ""
     return PLACEHOLDER_PREFIX in prompt and "PROMPTI TÄHÄN" in prompt
 
@@ -268,15 +272,18 @@ def _pipeline_needs_auto_reseed(pipeline):
     return any(_placeholder_stage(s) for s in by_order.values())
 
 
-def _single_writer_pipeline():
-    return next((p for p in store.list_pipelines()
+def _single_writer_pipeline(light=False):
+    return next((p for p in store.list_pipelines(light=light)
                  if p.get("name") == SINGLE_WRITER_PIPELINE_NAME), None)
 
 
 def ensure_current_defaults():
     """Repair the default (single-writer) pipeline before the UI reads it."""
     db.init_db()
-    pipeline = _single_writer_pipeline()
+    # Light: this runs on every /api/pipelines and /api/pipelines/{id} request,
+    # and it only checks which orders exist and whether any stage is still a
+    # placeholder — never the prompt text itself.
+    pipeline = _single_writer_pipeline(light=True)
     if pipeline is None or _pipeline_needs_auto_reseed(pipeline):
         return reseed_defaults(force=True)
     return {"ok": True, "created": 0, "updated": 0, "pipeline": pipeline}

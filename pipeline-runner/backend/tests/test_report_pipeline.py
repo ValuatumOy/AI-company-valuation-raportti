@@ -3045,6 +3045,26 @@ def test_reseed_refreshes_all_single_writer_pipelines(monkeypatch):
     assert len(s2["prompt_template"] or "") > 10000  # real vendored prompt loaded
 
 
+def test_pipeline_list_omits_prompt_bodies_but_detail_keeps_them():
+    """The list is what the admin UI boots on: with prompt bodies it was 474 kB
+    / ~6.8 s and died on any flaky link. Bodies live on the detail route."""
+    from app import seed, store
+
+    seed.ensure_seeded()
+    pipeline = seed._single_writer_pipeline()
+    light = next(p for p in store.list_pipelines(light=True)
+                 if p["id"] == pipeline["id"])
+    writer = next(s for s in light["stages"] if s["order"] == 2)
+    assert writer["prompt_template"] is None
+    assert writer["validator_code"] is None
+    assert writer["is_placeholder"] is False  # boot check still answerable
+    assert writer["model"] and writer["max_tokens"] == 96000  # metadata intact
+
+    full = next(s for s in store.get_pipeline(pipeline["id"])["stages"]
+                if s["order"] == 2)
+    assert len(full["prompt_template"] or "") > 10000
+
+
 def test_table_prose_columns_align_left_numeric_right():
     """Esa/CEO 2026-07-08: prose columns (Lähde, ...) were right-aligned and
     ugly; numeric year columns must stay right-aligned."""

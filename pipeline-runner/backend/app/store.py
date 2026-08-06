@@ -34,10 +34,26 @@ def _stage_row_to_dict(r):
     }
 
 
-def get_pipeline(pid):
+def get_pipeline(pid, light=False):
     p = db.query_one("SELECT * FROM pipelines WHERE id=?", (pid,))
     if not p:
         return None
+    if light:
+        # Everything except the two big text columns, plus the one fact the
+        # boot check needs from `prompt_template` (is it still a placeholder?)
+        # computed in SQL so the body never crosses the wire.
+        stages = db.query(
+            'SELECT id, pipeline_id, "order", name, enabled, model, temperature,'
+            ' max_tokens, reasoning_effort, expects_json, web_search,'
+            ' input_mapping,'
+            " (prompt_template LIKE '%PROMPTI TÄHÄN%') AS is_placeholder"
+            ' FROM stages WHERE pipeline_id=? ORDER BY "order"', (pid,)
+        )
+        p["stages"] = [{**_stage_row_to_dict({**s, "prompt_template": None,
+                                              "validator_code": None}),
+                        "is_placeholder": bool(s["is_placeholder"])}
+                       for s in stages]
+        return p
     stages = db.query(
         'SELECT * FROM stages WHERE pipeline_id=? ORDER BY "order"', (pid,)
     )
@@ -45,11 +61,17 @@ def get_pipeline(pid):
     return p
 
 
-def list_pipelines():
+def list_pipelines(light=False):
     # Oldest first, so the original default pipeline stays [0] after a second
     # (single-writer) pipeline is added. Consumers that want a specific pipeline
     # select by name; this only fixes the "primary is first" assumption.
-    return [get_pipeline(p["id"])
+    #
+    # `light` leaves the prompt bodies in the database. They are ~470 kB across
+    # the stage set and pulling them over the Supabase link is the whole cost of
+    # this call (6.8 s → 0.3 s without them), which matters because every
+    # /api/pipelines request pays it twice: once for the boot check, once for
+    # the response.
+    return [get_pipeline(p["id"], light=light)
             for p in db.query("SELECT id FROM pipelines ORDER BY created_at, id")]
 
 
