@@ -1,5 +1,47 @@
 # Handoff — 2026-08-11 (read this first)
 
+## 2026-08-11 — three fixes on top of the Smartly run (`24b05ec`, `7e15ebf`) — VERIFIED ON PROD
+
+1. **Restated derived figures corrected deterministically.** Root cause was ONE
+   wrong number, not two: a §11 table gave the optimistic scenario as 89 009
+   while `machine_readable` and the section's own derivation said 81 317, and
+   §1 then weighted its expected value off it (65 109 vs 63 186).
+   `render.py::_fix_restated_figures` now rewrites, from the canonical source,
+   before anything renders: metric cards (`_canonical_card_value`), a figure
+   attached to "odotusarvo", a range attached to "haarukka", the whole
+   `N % × A + N % × B + N % × C = D` sentence, and scenario table rows keyed by
+   scenario name or name-plus-label. A ±30 % plausibility window keeps
+   unrelated same-magnitude figures untouched (tested). `report_qa`
+   `_restated_derived_figures` flags scenario-vs-machine_readable drift — the
+   old prose reconciliation structurally cannot, because the wrong table cell
+   enters its own allowed set.
+2. **Data quality is appendix-only** (CEO). Prompt no longer asks §1 for a
+   quality line (+ final checks 26–27); `_strip_section1_data_quality` removes
+   a "Datan laatu…" sentence from §1 so older runs clean up too. Confidence
+   level stays — it describes the estimate, not the data.
+3. **Prose measure** — `p{max-width:72ch}` left paragraphs at 135,6 mm against
+   180 mm tables (measured in Chrome), i.e. 44 mm of white space down the right
+   of every paragraph. Cap removed, body type 9,6 → 10 pt. 29 → 28 pages.
+
+Tests 272 → 276. All three verified live on run `1df13023…`.
+
+### Open product findings from reading the Smartly output (not fixed)
+
+- **The optimistic scenario is structurally broken.** 81,3 M€ vs an 78,9 M€
+  base — 3 % apart. It assumes 250 M€ revenue and 10,1 % EBIT in 2029 but also
+  97,4 M€ net debt, which cancels the upside. A success scenario must not land
+  within 3 % of the base case.
+- **Market signals are undated.** The Providence deal is from 2019; the signal
+  table shows "noin 200 000 tEUR" with no year, in a report dated 2026. The
+  prompt already requires dating — it did not happen.
+- **Why the Smartly value looks low** (asked by the CEO): our EV is 108,5 M€
+  (equity 78,9 after 29,6 net debt) = 0,75× revenue, against an external
+  2,5–3,0× view. Cause is the forecast, not the method: Valuatum's
+  deterministic forecast cuts EBIT from 6 103 tEUR (2025 actual) to 1 388 tEUR
+  (2026e) while revenue grows 13,3 %, reaches only 7,1 % margin by 2035 (the
+  company ran 14–18 % in 2019–2021), and grows debt 46 → 119 M€ to fund three
+  negative-FCF years. The margin path is the single biggest lever on value.
+
 ## 2026-08-11 — Smartly run: all five prompt changes verified live, two model slips found
 
 Run `1df13023…`, Smartly.io Holding Oy KONSERNI (fid 274135, picked over the
