@@ -3588,3 +3588,72 @@ def test_cover_hierarchy_expected_value_primary_base_case_alongside():
     assert "konservatiivisesta perusskenaariosta" in html
     assert "pessimistisen skenaarion vaikutus" in html
     assert "optimistisen skenaarion vaikutus" in html
+
+
+def _restatement_report():
+    """A report whose optimistic scenario is stated one way in machine_readable
+    and another way in a section-11 table, with section 1 weighting off the
+    wrong figure — the exact 2026-08-11 Smartly shape."""
+    return {
+        "meta": {"company_name": "X"},
+        "cover": {"headline_value": "63 186 tEUR", "base_case_value": "78 869 tEUR"},
+        "expected_value": {"value": 63185.6, "unit": "tEUR"},
+        "machine_readable": {"scenarios": [
+            {"name": "Pessimistinen", "value_teur": 13687, "probability_pct": 25},
+            {"name": "Konservatiivinen", "value_teur": 78869, "probability_pct": 50},
+            {"name": "Optimistinen", "value_teur": 81317.3, "probability_pct": 25},
+        ]},
+        "sections": [
+            {"id": "1", "title": "TIIVISTELMÄ", "blocks": [
+                {"type": "metric_cards", "cards": [
+                    {"label": "Skenaarioiden odotusarvo", "value": "65 109 tEUR"},
+                    {"label": "Skenaariohaarukka", "value": "13 687–89 009 tEUR"},
+                ]},
+                {"type": "paragraph", "text":
+                    "Datan laatu: Hyvä, luottamustaso: Matala — perustelut liitteissä. "
+                    "Skenaarioiden odotusarvo on 65 109 tEUR ja skenaariohaarukka "
+                    "13 687–89 009 tEUR. Liikevaihto oli 65 109 tEUR vuonna 2025."},
+            ]},
+            {"id": "11", "title": "SKENAARIOT", "blocks": [
+                {"type": "table", "columns": ["Skenaario", "Omistaja-arvo"],
+                 "rows": [["Pessimistinen", 13687], ["Konservatiivinen", 78869],
+                          ["Optimistinen", 89009]]},
+            ]},
+        ],
+    }
+
+
+def test_restated_expected_value_and_range_are_corrected_to_the_canonical_figures():
+    # 2026-08-11 Smartly run: one section-11 table said the optimistic scenario
+    # was 89 009 while machine_readable said 81 317, so section 1 weighted its
+    # expected value off the wrong number (65 109 instead of 63 186) and the
+    # cover and the summary disagreed on the report's leading figure.
+    rep = _restatement_report()
+    html = render.render_html(rep)
+    text = render._norm_ws(render._strip_tags(html))
+    assert "63 186" in text and "65 109 tEUR ja" not in text
+    assert "13 687–81 317" in text and "89 009" not in text
+    # the scenario table row is corrected from machine_readable too
+    assert "81 317" in text
+    # a same-magnitude figure that is NOT a restatement is left alone
+    assert "Liikevaihto oli 65 109 tEUR" in text
+
+
+def test_section_1_never_carries_a_data_quality_line():
+    # CEO 2026-08-11: data quality belongs in the appendix (section 2) only.
+    rep = _restatement_report()
+    html = render.render_html(rep)
+    assert "Datan laatu" not in render._strip_tags(html)
+    assert "luottamustaso" in render._strip_tags(html).lower()  # kept: not data quality
+
+
+def test_prose_measure_matches_the_table_measure():
+    # A 72ch cap left every paragraph ~44 mm short of the full-width tables,
+    # which read as the text hugging the left edge of the page.
+    assert "p{ max-width:none; }" in render._STATIC_CSS
+
+
+def test_qa_flags_a_scenario_value_that_contradicts_machine_readable():
+    from app import report_qa
+    w = report_qa.warnings(_restatement_report())
+    assert any("Optimistinen" in x and "89009" in x.replace(" ", "") for x in w), w

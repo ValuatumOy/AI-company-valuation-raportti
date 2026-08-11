@@ -462,7 +462,11 @@ Kaikki analyysiohjeet, säännöt, kynnysarvot ja pakolliset lauseet pätevät s
 
 ### Yhteenveto
 
-3–5 `paragraph`-lohkoa. Sisällytä: painotettu arvo tai suora toteamus miksi arvoa ei voida määrittää; odotusarvo ja skenaariohaarukka + valittu todennäköisyysprofiili; arvostusväli tai menetelmien hajonta; luottamustaso + määräävä sääntö sekä datan laatuluokka yhdellä virkkeellä muodossa "Datan laatu: [luokka], luottamustaso: [taso] — perustelut ja rajoitteet liitteissä (osio 2)"; tärkein arvoa kantava oletus; tärkeimmät arvoa tukevat ja rasittavat tekijät; suora lause siitä mikä tekisi arviosta liian korkean/matalan; mahdollinen markkinasignaali ja sen suhde perusskenaarioon. Osio 2 (datan laatu) esitetään raportissa liitteenä — tiivistelmän on siksi kannettava tämä yksi laaturivi itse.
+3–5 `paragraph`-lohkoa. Sisällytä: painotettu arvo tai suora toteamus miksi arvoa ei voida määrittää; odotusarvo ja skenaariohaarukka + valittu todennäköisyysprofiili; arvostusväli tai menetelmien hajonta; luottamustaso + määräävä sääntö; tärkein arvoa kantava oletus; tärkeimmät arvoa tukevat ja rasittavat tekijät; suora lause siitä mikä tekisi arviosta liian korkean/matalan; mahdollinen markkinasignaali ja sen suhde perusskenaarioon.
+
+ÄLÄ käsittele datan laatua tässä osiossa: älä kirjoita datan laatuluokkaa, älä listaa datan puutteita äläkä viittaa datan laatua koskevaan liitteeseen. Datan laatu on kokonaisuudessaan osion 2 asia. Luottamustaso mainitaan tässä, koska se on arvion ominaisuus, ei datan laadun kuvaus.
+
+ODOTUSARVO JA HAARUKKA — TÄSMÄLLEEN YKSI LUKU KUMPIKIN. Kun mainitset skenaarioiden odotusarvon missä tahansa tekstissä, käytä TÄSMÄLLEEN samaa lukua kuin `expected_value.value` ja `cover.headline_value`. Kun mainitset skenaariohaarukan, ala- ja yläpään on oltava TÄSMÄLLEEN `machine_readable.scenarios`-listan pienin ja suurin arvo. Älä laske näitä uudelleen tekstiä kirjoittaessasi äläkä pyöristä niitä eri tavalla eri kohdissa — kopioi luku. Tämä on yleisin havaittu virhe (2026-08-11 Smartly-ajo: teksti sanoi odotusarvoksi 65 109 kun laskelma antoi 63 186, ja haarukan yläpääksi 89 009 kun optimistinen skenaario oli 81 317).
 
 Jos kaikki menetelmät ovat negatiivisia, käytä `paragraph`-lohkossa täsmälleen: "Tämä on sanottava suoraan: toimitettu ennustepolku ei tue positiivista omistaja-arvoa. [Menetelmä] antaa laskennalliseksi base case -arvoksi [arvo] ennen omistaja-arvon lattiaa. Tätä ei pidä lukea osakekannan käyväksi arvoksi, vaan mallin tuottamaksi alijäämäksi: annetulla ennusteella kassavirrat eivät kata velkoja ja pääoman kustannusta. Osakkeenomistajan vastuu on kuitenkin rajattu, joten omistaja-arvon alaraja on 0 tEUR. Mahdollinen positiivinen arvo olisi optio- tai strategista arvoa ja edellyttäisi käännettä, rahoitusjärjestelyä, synergioita tai ostajan omaa näkemystä."
 
@@ -615,6 +619,8 @@ Ennen kuin tuotat lopullisen JSONin, tarkista hiljaisesti:
 23. Sisältääkö jokainen `sections`-objekti `blocks`-listan, ja ovatko kuvaajat/taulukot lohkoina osioiden sisällä?
 24. Onko jokainen lohkotyyppi sallittu (`heading`, `paragraph`, `callout`, `metric_cards`, `key_value`, `table`, `chart`), eikä tuntemattomia tyyppejä ole?
 25. Selitinkö jokaisen ammattitermin (WACC, DCF, EVA, yritysarvo/EV, terminaaliarvo, käänteislaskelma) arkikielellä sen ensimmäisellä käyttökerralla, ja käytinkö "perusskenaario"- ja "omistaja-arvon alaraja" -muotoja?
+26. Onko skenaarioiden odotusarvo JOKAISESSA esiintymässä (osio 1 teksti, avainlukukortti, `cover.headline_value`, `expected_value.value`, osio 11) sama luku, ja haarukan ala- ja yläpää täsmälleen `machine_readable.scenarios`-listan pienin ja suurin arvo? Tarkista tämä laskemalla, älä silmämääräisesti.
+27. Onko osio 1 vapaa datan laatua koskevista maininnoista (laatuluokka, datan puutteet, viittaus laatuliitteeseen)?
 
 Jos jokin kohta epäonnistuu, korjaa ennen vastaamista.
 

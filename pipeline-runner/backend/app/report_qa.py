@@ -212,12 +212,61 @@ def _scenario_and_anchor_consistency(rep):
     return out
 
 
+def _restated_derived_figures(rep):
+    """Scenario values restated in a table must match `machine_readable.scenarios`.
+
+    High-precision counterpart to _prose_number_reconciliation, which cannot
+    catch this class: the model's own wrong table cell enters that check's
+    allowed set. 2026-08-11 Smartly run — one section-11 table gave the
+    optimistic scenario as 89 009 while machine_readable and the section's own
+    derivation both said 81 317, and the summary then weighted its expected
+    value off the wrong figure (65 109 instead of 63 186). render.py corrects
+    these at render time; this warning is how the drift stays visible.
+    """
+    out = []
+    mr = (rep or {}).get("machine_readable") or {}
+    sc = mr.get("scenarios")
+    if not (isinstance(sc, list) and sc):
+        return out
+    canon = {}
+    for s in sc:
+        if isinstance(s, dict):
+            v = _scenario_value(s)
+            name = str(s.get("name") or "").strip().lower()
+            if v is not None and name:
+                canon[name] = v
+    if not canon:
+        return out
+    for sec, b in _iter_blocks(rep):
+        if b.get("type") != "table":
+            continue
+        for row in b.get("rows") or []:
+            if not isinstance(row, list) or len(row) < 2:
+                continue
+            target = canon.get(str(row[0]).strip().lower())
+            if target is None:
+                continue
+            for cell in row[1:]:
+                v = _num(cell)
+                if v is None or abs(v) < 100:
+                    continue
+                if abs(v - target) <= max(1.0, 0.005 * abs(target)):
+                    break  # the scenario's own value, stated correctly
+                if abs(v - target) <= 0.30 * abs(target):
+                    out.append(
+                        f"osio {sec.get('id')}: skenaario {row[0]} on taulukossa "
+                        f"{v:.0f} mutta machine_readable sanoo {target:.0f}")
+                    break
+    return list(dict.fromkeys(out))
+
+
 def warnings(rep):
     """Non-blocking QA warnings over the assembled report. Never raises."""
     try:
         return (_duplicate_blocks(rep)
                 + _sensitivity_calibration(rep)
                 + _scenario_and_anchor_consistency(rep)
+                + _restated_derived_figures(rep)
                 + _prose_number_reconciliation(rep))
     except Exception as e:  # QA must never break report delivery
         return [f"report_qa-tarkistus epäonnistui: {e}"]

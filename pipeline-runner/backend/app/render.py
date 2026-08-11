@@ -180,6 +180,10 @@ _source_domain_map: ContextVar[dict] = ContextVar("_source_domain_map", default=
 # metric cards print in the same unit as the cover's hero figure.
 _report_scale_ctx: ContextVar[tuple] = ContextVar("_report_scale_ctx",
                                                   default=(1.0, "tEUR", 0))
+# Canonical derived figures {expected_value, range_low, range_high} — the
+# single source of truth for the two numbers the model restates most often
+# and most often gets wrong (2026-08-11 Smartly run).
+_canonical_ctx: ContextVar[dict] = ContextVar("_canonical_ctx", default={})
 _SOURCE_CITE_RE = re.compile(r"\(lähde:\s*([a-zA-Z0-9][\w.-]*\.[a-zA-Z]{2,})((?:\s*,\s*[^)]*)?)\)")
 
 
@@ -967,6 +971,159 @@ def _derive(report):
 # --------------------------------------------------------------------------- #
 # blocks
 # --------------------------------------------------------------------------- #
+_EV_PHRASE_RE = re.compile(
+    r"(odotusarvo[^.;]{0,70}?)(-?\d[\d\s  ]*\d|\d)(?:,(\d+))?\s*(tEUR|M€)", re.I)
+_RANGE_PHRASE_RE = re.compile(
+    r"((?:haarukka|vaihteluväli)[^.;]{0,50}?)"
+    r"(-?\d[\d\s  ]*\d|\d)(?:,\d+)?\s*[–-]\s*(-?\d[\d\s  ]*\d|\d)(?:,\d+)?"
+    r"\s*(tEUR|M€)", re.I)
+
+
+def _unit_fmt(teur, unit):
+    """Format a tEUR magnitude in the unit the sentence already uses."""
+    return f"{_fmt(teur / 1000.0, 1)} M€" if unit.upper() == "M€" else f"{_fmt(teur)} tEUR"
+
+
+def _unit_num(raw, unit):
+    """Read a figure written in `unit` back into tEUR."""
+    v = _to_num(raw)
+    return None if v is None else (v * 1000.0 if unit.upper() == "M€" else v)
+
+
+def _fix_restated_figures(report, canonical):
+    """Rewrite the two derived figures the model restates and sometimes gets
+    wrong, in place, before anything renders.
+
+    2026-08-11 Smartly run: one §11 table gave the optimistic scenario as
+    89 009 while `machine_readable.scenarios` and the section's own
+    deterministic derivation both said 81 317. The summary then computed its
+    expected value from the wrong figure (65 109 instead of 63 186), so the
+    cover and the summary disagreed on the report's leading number.
+
+    Only two narrowly-matched shapes are touched — a figure attached to the
+    word "odotusarvo", and a range attached to "haarukka"/"vaihteluväli" — and
+    only when it differs from the canonical value by more than rounding but
+    less than 30 % (a different figure entirely is someone else's number, not
+    a restatement of this one). Every rewrite is reported back to the caller.
+    """
+    ev = canonical.get("expected_value")
+    lo, hi = canonical.get("range_low"), canonical.get("range_high")
+    notes = []
+
+    def _close(v, target):
+        return abs(v - target) <= max(1.0, 0.005 * abs(target))
+
+    def _plausible(v, target):
+        return not _close(v, target) and abs(v - target) <= 0.30 * abs(target)
+
+    def _ev_sub(m):
+        unit = m.group(4)
+        raw = m.group(2) + ("," + m.group(3) if m.group(3) else "")
+        v = _unit_num(raw, unit)
+        if ev is None or v is None or not _plausible(v, ev):
+            return m.group(0)
+        notes.append(f"odotusarvo {raw.strip()} {unit} → {_unit_fmt(ev, unit)}")
+        return f"{m.group(1)}{_unit_fmt(ev, unit)}"
+
+    def _rng_sub(m):
+        unit = m.group(4)
+        a, b = _unit_num(m.group(2), unit), _unit_num(m.group(3), unit)
+        if lo is None or a is None or b is None:
+            return m.group(0)
+        if not (_plausible(a, lo) or _plausible(b, hi)):
+            return m.group(0)
+        notes.append(f"haarukka {m.group(2).strip()}–{m.group(3).strip()} {unit} → "
+                     f"{_unit_fmt(lo, unit)}–{_unit_fmt(hi, unit)}")
+        lo_s = _unit_fmt(lo, unit).rsplit(" ", 1)[0]
+        return f"{m.group(1)}{lo_s}–{_unit_fmt(hi, unit)}"
+
+    names = {s["name"].strip().lower(): s["value"]
+             for s in (_scenario_values(report) or []) if s.get("value") is not None}
+
+    for sec in (report or {}).get("sections") or []:
+        if not isinstance(sec, dict):
+            continue
+        for b in sec.get("blocks") or []:
+            if not isinstance(b, dict):
+                continue
+            if isinstance(b.get("text"), str):
+                b["text"] = _RANGE_PHRASE_RE.sub(_rng_sub,
+                                                 _EV_PHRASE_RE.sub(_ev_sub, b["text"]))
+            # A scenario table row keyed by scenario name must carry that
+            # scenario's canonical value, whatever cell it sits in.
+            if b.get("type") == "table" and names:
+                for row in b.get("rows") or []:
+                    if not isinstance(row, list) or len(row) < 2:
+                        continue
+                    key = _clean(row[0]).strip().lower()
+                    target = names.get(key)
+                    if target is None:
+                        continue
+                    for i in range(1, len(row)):
+                        v = _to_num(_short(row[i]))
+                        if v is not None and _plausible(v, target):
+                            notes.append(f"skenaario {row[0]}: {row[i]} → {_fmt(target)}")
+                            row[i] = _fmt(target)
+                            break
+    return notes
+
+
+_DQ_SENTENCE_RE = re.compile(
+    r"\s*Datan laatu(?:luokka)?\s*[:on][^.!?]*[.!?]\s*", re.I)
+
+
+def _strip_section1_data_quality(report):
+    """Data quality belongs to section 2, which renders in the appendix — the
+    summary must not carry it (CEO, 2026-08-11). The prompt says so, but the
+    sentence is formulaic enough to remove deterministically, which also
+    cleans up reports generated before the rule existed.
+
+    Only whole "Datan laatu: …" sentences inside section 1 are removed; a
+    paragraph left empty is dropped with them. Confidence level is untouched —
+    it is a property of the estimate, not a data-quality statement."""
+    sec = next((s for s in (report or {}).get("sections") or []
+                if isinstance(s, dict) and str(s.get("id")) == "1"), None)
+    if not sec:
+        return 0
+    kept, removed = [], 0
+    for b in sec.get("blocks") or []:
+        if isinstance(b, dict) and isinstance(b.get("text"), str) \
+                and _DQ_SENTENCE_RE.search(b["text"]):
+            new = _DQ_SENTENCE_RE.sub(" ", b["text"]).strip()
+            removed += 1
+            if not new:
+                continue
+            b = {**b, "text": new}
+        kept.append(b)
+    sec["blocks"] = kept
+    return removed
+
+
+def _canonical_figures(report, derived):
+    """The expected value and scenario range, taken from their one authoritative
+    source. Expected value: `expected_value.value`, but recomputed from the
+    scenario probabilities when the two disagree — the probability-weighted sum
+    is what the report's own calculation string shows. Range: the smallest and
+    largest scenario value."""
+    out = {}
+    vals = _scenario_values(report) or []
+    nums = [v["value"] for v in vals if v.get("value") is not None]
+    probs = [v.get("prob") for v in vals if v.get("value") is not None]
+    ev_obj = (report or {}).get("expected_value")
+    ev = _to_num(ev_obj.get("value") if isinstance(ev_obj, dict) else ev_obj)
+    if len(nums) == 3 and all(p is not None for p in probs) and abs(sum(probs) - 100) <= 1:
+        calc = sum(p * v for p, v in zip(probs, nums)) / 100.0
+        ev = calc if ev is None or abs(calc - ev) > max(1.0, 0.005 * abs(ev)) else ev
+    if ev is None:
+        rng = derived.get("range") or {}
+        ev = _to_num(rng.get("mid"))
+    if ev is not None:
+        out["expected_value"] = ev
+    if nums:
+        out["range_low"], out["range_high"] = min(nums), max(nums)
+    return out
+
+
 def _block_heading(b):
     return f'<h3 class="blk">{_esc(b.get("text"))}</h3>'
 
@@ -1017,12 +1174,42 @@ def _as_records(coll, keys):
     return out
 
 
+def _canonical_card_value(label, current):
+    """The expected value and the scenario range are computed deterministically
+    elsewhere in the report; a summary card restating them must not disagree.
+    Returns a corrected 'N tEUR' string, or None to keep what the model wrote.
+
+    Only fires on an unambiguous label and a material difference — a card
+    labelled something else, or already right, is left alone."""
+    can = _canonical_ctx.get() or {}
+    lab = _clean(label).lower()
+    cur = _to_num(_short(current))
+    if "odotusarvo" in lab and can.get("expected_value") is not None:
+        ev = can["expected_value"]
+        if cur is None or abs(cur - ev) > max(1.0, 0.005 * abs(ev)):
+            return f"{_fmt(ev)} tEUR"
+    if ("haarukka" in lab or "vaihteluväli" in lab) and can.get("range_low") is not None:
+        lo, hi = can["range_low"], can["range_high"]
+        m = _TEUR_RANGE_RE.match(_short(current) or "")
+        cl = _to_num(m.group(1)) if m else None
+        ch = _to_num(m.group(2)) if m else None
+        off = (cl is None or ch is None
+               or abs(cl - lo) > max(1.0, 0.005 * abs(lo))
+               or abs(ch - hi) > max(1.0, 0.005 * abs(hi)))
+        if off:
+            return f"{_fmt(lo)}–{_fmt(hi)} tEUR"
+    return None
+
+
 def _block_metric_cards(b):
     cards = []
     for c in _as_records(b.get("cards"), ("label", "value")):
         label = _clean(c.get("label")).lower()
         if "luottamustaso" in label:
             continue
+        fixed = _canonical_card_value(c.get("label"), c.get("value"))
+        if fixed is not None:
+            c = {**c, "value": fixed}
         cards.append(c)
     if not cards:
         return ""
@@ -1993,6 +2180,10 @@ def render_html(report):
     _source_domain_map.set(_collect_source_urls(report))
     derived = _derive(report)
     _report_scale_ctx.set(_report_scale(report, derived))
+    canonical = _canonical_figures(report, derived)
+    _canonical_ctx.set(canonical)
+    _fix_restated_figures(report, canonical)
+    _strip_section1_data_quality(report)
     try:
         _cover_guard(report, derived)
     except CoverGuardError:
@@ -2101,8 +2292,12 @@ _STATIC_CSS = """
 }
 *{ box-sizing:border-box; }
 html,body{ margin:0; padding:0; }
-body{ background:#fff; color:var(--ink); font-family:var(--sans); font-size:9.6pt; line-height:1.5; }
-p{ max-width:72ch; }
+body{ background:#fff; color:var(--ink); font-family:var(--sans); font-size:10pt; line-height:1.52; }
+/* Prose fills the same measure as the tables and charts beside it. A 72ch cap
+   left every paragraph 44 mm short of the table edge, which read as the text
+   being pushed to the left of the page (2026-08-11). Cover and note text keep
+   their own narrower measures. */
+p{ max-width:none; }
 .page{ position:relative; padding:0; display:flex; flex-direction:column; }
 @media print{ .page{ min-height:255mm; page-break-after:always; } }
 @media screen{ .page{ padding-bottom:14mm; } }
@@ -2188,7 +2383,7 @@ a.secref{ color:var(--lime); text-decoration:none; border-bottom:1px dotted var(
 .kv .k{ color:var(--gray); flex:1 1 auto; }
 .kv .v{ font-variant-numeric:tabular-nums lining-nums; font-weight:600; white-space:nowrap; }
 .kv.kvl{ flex-direction:column; align-items:flex-start; gap:1px; }
-.kv.kvl .v{ white-space:normal; text-align:left; max-width:72ch; }
+.kv.kvl .v{ white-space:normal; text-align:left; max-width:none; }
 .chart-host{ width:100%; margin:8px 0 12px; page-break-inside:avoid; }
 .two-col{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
 .toc{ font-size:9.8pt; }
