@@ -458,7 +458,7 @@ Kaikki analyysiohjeet, säännöt, kynnysarvot ja pakolliset lauseet pätevät s
 
 ### Avainluvut
 
-`metric_cards`-lohko. Sisällytä keskeiset luvut korteiksi (esim. oman pääoman arvo / base case ennen flooria sekä skenaariohaarukka). Jos painotettu arvo on positiivinen, ensimmäinen kortti on "Oman pääoman arvo"; jos negatiivinen, käytä "Laskennallinen base case ennen flooria" ja erillinen kortti "Omistaja-arvon lattia: 0 tEUR". ÄLÄ lisää "Skenaarioiden odotusarvo"- tai "Yritysarvo (EV)" -korttia avainlukujen joukkoon: odotusarvo mainitaan tekstissä skenaarioanalyysin tuloksena ja yritysarvo (EV) esitetään DCF-osiossa — kumpikaan ei ole tämän osion avainlukukortti. (Skenaarioiden odotusarvo ON kannen pääluku — ks. KANSI-ohje yllä — mutta sitä ei toisteta erillisenä korttina tässä.) Lisää markkinasignaalikortti, jos signaali löytyi tai on ilmoitettu.
+`metric_cards`-lohko. Ensimmäinen kortti on "Skenaarioiden odotusarvo" ja siinä TÄSMÄLLEEN sama luku kuin kannen pääluvussa (`cover.headline_value`) — raportin johtava luku on sama kannessa ja tiivistelmässä (toimitusjohtajan päätös 2026-08-11). Toinen kortti: jos painotettu arvo on positiivinen, "Konservatiivinen perusskenaario"; jos negatiivinen, "Laskennallinen perusskenaario ennen omistaja-arvon alarajaa" ja erillinen kortti "Omistaja-arvon alaraja: 0 tEUR". Kolmanneksi skenaariohaarukka. ÄLÄ lisää "Yritysarvo (EV)" -korttia — EV esitetään DCF-osiossa. Lisää markkinasignaalikortti, jos signaali löytyi tai on ilmoitettu.
 
 ### Yhteenveto
 

@@ -176,6 +176,10 @@ _MD_ITALIC = re.compile(r"(?<![\*\w])\*([^*\n]+)\*(?!\w)")
 # render_html() call (ContextVar, not a module global, so concurrent renders
 # in different request threads never cross-contaminate each other's sources).
 _source_domain_map: ContextVar[dict] = ContextVar("_source_domain_map", default={})
+# Report headline scale (div, unit, dec) — set once per render so summary
+# metric cards print in the same unit as the cover's hero figure.
+_report_scale_ctx: ContextVar[tuple] = ContextVar("_report_scale_ctx",
+                                                  default=(1.0, "tEUR", 0))
 _SOURCE_CITE_RE = re.compile(r"\(lähde:\s*([a-zA-Z0-9][\w.-]*\.[a-zA-Z]{2,})((?:\s*,\s*[^)]*)?)\)")
 
 
@@ -326,6 +330,26 @@ def _scaled_cover_str(s, scale):
         return cleaned
     n = _to_num(m.group(1))
     return f"{_fmt(n / div, dec)} {unit}" if n is not None else cleaned
+
+
+_TEUR_RANGE_RE = re.compile(
+    r"^\s*(-?\d[\d\s  ]*(?:[.,]\d+)?)\s*[–-]\s*(-?\d[\d\s  ]*(?:[.,]\d+)?)\s*tEUR\s*$")
+
+
+def _scaled_card_str(s, scale):
+    """Re-express a metric-card value ('9 983 tEUR' or '3 471–29 196 tEUR')
+    in the report headline unit so the summary cards match the cover figure.
+    Anything else passes through cleaned but unscaled."""
+    div, unit, dec = scale
+    cleaned = _short(s)
+    if div == 1.0:
+        return cleaned
+    m = _TEUR_RANGE_RE.match(cleaned)
+    if m:
+        lo, hi = _to_num(m.group(1)), _to_num(m.group(2))
+        if lo is not None and hi is not None:
+            return f"{_fmt(lo / div, dec)}–{_fmt(hi / div, dec)} {unit}"
+    return _scaled_cover_str(cleaned, scale)
 
 
 def _display_industry(meta):
@@ -1004,11 +1028,12 @@ def _block_metric_cards(b):
         return ""
     n = max(1, min(len(cards), 4))
     cells = []
+    scale = _report_scale_ctx.get()
     for c in cards:
         accent = " accent" if c.get("emphasis") else ""
-        val = _clean(c.get("value"))
+        val = _scaled_card_str(c.get("value"), scale)
         vcls = "mval long" if len(val) > 24 else "mval"
-        cells.append(f'<div class="mcard{accent}"><div class="{vcls}">{_esc(c.get("value"))}</div>'
+        cells.append(f'<div class="mcard{accent}"><div class="{vcls}">{html.escape(val)}</div>'
                      f'<div class="mlabel">{_esc(c.get("label"))}</div></div>')
     return (f'<div class="mgrid" style="grid-template-columns:repeat({n},1fr);">'
             f'{"".join(cells)}</div>')
@@ -1351,7 +1376,7 @@ def _cover(report, derived):
     else:
         note = ("Skenaarioiden todennäköisyyksillä painotettu odotusarvo. "
                 "Todennäköisyydet ovat AI:n muodostamia, muokattavia oletuksia. "
-                "Konservatiivinen perusskenaario (DCF) ja haarukan ääripäät "
+                "Konservatiivinen perusskenaario ja haarukan ääripäät "
                 "esitetään alla.")
     # downside/upside bridge: show WHY the expected value differs from the base
     bridge_html = ""
@@ -1376,11 +1401,15 @@ def _cover(report, derived):
     if not bridge_html and bcv not in (None, "") and exp_num is not None:
         bridge_html = (
             '<p class="hero-desc" style="margin-top:2mm">'
-            'Konservatiivinen perusskenaario (DCF/EVA) '
+            'Konservatiivinen perusskenaario '
             f'<b>{_esc(_scaled_cover_str(bcv, scale))}</b>.</p>'
         )
 
-    # --- band + meta ------------------------------------------------------
+    # --- band + company + meta ---------------------------------------------
+    # Cover v4 (2026-08-11, Asiakastieto comparison): the company name is the
+    # page's title, not a small meta cell — a buyer must see whose valuation
+    # this is at arm's length. The three-column explainer grid moved off the
+    # cover (its content lives in the summary and the glossary appendix).
     band = (
         '<div class="band">'
         f'<div class="brand">{_esc(_brand(report)[0])} · Yritysanalyysi · AI</div>'
@@ -1388,10 +1417,13 @@ def _cover(report, derived):
         '</div>'
     )
     meta_row = (
-        '<div class="meta">'
-        '<div><div class="lab">Yhtiö</div>'
-        f'<div class="co">{_esc(meta.get("company_name"))}</div>'
-        f'<div class="sub">{_esc(industry)}</div></div>'
+        '<div style="margin:0 0 7mm">'
+        '<div class="lab">Yhtiö</div>'
+        f'<div class="co" style="font-size:24pt;line-height:1.15;margin:1mm 0">'
+        f'{_esc(meta.get("company_name"))}</div>'
+        f'<div class="sub">{_esc(industry)}</div>'
+        '</div>'
+        '<div class="meta" style="grid-template-columns:repeat(3,1fr)">'
         '<div><div class="lab">Y-tunnus</div>'
         f'<div class="val">{_esc(meta.get("y_tunnus"))}</div></div>'
         '<div><div class="lab">Raportin päivä</div>'
@@ -1445,19 +1477,19 @@ def _cover(report, derived):
             f'<div class="chart-labels">{label_html}</div>'
             '</div>'
         )
+        # One line naming the ACTUAL accepted methods — the old hardcoded
+        # "DCF ja EVA" grid claimed methods the report could contradict a page
+        # later (Heeros: DCF 54,5 % + tasepohjainen 45,5 %, EVA weighted 0 %).
+        used = [m["label"] for m in (derived.get("methods") or [])
+                if not m.get("muted") and m.get("label")][:3]
+        method_txt = (
+            "Konservatiivinen perusskenaario on laskettu yhtiön toteutuneista "
+            "luvuista ja ennusteista"
+            + (f' ({" · ".join(_esc(u) for u in used)})' if used else "")
+            + ". Menetelmät ja painot perustellaan arvonmääritysosiossa."
+        )
         expl_html = (
-            '<div class="expl">'
-            '<div><h4>Konservatiivinen perusskenaario</h4>'
-            '<p>Laskettu yhtiön toteutuneista luvuista ja ennusteista kassavirta- (DCF) '
-            'ja lisäarvomenetelmällä (EVA).</p></div>'
-            '<div><h4>Skenaarioiden odotusarvo</h4>'
-            '<p>Skenaarioiden todennäköisyyksillä painotettu keskiarvo. Perustuu '
-            'AI:n muodostamiin, käyttäjän vahvistamattomiin oletuksiin — '
-            'todennäköisyydet ovat muokattavia oletuksia, eivät ennuste.</p></div>'
-            '<div><h4>Haarukan ääripäät</h4>'
-            '<p>Pessimistinen ja optimistinen skenaario kuvaavat arvion ala- ja '
-            'ylärajan; oletukset ja perustelut skenaario-osiossa.</p></div>'
-            '</div>'
+            f'<p class="hero-desc" style="margin-top:5mm">{method_txt}</p>'
         )
 
     foot = ('<div class="footnote"><p><b>Voit muuttaa oletuksia.</b> Skenaarioiden '
@@ -1529,24 +1561,43 @@ _MANDATE_LABELS = [
 def _mandate(report):
     """Toimeksianto (engagement/mandate) block: valuation date, purpose,
     standard of value, etc. — shown before the ToC so a reader knows what kind
-    of opinion they're holding before reaching any numbers."""
+    of opinion they're holding before reaching any numbers.
+
+    Without a mandate object (the single-writer prompt never emits one — half
+    its fields aren't in the input data), fall back to a Perustiedot block
+    built purely from `meta`: deterministic, no model involvement."""
     meta = report.get("meta") or {}
     mandate = meta.get("mandate")
-    if not isinstance(mandate, dict) or not mandate:
-        return ""
-    values = dict(mandate)
-    values.setdefault("report_date", meta.get("report_date"))
-    values.setdefault("currency_unit", meta.get("unit"))
+    if isinstance(mandate, dict) and mandate:
+        title = "Toimeksianto"
+        values = dict(mandate)
+        values.setdefault("report_date", meta.get("report_date"))
+        values.setdefault("currency_unit", meta.get("unit"))
+        pairs = [(label, values.get(key)) for key, label in _MANDATE_LABELS]
+    else:
+        title = "Perustiedot"
+        level = {"parent": "Yhtiötaso (virallinen tilinpäätösdata)",
+                 "consolidated": "Konsernitaso (virallinen tilinpäätösdata)"
+                 }.get(str(meta.get("level") or "").lower())
+        pairs = [
+            ("Yhtiö", meta.get("company_name")),
+            ("Y-tunnus", meta.get("y_tunnus")),
+            ("Toimiala", _display_industry(meta)),
+            ("Kotipaikka", meta.get("domicile")),
+            ("Raportin päivä", meta.get("report_date")),
+            ("Lukujen taso", level),
+            ("Valuutta / yksikkö", meta.get("unit")),
+        ]
     rows = "".join(
         f'<div class="kv"><span class="k">{_esc(label)}</span>'
-        f'<span class="v" style="white-space:normal;text-align:right;max-width:110mm">{_esc(values[key])}</span></div>'
-        for key, label in _MANDATE_LABELS if values.get(key)
+        f'<span class="v" style="white-space:normal;text-align:right;max-width:110mm">{_esc(val)}</span></div>'
+        for label, val in pairs if val
     )
     if not rows:
         return ""
     return (
         '<div style="margin-bottom:20px">'
-        '<h4 class="blk" style="margin-top:0">Toimeksianto</h4>'
+        f'<h4 class="blk" style="margin-top:0">{title}</h4>'
         f'{rows}</div>'
     )
 
@@ -1707,6 +1758,73 @@ def _glossary_page(report):
         '<div class="sh-sub">Raportissa käytetyt keskeiset termit arkikielellä</div></div></div>'
         '<div class="sec-rule"></div>'
         f'<div class="two-col" style="row-gap:10px">{items}</div>'
+        f'</div>{_footer()}</section>'
+    )
+
+
+# Part structure (2026-08-11, Asiakastieto comparison): the flat 16-section
+# list gets two part-divider pages so a reader always knows which part of the
+# report they are in — background vs. the valuation itself. Appendix keeps
+# its own existing divider.
+_PART_TAUSTA_IDS = {"3", "4", "5", "6"}
+_PART_VALUATION_IDS = {"8", "9", "10", "11", "12", "13", "14"}
+
+
+def _value_flow_html():
+    """Static plain-language diagram of how the value is formed. Deterministic
+    renderer content; the run-specific methods and weights are argued inside
+    the valuation section itself."""
+    steps = [
+        ("Ennustetut kassavirrat", "yhtiön toteutuneista luvuista ja ennusteesta"),
+        ("Diskonttaus nykyhetkeen", "tuottovaatimuksella (WACC)"),
+        ("Yritysarvo", "koko liiketoiminnan arvo"),
+        ("− velat + kassa", "rahoitusrakenteen vaikutus"),
+        ("Oman pääoman arvo", "omistajien osuus"),
+        ("Skenaariopainotus", "kolme skenaariota todennäköisyyksin"),
+        ("Odotusarvo", "kannen ja tiivistelmän johtava luku"),
+    ]
+    box = ('<div style="background:#fff;border:1px solid #D8DED8;padding:8px 10px;'
+           'border-radius:2px;break-inside:avoid">'
+           '<div style="font-weight:700;font-size:9pt">{t}</div>'
+           '<div class="muted" style="font-size:7.5pt">{s}</div></div>')
+    arrow = ('<div style="text-align:center;color:var(--lime-deep);'
+             'font-size:10pt;line-height:1;margin:2px 0">↓</div>')
+    inner = arrow.join(box.format(t=_esc(t), s=_esc(s)) for t, s in steps)
+    return (
+        '<div>'
+        '<div class="section-lab" style="margin-bottom:4mm">'
+        'Miten arvo muodostuu — laskennan periaate</div>'
+        f'{inner}'
+        '<p class="muted" style="font-size:7.5pt;margin-top:4mm">'
+        'Kaavio kuvaa pääperiaatteen. Käytetyt menetelmät, niiden painot ja '
+        'perustelut esitetään seuraavissa osioissa; termit selitetään '
+        'sanasto-liitteessä.</p></div>'
+    )
+
+
+def _part_divider(report, title, desc, listing, extra=""):
+    rows = "".join(
+        f'<a class="toc-row" href="#sec-{n}"><span class="tn">{n}</span>'
+        f'<span class="tt">{_esc(_title_case(t))}</span></a>'
+        for n, t in listing)
+    toc = f'<div class="toc">{rows}</div>'
+    # With extra content (the value-flow diagram), section list and diagram
+    # sit side by side so the divider never overflows its single page.
+    lower = (f'<div class="two-col" style="max-width:170mm;margin:10mm auto 0;'
+             f'grid-template-columns:1.1fr 0.9fr;gap:24px">'
+             f'<div>{toc}</div>{extra}</div>'
+             if extra else
+             f'<div style="max-width:120mm;margin:8mm auto 0">{toc}</div>')
+    return (
+        '<section class="page part-divider">'
+        f'{_header(report)}'
+        '<div class="pbody">'
+        '<div style="max-width:120mm;margin:14mm auto 0;text-align:center">'
+        '<div style="font-size:8pt;text-transform:uppercase;letter-spacing:.14em;'
+        'color:var(--lime-deep);font-weight:700;margin-bottom:8px">Osa</div>'
+        f'<h2 style="font-size:22pt;margin-bottom:10px">{_esc(title)}</h2>'
+        f'<p class="muted">{_esc(desc)}</p></div>'
+        f'{lower}'
         f'</div>{_footer()}</section>'
     )
 
@@ -1874,6 +1992,7 @@ def render_html(report):
         raise ValueError("report ei ole objekti")
     _source_domain_map.set(_collect_source_urls(report))
     derived = _derive(report)
+    _report_scale_ctx.set(_report_scale(report, derived))
     try:
         _cover_guard(report, derived)
     except CoverGuardError:
@@ -1885,17 +2004,38 @@ def render_html(report):
     # Insert one "Liitteet" divider right before the first appendix section
     # (source register / methodology / full forecast detail) so the main body
     # stays a coherent read and the appendix is clearly marked as such.
-    # Page order: cover → section 1 (summary) → ToC → rest of the body →
-    # appendix. The buyer sees the valuation and its grounds before any
-    # navigation page (2026-08-11 restructure). Glossary is a static
-    # renderer page appended as the last appendix item.
+    # Page order: cover → section 1 (summary) → ToC → part divider "Tausta"
+    # → background sections → part divider "Arvonmääritys" (with the static
+    # value-flow diagram) → valuation sections → appendix divider → appendix
+    # → glossary. The buyer sees the valuation and its grounds before any
+    # navigation page (2026-08-11 restructure).
+    display = {i: s for i, s in enumerate(sections, start=1)}
+    listing_of = lambda ids: [(i, s.get("title") or "")
+                              for i, s in display.items()
+                              if str(s.get("id")) in ids]
     section_html_parts = []
-    divider_shown = False
+    appendix_shown = tausta_shown = valuation_shown = False
     toc_at = 0
     for i, s in enumerate(sections, start=1):
-        if not divider_shown and str(s.get("id")) in APPENDIX_SECTION_IDS:
+        sid = str(s.get("id"))
+        if not tausta_shown and sid in _PART_TAUSTA_IDS:
+            section_html_parts.append(_part_divider(
+                report, "Tausta ja liiketoiminta",
+                "Mitä yhtiö tekee, miten se on kehittynyt ja mitä ennuste "
+                "olettaa — pohja, jolle arvonmääritys rakentuu.",
+                listing_of(_PART_TAUSTA_IDS)))
+            tausta_shown = True
+        if not valuation_shown and sid in _PART_VALUATION_IDS:
+            section_html_parts.append(_part_divider(
+                report, "Arvonmääritys",
+                "Menetelmät, laskelmat, herkkyydet ja riskit — miten arvio "
+                "muodostuu ja mikä sitä liikuttaisi.",
+                listing_of(_PART_VALUATION_IDS),
+                extra=_value_flow_html()))
+            valuation_shown = True
+        if not appendix_shown and sid in APPENDIX_SECTION_IDS:
             section_html_parts.append(_appendix_divider(report))
-            divider_shown = True
+            appendix_shown = True
         section_html_parts.append(_section(report, s, derived, display_no=i))
         if i == 1:
             toc_at = len(section_html_parts)

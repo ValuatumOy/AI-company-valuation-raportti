@@ -2902,10 +2902,11 @@ def test_golden_pdf_has_no_blank_pages(tmp_path):
     out = str(tmp_path / "g.pdf")
     render.render_pdf(rep, out)
     n_sections = len(render._ensure_disclaimer(render._ordered_sections(rep)))
-    # cover + TOC + appendix divider (section 16's disclaimer is always
-    # ensured, so the divider always fires) + static glossary page + one page
-    # per section — and crucially NO trailing blank pages.
-    assert _pdf_page_count(out) == n_sections + 4
+    # cover + TOC + two part dividers + appendix divider (section 16's
+    # disclaimer is always ensured, so the appendix divider always fires) +
+    # static glossary page + one page per section — and crucially NO trailing
+    # blank pages.
+    assert _pdf_page_count(out) == n_sections + 6
 
 
 def test_blank_prompt_stage_is_skipped(monkeypatch):
