@@ -979,6 +979,15 @@ _RANGE_PHRASE_RE = re.compile(
     r"\s*(tEUR|M€)", re.I)
 
 
+# "Odotusarvo on 25 % × 13 687 tEUR + 50 % × 78 869 tEUR + 25 % × 89 009 tEUR
+#  = 65 109 tEUR" — the whole weighted sum is rebuilt from the canonical
+# scenarios rather than patched term by term.
+_EV_SUM_RE = re.compile(
+    r"(?:\d{1,3}\s*%\s*[×x*]\s*-?\d[\d\s  ]*(?:,\d+)?\s*(?:tEUR|M€)\s*[+]\s*){2}"
+    r"\d{1,3}\s*%\s*[×x*]\s*-?\d[\d\s  ]*(?:,\d+)?\s*(?:tEUR|M€)"
+    r"\s*=\s*-?\d[\d\s  ]*(?:,\d+)?\s*(tEUR|M€)", re.I)
+
+
 def _unit_fmt(teur, unit):
     """Format a tEUR magnitude in the unit the sentence already uses."""
     return f"{_fmt(teur / 1000.0, 1)} M€" if unit.upper() == "M€" else f"{_fmt(teur)} tEUR"
@@ -1037,8 +1046,21 @@ def _fix_restated_figures(report, canonical):
         lo_s = _unit_fmt(lo, unit).rsplit(" ", 1)[0]
         return f"{m.group(1)}{lo_s}–{_unit_fmt(hi, unit)}"
 
-    names = {s["name"].strip().lower(): s["value"]
-             for s in (_scenario_values(report) or []) if s.get("value") is not None}
+    scen = [s for s in (_scenario_values(report) or [])
+            if s.get("value") is not None]
+    names = {s["name"].strip().lower(): s["value"] for s in scen}
+
+    def _sum_sub(m):
+        unit = m.group(1)
+        if ev is None or len(scen) != 3 or any(s.get("prob") is None for s in scen):
+            return m.group(0)
+        terms = " + ".join(
+            f"{_fmt(s['prob'])} % × {_unit_fmt(s['value'], unit)}" for s in scen)
+        rebuilt = f"{terms} = {_unit_fmt(ev, unit)}"
+        if _norm_ws(rebuilt) == _norm_ws(m.group(0)):
+            return m.group(0)
+        notes.append(f"odotusarvon laskukaava → {rebuilt}")
+        return rebuilt
 
     for sec in (report or {}).get("sections") or []:
         if not isinstance(sec, dict):
@@ -1047,16 +1069,22 @@ def _fix_restated_figures(report, canonical):
             if not isinstance(b, dict):
                 continue
             if isinstance(b.get("text"), str):
-                b["text"] = _RANGE_PHRASE_RE.sub(_rng_sub,
-                                                 _EV_PHRASE_RE.sub(_ev_sub, b["text"]))
-            # A scenario table row keyed by scenario name must carry that
-            # scenario's canonical value, whatever cell it sits in.
+                t = _EV_SUM_RE.sub(_sum_sub, b["text"])
+                b["text"] = _RANGE_PHRASE_RE.sub(_rng_sub, _EV_PHRASE_RE.sub(_ev_sub, t))
+            # A row keyed by a scenario name must carry that scenario's
+            # canonical value. The key may be the bare name ("Optimistinen") or
+            # name-plus-label ("Optimistinen omistaja-arvo"); the plausibility
+            # window below keeps unrelated same-prefix rows ("Optimistinen
+            # liikevaihto vuonna 2029") out of it.
             if b.get("type") == "table" and names:
                 for row in b.get("rows") or []:
                     if not isinstance(row, list) or len(row) < 2:
                         continue
                     key = _clean(row[0]).strip().lower()
                     target = names.get(key)
+                    if target is None:
+                        target = next((v for n, v in names.items()
+                                       if key.startswith(n)), None)
                     if target is None:
                         continue
                     for i in range(1, len(row)):

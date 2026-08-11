@@ -3618,6 +3618,12 @@ def _restatement_report():
                 {"type": "table", "columns": ["Skenaario", "Omistaja-arvo"],
                  "rows": [["Pessimistinen", 13687], ["Konservatiivinen", 78869],
                           ["Optimistinen", 89009]]},
+                {"type": "paragraph", "text":
+                    "Odotusarvo on 25 % \u00d7 13 687 tEUR + 50 % \u00d7 78 869 tEUR "
+                    "+ 25 % \u00d7 89 009 tEUR = 65 109 tEUR."},
+                {"type": "table", "columns": ["Er\u00e4", "Arvo"],
+                 "rows": [["Optimistinen liikevaihto vuonna 2029", "250 000 tEUR"],
+                          ["Optimistinen omistaja-arvo", "89 009 tEUR"]]},
             ]},
         ],
     }
@@ -3635,6 +3641,11 @@ def test_restated_expected_value_and_range_are_corrected_to_the_canonical_figure
     assert "13 687–81 317" in text and "89 009" not in text
     # the scenario table row is corrected from machine_readable too
     assert "81 317" in text
+    # the whole weighted-sum sentence is rebuilt, not patched term by term
+    assert "25 % \u00d7 13 687 tEUR + 50 % \u00d7 78 869 tEUR + 25 % \u00d7 81 317 tEUR = 63 186 tEUR" in text
+    # a name-plus-label row is corrected; an unrelated same-prefix row is not
+    assert "Optimistinen omistaja-arvo 81 317" in text
+    assert "250 000" in text
     # a same-magnitude figure that is NOT a restatement is left alone
     assert "Liikevaihto oli 65 109 tEUR" in text
 
