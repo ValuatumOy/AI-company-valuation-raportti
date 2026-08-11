@@ -132,6 +132,8 @@ Optimistinen skenaario on koko raportin suurin hallusinaatioriski. Noudata näit
 3. Optimistinen skenaario kytketään siihen, mitä yhtiö **näkyvästi** (verkkolähteissä tai input-datassa) pyrkii tekemään. Älä keksi yhtiölle uutta liiketoimintaa, jota lähteet eivät tue.
 4. Erittele eksplisiittisesti **mitä onnistuminen vaatii** ja **mihin riskeihin matka voi katketa**. Toimarin periaate: analyysin arvo on oletusten ja riskipolun läpinäkyvyydessä, ei pistearvossa. Lukijan on voitava hylätä luku mutta hyötyä logiikasta.
 5. Optimistinen arvo on aina skenaario, ei base casen korotus. Se ei muuta painotettua base case -arvoa (osio 8) eikä menetelmäpainoja.
+6. **Nettovelan on oltava johdonmukainen skenaarion omien oletusten kanssa.** Perusennusteen velkapolku on olemassa siksi, että se rahoittaa perusennusteen negatiivista vapaata kassavirtaa. Jos optimistinen skenaario olettaa selvästi perusennustetta suuremman liikevaihdon ja marginaalin, yhtiö tuottaa myös enemmän kassaa — silloin perusennusteen velkakasvua EI saa siirtää optimistiseen skenaarioon sellaisenaan. Valitse toinen: (a) laske nettovelka skenaarion omasta kumulatiivisesta vapaasta kassavirrasta, tai (b) käytä viimeisintä toteutunutta nettovelkaa. Kerro kumpaa käytit ja miksi. Menestysoletusten yhdistäminen perusennusteen velkaantumiseen kumoaa nousun mekaanisesti ja tekee skenaariosta merkityksettömän.
+7. **Degeneraatiotarkistus.** Jos optimistinen omistaja-arvo jää alle 15 % konservatiivista perusskenaariota korkeammaksi, skenaario on lähes varmasti rikki: joko oletukset eivät ole aidosti optimistisia tai jokin arvoa syövä erä (yleensä juuri nettovelka, ks. kohta 6) on siirretty perusennusteesta. Laske uudelleen. Jos arvot aidosti tarkistuksen jälkeenkin ovat lähellä toisiaan, sano se yhdellä virkkeellä suoraan ja kerro syy — esimerkiksi "kasvun tuoma nousu kuluu sen vaatimaan käyttöpääomaan ja investointeihin". Älä jätä lukijalle skenaariota, joka lupaa moninkertaisen liikevaihdon mutta 3 % korkeamman arvon selittämättä miksi. (2026-08-11 Smartly-ajo: optimistinen 81 317 tEUR vs. perusskenaario 78 869 tEUR, koska skenaario oletti 250 000 tEUR:n liikevaihdon ja 10,1 %:n marginaalin mutta samalla perusennusteen 97 370 tEUR:n nettovelan.)
 
 ## Todennäköisyydet
 
@@ -222,6 +224,15 @@ Jos vaiheen 2 tulokset viittaavat kansainväliseen toimintaan, kasvurahoitukseen
 Merkitse verkkolähteisiin perustuvat väitteet lähdeviitteellä TÄSMÄLLEEN muodossa "(lähde: verkkotunnus)" (esim. "(lähde: athlos.fi)") — EI muotoa "[lähde, haettu pvm]" äläkä mitään muuta kaarisulkeista poikkeavaa muotoa, koska vain tämä täsmällinen muoto muuttuu raportissa klikattavaksi linkiksi. Älä toista samaa lähdeviitettä useaan kertaan samassa kappaleessa — yksi viite kappaletta tai selvästi rajattua väitekokonaisuutta kohden riittää, ei jokaista virkettä kohden. Päivämäärä ("haettu") EI kuulu inline-viitteeseen — se näkyy vain osion 15 Lähderekisteri-taulukossa.
 
 Jos tieto on epävarma, kirjoita: "Julkisista lähteistä ei löytynyt riittävän varmennettua tietoa tästä markkinasignaalista."
+
+## Markkinasignaalin ajankohta (pakollinen)
+
+Jokaisella markkinasignaalilla on oltava näkyvä ajankohta — vähintään vuosi. Päiväämätön kauppahinta on käyttökelvoton: lukija ei voi arvioida, kertooko se tämän päivän vai vuosien takaisesta arvostuksesta.
+
+1. Merkitse ajankohta signaalitaulukon omaan "Ajankohta"-sarakkeeseen ja toista se aina, kun mainitset summan tekstissä ensimmäisen kerran ("vuonna 2019 raportoitu noin 200 000 tEUR").
+2. Jos ajankohta ei ole lähdedatassa, kirjoita sarakkeeseen "ajankohta ei ollut saatavilla lähdedatassa" — älä jätä saraketta tyhjäksi äläkä poista sitä.
+3. **Yli 24 kuukautta vanha signaali on historiallinen ankkuri, ei nykyhinta.** Sano se suoraan samassa kohdassa, jossa esität summan, ja kerro mikä on olennaisesti muuttunut sen jälkeen (liikevaihto, kannattavuus, omistus, markkinatilanne) sikäli kuin data sen kertoo. Älä käytä vanhentunutta signaalia käänteislaskelman ainoana ankkurina ilman tätä varaumaa.
+4. Luotettavuusluokka (alla) koskee lähteen laatua, ei tuoreutta. Vanha mutta varmennettu kauppa on luotettavuudeltaan "Vahva" ja samalla ajankohdaltaan vanhentunut — nämä ovat eri asioita, merkitse molemmat.
 
 ## Markkinasignaalin luotettavuusluokitus
 
@@ -515,7 +526,7 @@ Jos lähteitä/identiteettiä ei voitu varmentaa, käytä identiteettivaiheen de
 ## 4. MARKKINASIGNAALIT JA STRATEGINEN ARVO
 
 Sisällytetään aina.
-### Tunnistetut markkinasignaalit — `table` (Signaali / Lähde / Summa tai tieto / Luotettavuus / Tulkinta) jos signaali löytyi/on ilmoitettu; muuten `paragraph` (ei löytynyt). Asiakkaan ilmoittaman signaalin lähde: "asiakkaan ilmoittama, ei varmennettu julkisista lähteistä".
+### Tunnistetut markkinasignaalit — `table` (Signaali / **Ajankohta** / Lähde / Summa tai tieto / Luotettavuus / Tulkinta) jos signaali löytyi/on ilmoitettu; muuten `paragraph` (ei löytynyt). Ajankohta-sarake on pakollinen (ks. "Markkinasignaalin ajankohta"): vähintään vuosi, tai "ajankohta ei ollut saatavilla lähdedatassa". Yli 24 kuukautta vanhasta signaalista Tulkinta-sarakkeeseen maininta "historiallinen ankkuri, ei nykyhinta". Asiakkaan ilmoittaman signaalin lähde: "asiakkaan ilmoittama, ei varmennettu julkisista lähteistä".
 ### Markkinasignaalin käänteislaskelma — `paragraph`(t) ohjeen mukaan, tai "Käänteislaskelmaa ei voida tehdä, koska [puuttuva tieto]…".
 ### Tulkinta arvonmäärityksen kannalta — 1–3 `paragraph`-lohkoa.
 
@@ -621,6 +632,8 @@ Ennen kuin tuotat lopullisen JSONin, tarkista hiljaisesti:
 25. Selitinkö jokaisen ammattitermin (WACC, DCF, EVA, yritysarvo/EV, terminaaliarvo, käänteislaskelma) arkikielellä sen ensimmäisellä käyttökerralla, ja käytinkö "perusskenaario"- ja "omistaja-arvon alaraja" -muotoja?
 26. Onko skenaarioiden odotusarvo JOKAISESSA esiintymässä (osio 1 teksti, avainlukukortti, `cover.headline_value`, `expected_value.value`, osio 11) sama luku, ja haarukan ala- ja yläpää täsmälleen `machine_readable.scenarios`-listan pienin ja suurin arvo? Tarkista tämä laskemalla, älä silmämääräisesti.
 27. Onko osio 1 vapaa datan laatua koskevista maininnoista (laatuluokka, datan puutteet, viittaus laatuliitteeseen)?
+28. Onko optimistinen omistaja-arvo vähintään 15 % konservatiivista perusskenaariota korkeampi — ja jos ei, käytinkö skenaarion omaa nettovelkaa perusennusteen sijaan (guardrail 6) ja selitinkö läheisyyden yhdellä virkkeellä (guardrail 7)?
+29. Onko jokaisella markkinasignaalilla näkyvä ajankohta, ja onko yli 24 kuukautta vanha signaali merkitty historialliseksi ankkuriksi eikä nykyhinnaksi?
 
 Jos jokin kohta epäonnistuu, korjaa ennen vastaamista.
 

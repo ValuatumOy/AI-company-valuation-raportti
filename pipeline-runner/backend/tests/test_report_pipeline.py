@@ -3668,3 +3668,20 @@ def test_qa_flags_a_scenario_value_that_contradicts_machine_readable():
     from app import report_qa
     w = report_qa.warnings(_restatement_report())
     assert any("Optimistinen" in x and "89009" in x.replace(" ", "") for x in w), w
+
+
+def test_qa_flags_an_optimistic_scenario_that_barely_beats_the_base_case():
+    # 2026-08-11 Smartly run: optimistic 81 317 vs base 78 869 (+3 %), because
+    # the scenario assumed 250 M€ revenue and a 10,1 % margin but carried the
+    # BASE forecast's 97 370 tEUR net debt, which cancelled the upside.
+    from app import report_qa
+    rep = _restatement_report()
+    w = report_qa.warnings(rep)
+    assert any("optimistinen skenaario" in x and "nettovelka" in x for x in w), w
+    # a genuinely optimistic scenario is not flagged
+    rep["machine_readable"]["scenarios"][2]["value_teur"] = 180000
+    assert not any("optimistinen skenaario" in x
+                   for x in report_qa.warnings(rep))
+    # an optimistic scenario BELOW the base case is always wrong
+    rep["machine_readable"]["scenarios"][2]["value_teur"] = 50000
+    assert any("MATALAMPI" in x for x in report_qa.warnings(rep))

@@ -260,6 +260,41 @@ def _restated_derived_figures(rep):
     return list(dict.fromkeys(out))
 
 
+def _degenerate_optimistic_scenario(rep):
+    """An optimistic scenario worth barely more than the base case is broken.
+
+    2026-08-11 Smartly run: optimistic 81 317 vs a 78 869 base — 3 % apart —
+    because the scenario paired 250 M€ revenue and a 10,1 % EBIT margin with
+    the BASE forecast's 97 370 tEUR net debt, which exists only to fund the
+    base case's negative free cash flow. Success-case operations plus
+    base-case leverage cancel the upside mechanically. Prompt guardrails 6-7
+    tell the model to use the scenario's own net debt; this is how a
+    regression stays visible.
+    """
+    mr = (rep or {}).get("machine_readable") or {}
+    sc = mr.get("scenarios")
+    if not (isinstance(sc, list) and sc):
+        return []
+    by_name = {}
+    for s in sc:
+        if isinstance(s, dict):
+            v = _scenario_value(s)
+            if v is not None:
+                by_name[str(s.get("name") or "").strip().lower()] = v
+    opt = next((v for n, v in by_name.items() if n.startswith("optimis")), None)
+    base = next((v for n, v in by_name.items() if n.startswith("konservat")), None)
+    if opt is None or base is None or base <= 0:
+        return []
+    if opt < base:
+        return [f"optimistinen skenaario {opt:.0f} on konservatiivista "
+                f"perusskenaariota {base:.0f} MATALAMPI"]
+    if opt < base * 1.15:
+        return [f"optimistinen skenaario {opt:.0f} on vain "
+                f"{100 * (opt / base - 1):.1f} % perusskenaariota {base:.0f} korkeampi "
+                f"— tarkista, siirtyikö perusennusteen nettovelka skenaarioon"]
+    return []
+
+
 def warnings(rep):
     """Non-blocking QA warnings over the assembled report. Never raises."""
     try:
@@ -267,6 +302,7 @@ def warnings(rep):
                 + _sensitivity_calibration(rep)
                 + _scenario_and_anchor_consistency(rep)
                 + _restated_derived_figures(rep)
+                + _degenerate_optimistic_scenario(rep)
                 + _prose_number_reconciliation(rep))
     except Exception as e:  # QA must never break report delivery
         return [f"report_qa-tarkistus epäonnistui: {e}"]
