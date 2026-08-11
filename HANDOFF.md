@@ -28,6 +28,12 @@ the appendices, less jargon. All shipped; nothing verified with a paid run yet
   `pipeline-runner/backend/prompts/singlewriter.txt` is canonical.
 - Renderer verified free of charge: 272/272 tests pass (golden PDF included)
   and an existing prod run's `report.html` shows the new order + Sanasto.
+- **Peer comparison moved out of the appendix** (`1402ec5`). Toimialavertailu
+  was a `### ` subsection of section 15, so the peer table printed after the
+  disclaimers. It is now `### Verrokkivertailu ja toimialakonteksti` in
+  section 8, right after Arvostusväli; section 15 is told not to repeat it.
+  VERROKIT rules 6 and 10 and hard rule 38 repointed to section 8. Prompt-only
+  — the peer table is model-emitted, nothing in `render.py` touches `peers`.
 
 ## 2026-08-06 — the admin UI would not open: four causes, all fixed
 
