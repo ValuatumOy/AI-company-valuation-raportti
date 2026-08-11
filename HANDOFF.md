@@ -25,15 +25,20 @@
 
 Tests 272 → 276. All three verified live on run `1df13023…`.
 
-### Open product findings from reading the Smartly output (not fixed)
+### Product findings from reading the Smartly output — both fixed (`e1a181d`)
 
-- **The optimistic scenario is structurally broken.** 81,3 M€ vs an 78,9 M€
-  base — 3 % apart. It assumes 250 M€ revenue and 10,1 % EBIT in 2029 but also
-  97,4 M€ net debt, which cancels the upside. A success scenario must not land
-  within 3 % of the base case.
-- **Market signals are undated.** The Providence deal is from 2019; the signal
-  table shows "noin 200 000 tEUR" with no year, in a report dated 2026. The
-  prompt already requires dating — it did not happen.
+- **The optimistic scenario collapsed into the base case.** 81,3 M€ vs 78,9 M€
+  — 3 % apart — because it assumed 250 M€ revenue and 10,1 % EBIT in 2029 while
+  carrying the BASE forecast's 97,4 M€ net debt (which exists only to fund the
+  base case's negative FCF). Optimistic guardrail 6 now requires the scenario's
+  net debt to follow from its own cash flow or the latest actual; guardrail 7
+  adds a <+15 % degeneracy check. `report_qa._degenerate_optimistic_scenario`
+  flags it either way, including optimistic-below-base.
+- **Market signals were undated.** Signal table gains a mandatory Ajankohta
+  column; a signal older than 24 months must be labelled a historical anchor,
+  not a current price; reliability (source quality) is explicitly separated
+  from recency. Final checks 28–29 cover both. Prompt-only — needs a run to
+  verify.
 - **Why the Smartly value looks low** (asked by the CEO): our EV is 108,5 M€
   (equity 78,9 after 29,6 net debt) = 0,75× revenue, against an external
   2,5–3,0× view. Cause is the forecast, not the method: Valuatum's
