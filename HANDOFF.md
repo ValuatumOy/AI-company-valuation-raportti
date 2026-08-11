@@ -28,6 +28,15 @@ the appendices, less jargon. All shipped; nothing verified with a paid run yet
   `pipeline-runner/backend/prompts/singlewriter.txt` is canonical.
 - Renderer verified free of charge: 272/272 tests pass (golden PDF included)
   and an existing prod run's `report.html` shows the new order + Sanasto.
+- **Cover v4 + part structure** (`59bcec7`, from the Asiakastieto comparison
+  `asiakastieto-vertailu-2026-08-11.md`; CEO decision: expected value leads).
+  Cover method line built from the run's accepted methods (the hardcoded
+  "DCF ja EVA" grid claimed a method Heeros weighted 0 %); company name is
+  the cover title; summary metric cards scale to the cover unit via
+  `_report_scale_ctx` and lead with the expected value (prompt §1 updated);
+  Perustiedot block from `meta` above the ToC; two part dividers ("Tausta ja
+  liiketoiminta", "Arvonmääritys" — the latter carries a static value-flow
+  diagram). Golden PDF page count now n_sections + 6.
 - **Peer comparison moved out of the appendix** (`1402ec5`). Toimialavertailu
   was a `### ` subsection of section 15, so the peer table printed after the
   disclaimers. It is now `### Verrokkivertailu ja toimialakonteksti` in
