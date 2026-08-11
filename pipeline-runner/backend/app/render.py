@@ -1566,6 +1566,8 @@ def _toc(report, sections):
         f'<a class="toc-row" href="#sec-{i}"><span class="tn">{i}</span>'
         f'<span class="tt">{_esc(_title_case(s.get("title")))}</span></a>'
         for i, s in enumerate(sections, start=1))
+    rows += ('<a class="toc-row" href="#sec-glossary"><span class="tn">·</span>'
+             '<span class="tt">SANASTO</span></a>')
     return (
         '<section class="page">'
         f'{_header(report)}'
@@ -1642,6 +1644,70 @@ def _section(report, sec, derived=None, display_no=None):
         f'<div class="sh-t"><h2>{_esc(_title_case(sec.get("title")))}</h2></div></div>'
         '<div class="sec-rule"></div>'
         f'{blocks}</div>{_footer()}</section>'
+    )
+
+
+# Plain-Finnish glossary, rendered as a static appendix page. Deterministic
+# renderer content (not model output) so it costs nothing and never varies.
+_GLOSSARY = [
+    ("DCF eli diskontattu kassavirta",
+     "Menetelmä, jossa yhtiön ennustetut tulevat kassavirrat muunnetaan "
+     "nykyarvoon. Mitä kauempana tulevaisuudessa ja mitä epävarmempi "
+     "kassavirta on, sitä vähemmän se painaa arvossa."),
+    ("WACC eli pääoman tuottovaatimus",
+     "Korko, jolla tulevat kassavirrat diskontataan nykyhetkeen. Kuvaa "
+     "tuottoa, jonka sijoittaja vaatii yhtiön riskitasolla — korkeampi "
+     "tuottovaatimus tarkoittaa matalampaa arvoa."),
+    ("EVA eli lisäarvomenetelmä",
+     "Arvottaa yhtiön sen mukaan, kuinka paljon tulos ylittää tai alittaa "
+     "pääoman kustannuksen. Perustuu samaan ennusteeseen kuin DCF, joten "
+     "menetelmät eivät ole toisistaan riippumattomia."),
+    ("Yritysarvo (EV)",
+     "Koko liiketoiminnan arvo ennen rahoitusrakennetta. Omistajien osuus "
+     "saadaan, kun yritysarvosta vähennetään korolliset velat ja lisätään "
+     "kassavarat."),
+    ("Oman pääoman arvo eli omistaja-arvo",
+     "Osakkeenomistajille kuuluva osuus yhtiön arvosta — luku, jota tämä "
+     "raportti ensisijaisesti arvioi."),
+    ("Perusskenaario (base case)",
+     "Toteutuneisiin lukuihin ja toimitettuun ennusteeseen perustuva "
+     "laskelma ilman optimistisia tai pessimistisiä lisäoletuksia."),
+    ("Odotusarvo",
+     "Skenaarioiden todennäköisyyksillä painotettu keskiarvo. "
+     "Todennäköisyydet ovat muokattavia oletuksia, eivät ennuste."),
+    ("Omistaja-arvon alaraja",
+     "Osakeyhtiön omistajan vastuu on rajattu, joten omistaja-arvo ei voi "
+     "olla alle 0 tEUR, vaikka laskelma antaisi negatiivisen luvun."),
+    ("Terminaaliarvo",
+     "Ennustejakson jälkeisten vuosien yhteenlaskettu arvo yhtenä lukuna. "
+     "Muodostaa usein suuren osan DCF-arvosta."),
+    ("Arvostuskertoimet ja verrokit",
+     "Vertailukelpoisten yhtiöiden hinnoittelu (esim. EV/liikevaihto), jota "
+     "käytetään ristiintarkistuksena omalle laskelmalle."),
+    ("Käänteislaskelma",
+     "Laskelma siitä, millaista tulevaa kassavirtaa esimerkiksi "
+     "rahoituskierroksen valuaatio edellyttäisi ollakseen perusteltu."),
+    ("Luottamustaso",
+     "Raportin oma arvio siitä, kuinka vankalla pohjalla arvio on — "
+     "määräytyy datan kattavuudesta ja menetelmien yhtenäisyydestä."),
+]
+
+
+def _glossary_page(report):
+    items = "".join(
+        f'<div style="break-inside:avoid"><h4 class="blk">{_esc(term)}</h4>'
+        f'<p style="margin-top:2px">{_esc(text)}</p></div>'
+        for term, text in _GLOSSARY)
+    return (
+        '<section class="page" id="sec-glossary">'
+        f'{_header(report)}'
+        '<div class="pbody">'
+        '<div class="sec-head"><span class="sec-num" style="background:var(--green);color:#fff">·</span>'
+        '<div class="sh-t"><h2>Sanasto</h2>'
+        '<div class="sh-sub">Raportissa käytetyt keskeiset termit arkikielellä</div></div></div>'
+        '<div class="sec-rule"></div>'
+        f'<div class="two-col" style="row-gap:10px">{items}</div>'
+        f'</div>{_footer()}</section>'
     )
 
 
@@ -1819,16 +1885,23 @@ def render_html(report):
     # Insert one "Liitteet" divider right before the first appendix section
     # (source register / methodology / full forecast detail) so the main body
     # stays a coherent read and the appendix is clearly marked as such.
+    # Page order: cover → section 1 (summary) → ToC → rest of the body →
+    # appendix. The buyer sees the valuation and its grounds before any
+    # navigation page (2026-08-11 restructure). Glossary is a static
+    # renderer page appended as the last appendix item.
     section_html_parts = []
     divider_shown = False
+    toc_at = 0
     for i, s in enumerate(sections, start=1):
         if not divider_shown and str(s.get("id")) in APPENDIX_SECTION_IDS:
             section_html_parts.append(_appendix_divider(report))
             divider_shown = True
         section_html_parts.append(_section(report, s, derived, display_no=i))
-    body = (_cover(report, derived)
-            + _toc(report, sections)
-            + "".join(section_html_parts))
+        if i == 1:
+            toc_at = len(section_html_parts)
+    section_html_parts.append(_glossary_page(report))
+    section_html_parts.insert(toc_at, _toc(report, sections))
+    body = _cover(report, derived) + "".join(section_html_parts)
     meta = report.get("meta") or {}
     title = _esc(meta.get("company_name") or "AI-Arvonmääritysraportti")
     # 2026-07 brand refresh: display face is Georgia; Gelasio (metric-compatible)

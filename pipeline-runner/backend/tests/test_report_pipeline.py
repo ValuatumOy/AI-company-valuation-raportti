@@ -151,7 +151,7 @@ def test_toc_and_section_numbering_has_no_gap():
            "sections": [{"id": sid, "title": f"T{sid}", "blocks": []} for sid in SECTION_ORDER]}
     html = render.render_html(rep)
     text = render._norm_ws(render._strip_tags(html))
-    assert "7 T8" in text  # id "8" is the 7th real section — no jump to "8 T8"
+    assert "6 T8" in text  # id "8" is the 6th real section (id 2 renders in the appendix)
     assert "8 T8" not in text
 
 
@@ -171,9 +171,9 @@ def test_appendix_divider_appears_once_before_appendix_sections():
 
 
 def test_section_refs_remapped_from_internal_id_to_display_number():
-    # The LLM writes cross-refs in internal-id space; SECTION_ORDER skips id 7,
-    # so id 9 (DCF) must render as "osio 8", id 17 (liite) as "osio 16", while
-    # ids 1-6 are unchanged. Rendering (_inline) then turns each ref into a
+    # The LLM writes cross-refs in internal-id space; SECTION_ORDER skips id 7
+    # and defers id 2 to the appendix, so id 9 (DCF) must render as "osio 7",
+    # id 17 (liite) as "osio 16", and id 5 as "osio 4". Rendering (_inline) then turns each ref into a
     # clickable #sec-N deep link — a reader hitting a restated figure should be
     # able to jump straight back to where it was first derived (Esa's "mistä
     # tuo 256 tEUR tuli?" complaint, 2026-07-10).
@@ -185,11 +185,11 @@ def test_section_refs_remapped_from_internal_id_to_display_number():
     ]
     render._resolve_section_refs(sections)
     assert render._inline(sections[0]["blocks"][0]["text"]) == (
-        'DCF-erittely <a href="#sec-8" class="secref">osiossa 8</a> ja liite '
+        'DCF-erittely <a href="#sec-7" class="secref">osiossa 7</a> ja liite '
         '<a href="#sec-16" class="secref">osiossa 16</a>.'
     )
     assert render._inline(sections[0]["blocks"][1]["text"]) == (
-        'Historia esitetään <a href="#sec-5" class="secref">osiossa 5</a>.'
+        'Historia esitetään <a href="#sec-4" class="secref">osiossa 4</a>.'
     )
 
 
@@ -208,7 +208,7 @@ def test_assembler_orders_sections_without_section_7():
     ]}
     rep = assemble.assemble(run)
     ids = [s["id"] for s in rep["sections"]]
-    assert ids == ["1", "2", "3", "4", "5", "6", "8", "9", "10", "11", "12", "13", "14", "15", "16"]
+    assert ids == ["1", "3", "4", "5", "6", "8", "9", "10", "11", "12", "13", "14", "2", "15", "16"]
     assert "7" not in ids
     assert rep["report_type"] == "ai_valuation_report"
 
@@ -2903,9 +2903,9 @@ def test_golden_pdf_has_no_blank_pages(tmp_path):
     render.render_pdf(rep, out)
     n_sections = len(render._ensure_disclaimer(render._ordered_sections(rep)))
     # cover + TOC + appendix divider (section 16's disclaimer is always
-    # ensured, so the divider always fires) + one page per section — and
-    # crucially NO trailing blank pages.
-    assert _pdf_page_count(out) == n_sections + 3
+    # ensured, so the divider always fires) + static glossary page + one page
+    # per section — and crucially NO trailing blank pages.
+    assert _pdf_page_count(out) == n_sections + 4
 
 
 def test_blank_prompt_stage_is_skipped(monkeypatch):

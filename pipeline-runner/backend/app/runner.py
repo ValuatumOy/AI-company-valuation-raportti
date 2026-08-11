@@ -48,15 +48,19 @@ def _correction_model(stage):
 
 
 # Canonical report section order. Section 7 is intentionally absent.
+# Section 2 (data quality) renders in the appendix: it is pure caveat
+# material, and the buyer-facing opening pages must lead with the valuation
+# itself (2026-08-11 restructure). Its internal id stays "2" so the prompt
+# and cross-references never change.
 SECTION_ORDER = [
-    "1", "2", "3", "4", "5", "6", "8", "9", "10", "11", "12", "13", "14",
-    "15", "16", "17",
+    "1", "3", "4", "5", "6", "8", "9", "10", "11", "12", "13", "14",
+    "2", "15", "16", "17",
 ]
 
-# Sections rendered after the "Liitteet" (appendix) divider — the full
-# forecast detail, source register, and methodology/disclaimer, kept out of
-# the main body so it stays a coherent read.
-APPENDIX_SECTION_IDS = {"15", "16", "17"}
+# Sections rendered after the "Liitteet" (appendix) divider — data quality,
+# the full forecast detail, source register, and methodology/disclaimer,
+# kept out of the main body so it stays a coherent read.
+APPENDIX_SECTION_IDS = {"2", "15", "16", "17"}
 
 # Well-known context keys by stage order (slugified name is also added).
 WELL_KNOWN = {

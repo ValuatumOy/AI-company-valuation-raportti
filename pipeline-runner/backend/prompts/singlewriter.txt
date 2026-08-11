@@ -303,6 +303,12 @@ Käytä tällaista tyyliä:
 * ymmärrettävää suomea
 * ei konsulttijargonia, ei markkinointikieltä, ei tyhjiä superlatiiveja
 
+Termien selittäminen (raportin ostaja ei ole rahoitusammattilainen):
+
+* Kun käytät ammattitermiä ENSIMMÄISEN kerran raportissa, selitä se samassa virkkeessä lyhyesti arkikielellä. Koskee vähintään näitä: WACC ("WACC eli pääoman tuottovaatimus"), DCF ("DCF eli diskontattu kassavirta"), EVA ("EVA eli lisäarvomenetelmä"), yritysarvo/EV ("koko liiketoiminnan arvo ennen velkojen vähentämistä"), terminaaliarvo ("ennustejakson jälkeisten vuosien arvo yhtenä lukuna"), käänteislaskelma, arvostuskerroin/multippeli. Myöhemmillä käyttökerroilla pelkkä termi riittää.
+* "Base case" -termin rinnalla käytä ensisijaisesti sanaa "perusskenaario". Omistaja-arvon lattiasta käytä muotoa "omistaja-arvon alaraja" — ei "floor" tai "floori".
+* Raporttiin lisätään automaattisesti sanasto-liite, jossa keskeiset termit selitetään — ÄLÄ tuota omaa sanasto-osiota.
+
 Hyviä lauserakenteita:
 
 * "Tämä on sanottava suoraan: …"
@@ -456,7 +462,7 @@ Kaikki analyysiohjeet, säännöt, kynnysarvot ja pakolliset lauseet pätevät s
 
 ### Yhteenveto
 
-3–5 `paragraph`-lohkoa. Sisällytä: painotettu arvo tai suora toteamus miksi arvoa ei voida määrittää; odotusarvo ja skenaariohaarukka + valittu todennäköisyysprofiili; arvostusväli tai menetelmien hajonta; luottamustaso + määräävä sääntö; tärkein arvoa kantava oletus; tärkeimmät arvoa tukevat ja rasittavat tekijät; suora lause siitä mikä tekisi arviosta liian korkean/matalan; mahdollinen markkinasignaali ja sen suhde base caseen.
+3–5 `paragraph`-lohkoa. Sisällytä: painotettu arvo tai suora toteamus miksi arvoa ei voida määrittää; odotusarvo ja skenaariohaarukka + valittu todennäköisyysprofiili; arvostusväli tai menetelmien hajonta; luottamustaso + määräävä sääntö sekä datan laatuluokka yhdellä virkkeellä muodossa "Datan laatu: [luokka], luottamustaso: [taso] — perustelut ja rajoitteet liitteissä (osio 2)"; tärkein arvoa kantava oletus; tärkeimmät arvoa tukevat ja rasittavat tekijät; suora lause siitä mikä tekisi arviosta liian korkean/matalan; mahdollinen markkinasignaali ja sen suhde perusskenaarioon. Osio 2 (datan laatu) esitetään raportissa liitteenä — tiivistelmän on siksi kannettava tämä yksi laaturivi itse.
 
 Jos kaikki menetelmät ovat negatiivisia, käytä `paragraph`-lohkossa täsmälleen: "Tämä on sanottava suoraan: toimitettu ennustepolku ei tue positiivista omistaja-arvoa. [Menetelmä] antaa laskennalliseksi base case -arvoksi [arvo] ennen omistaja-arvon lattiaa. Tätä ei pidä lukea osakekannan käyväksi arvoksi, vaan mallin tuottamaksi alijäämäksi: annetulla ennusteella kassavirrat eivät kata velkoja ja pääoman kustannusta. Osakkeenomistajan vastuu on kuitenkin rajattu, joten omistaja-arvon alaraja on 0 tEUR. Mahdollinen positiivinen arvo olisi optio- tai strategista arvoa ja edellyttäisi käännettä, rahoitusjärjestelyä, synergioita tai ostajan omaa näkemystä."
 
@@ -476,6 +482,8 @@ Jos markkinasignaali löytyy/on ilmoitettu, jatka `paragraph`-lohkolla: "Tätä 
 
 ## 2. DATAN LAATU JA KÄYTETYT LÄHTEET
 
+Tämä osio esitetään valmiissa raportissa liitteenä (raportin lopussa). Kirjoita se silti täydellisenä tähän kohtaan id:llä "2" — sijoittelu tapahtuu automaattisesti. Älä viittaa tästä osiosta "seuraaviin osioihin" tai "edelliseen osioon".
+
 `paragraph`: "Datan laatuluokka: [Heikko / Kohtalainen / Hyvä]." Määritä luokka näin:
 * Hyvä: vähintään 4–5 yhtenäistä tilikautta, tulos ja tase kattavasti, ennusteet tai valuaatiomoottorin output, ei olennaisia puuttuvia ydintietoja eikä sisäisiä ristiriitoja.
 * Kohtalainen: riittävästi tulos- ja tasetietoja trendianalyysiin, mutta puutteita (kassavirta, toimialavertailu, ennusteet, omistajapalkat, markkinasignaalien ehdot, konsernitaso) tai sisäisiä ristiriitoja.
@@ -489,7 +497,7 @@ Jos markkinasignaali löytyy/on ilmoitettu, jatka `paragraph`-lohkolla: "Tätä 
 
 ## 3. YHTIÖN LIIKETOIMINTAPROFIILI
 
-`paragraph` (kursiivi `*…*`): "Tämä osio yhdistää tilinpäätösanalyysin käytettävissä oleviin liiketoimintatietoihin. Ulkoisista lähteistä peräisin olevat tiedot kuvaavat yhtiön omaa tai kolmannen osapuolen julkaisemaa tietoa, eivät tilintarkastettua dataa."
+`paragraph` (kursiivi `*…*`): "Ulkoisista lähteistä peräisin olevat tiedot ovat yhtiön tai kolmannen osapuolen julkaisemia, eivät tilintarkastettuja. Datan rajoitteet on kuvattu liitteissä."
 
 Jos lähteitä/identiteettiä ei voitu varmentaa, käytä identiteettivaiheen degradaatiolausetta.
 
@@ -605,6 +613,7 @@ Ennen kuin tuotat lopullisen JSONin, tarkista hiljaisesti:
 22. Onko vastaus yksi validi JSON-objekti OUTPUT-skeeman mukaan, ilman tekstiä tai koodiaitoja, alkaen `{` ja päättyen `}`?
 23. Sisältääkö jokainen `sections`-objekti `blocks`-listan, ja ovatko kuvaajat/taulukot lohkoina osioiden sisällä?
 24. Onko jokainen lohkotyyppi sallittu (`heading`, `paragraph`, `callout`, `metric_cards`, `key_value`, `table`, `chart`), eikä tuntemattomia tyyppejä ole?
+25. Selitinkö jokaisen ammattitermin (WACC, DCF, EVA, yritysarvo/EV, terminaaliarvo, käänteislaskelma) arkikielellä sen ensimmäisellä käyttökerralla, ja käytinkö "perusskenaario"- ja "omistaja-arvon alaraja" -muotoja?
 
 Jos jokin kohta epäonnistuu, korjaa ennen vastaamista.
 
