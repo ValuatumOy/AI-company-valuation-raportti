@@ -1,5 +1,28 @@
 # Handoff — 2026-08-11 (read this first)
 
+## 2026-08-11 — Smartly run: all five prompt changes verified live, two model slips found
+
+Run `1df13023…`, Smartly.io Holding Oy KONSERNI (fid 274135, picked over the
+three other Smartly fids because it alone had full 2017–2025 actuals), $1,10.
+All five pending prompt changes verified in the output: expected-value card
+first · first-use glossing (WACC eli…, DCF eli…), "perusskenaario" ×10,
+"omistaja-arvon alaraja" · §1 quality line with liite pointer · peer table in
+§8 (Verrokkivertailu ja toimialakonteksti, 7 peers — enrichment min-5 rule
+delivered) with §15 holding only the source register · mediaani allowed since
+n=7≥3. Option floor untested (base case positive).
+
+Two model-consistency slips in this run (renderer/prompt fine, model wrong):
+- §1 states odotusarvo 65 109 tEUR / card 65,1 M€; correct is 63 186
+  (25%×13 687 + 50%×78 869 + 25%×81 317 — cover and `expected_value` agree).
+- §1 and cover secondary_lines say haarukka upper end 89 009; the optimistic
+  scenario is 81 317 (`machine_readable.scenarios`).
+Both are restated-figure drift (final-check rule 21/14 territory). Candidate
+hardening: report_qa cross-check of §1 restatements against
+`expected_value`/`machine_readable`, or renderer-side overwrite of the §1
+odotusarvo card from `expected_value.value`.
+Also: "noin 200 000 tEUR" market-signal card doesn't scale to M€ (the "noin"
+prefix defeats `_TEUR_RANGE_RE`/`_PURE_TEUR_RE`) — cosmetic.
+
 ## 2026-08-11 — buyer-first restructure: summary first, caveats to the appendix, glossary (`78328ba`)
 
 CEO ask: first pages must carry what the buyer wants to know, disclaimers to
