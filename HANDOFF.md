@@ -1,4 +1,33 @@
-# Handoff — 2026-08-06 (read this first)
+# Handoff — 2026-08-11 (read this first)
+
+## 2026-08-11 — buyer-first restructure: summary first, caveats to the appendix, glossary (`78328ba`)
+
+CEO ask: first pages must carry what the buyer wants to know, disclaimers to
+the appendices, less jargon. All shipped; nothing verified with a paid run yet
+— the user decides separately whether to run one.
+
+- **Section 2 (data quality) renders in the appendix.** `runner.py`:
+  `SECTION_ORDER` moved `"2"` between `"14"` and `"15"`,
+  `APPENDIX_SECTION_IDS` now `{"2","15","16","17"}`. The internal id stays
+  `"2"` so the prompt and `osio N` cross-refs never change — display numbers
+  renumber automatically (DCF id 9 now prints as osio 7).
+- **Page order** (`render.py render_html`): cover → section 1 (summary) → ToC
+  → body → Liitteet divider → 2, 15, 16, 17 → static Sanasto page. The ToC
+  gained a Sanasto row (`#sec-glossary`).
+- **Static glossary** (`_GLOSSARY` + `_glossary_page` in `render.py`): 12
+  plain-Finnish term explanations, deterministic renderer content, zero model
+  cost. Golden-PDF page count is now `n_sections + 4`.
+- **Prompt (`singlewriter.txt`)**: TYYLI gained explain-on-first-use for
+  WACC/DCF/EVA/EV/terminaaliarvo/käänteislaskelma, "perusskenaario" over
+  "base case", "omistaja-arvon alaraja" over "floor", and a note not to write
+  its own sanasto. §1 Yhteenveto must carry one line "Datan laatu: X,
+  luottamustaso: Y — perustelut liitteissä". §3's italic caveat shortened to a
+  pointer. Final-check item 25 added. Legal exact-texts untouched.
+- Prompt reseeded to prod via `POST /api/reseed` after the Railway deploy.
+- Root `prompts/valuatum-arvonmaaritys-prompti-v3.md` is a STALE copy —
+  `pipeline-runner/backend/prompts/singlewriter.txt` is canonical.
+- Renderer verified free of charge: 272/272 tests pass (golden PDF included)
+  and an existing prod run's `report.html` shows the new order + Sanasto.
 
 ## 2026-08-06 — the admin UI would not open: four causes, all fixed
 
