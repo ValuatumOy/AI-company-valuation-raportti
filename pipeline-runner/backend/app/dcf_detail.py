@@ -123,6 +123,32 @@ def _waterfall_steps(dcf, ev):
     return steps
 
 
+def value_flow_figures(input_data):
+    """EV / bridge delta / equity / WACC / forecast horizon for the plain-
+    language value-flow diagram (Osa 2 divider) — same source as the EV→equity
+    waterfall above, so the two can never show different numbers for the same
+    bridge."""
+    ve = (input_data or {}).get("valuation_engine") or {}
+    dcf = ve.get("dcf") or {}
+    wacc = ve.get("wacc_parameters") or {}
+    forecast = (input_data or {}).get("forecast") or {}
+    ev = _first_num(_get_list(dcf, "cumulative_discounted_fcff"))
+    equity = dcf.get("equity_value_before_floor")
+    out = {}
+    if _is_num(ev):
+        out["ev_teur"] = ev
+    if _is_num(equity):
+        out["equity_teur"] = equity
+    if _is_num(ev) and _is_num(equity):
+        out["bridge_delta_teur"] = equity - ev
+    if _is_num(wacc.get("wacc_pct")):
+        out["wacc_pct"] = wacc["wacc_pct"]
+    years = [y for y in (forecast.get("years") or []) if y]
+    if years:
+        out["forecast_years"] = f"{years[0]}–{years[-1]}"
+    return out or None
+
+
 def _last(xs):
     for x in reversed(xs or []):
         if x not in (None, ""):

@@ -308,6 +308,9 @@ def assemble(run):
     _inject_sensitivity_blocks(sections, outputs.get(0))
     _inject_headcount_efficiency_blocks(sections, outputs.get(0))
     wrapper["sections"] = sections
+    vf = dcf_detail.value_flow_figures(outputs.get(0))
+    if vf is not None:
+        wrapper["_value_flow"] = vf
 
     # Attach the structured scoring (stage 3) + scenarios (stage 4) objects so
     # the renderer can derive the signature visuals (range bar, method-value

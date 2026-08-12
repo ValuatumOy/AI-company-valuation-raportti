@@ -2030,35 +2030,73 @@ _PART_TAUSTA_IDS = {"3", "4", "5", "6"}
 _PART_VALUATION_IDS = {"8", "9", "10", "11", "12", "13", "14"}
 
 
-def _value_flow_html():
-    """Static plain-language diagram of how the value is formed. Deterministic
-    renderer content; the run-specific methods and weights are argued inside
-    the valuation section itself."""
+def _value_flow_html(report, derived):
+    """Plain-language diagram of how the value is formed, with this run's own
+    figures under each step. All numbers are deterministic reuses of data
+    computed elsewhere (the DCF bridge behind `_waterfall_steps`, the cover's
+    scenario weights) — never re-derived here, so they can't drift apart."""
+    report = report or {}
+    derived = derived or {}
+    scale = _report_scale(report, derived)
+    vf = report.get("_value_flow") or {}
+
+    scen = _scenario_values(report)
+    scen_num = None
+    if scen and len(scen) == 3 and all(s.get("prob") is not None for s in scen):
+        def _order(s):
+            n = s["name"].lower()
+            if "pessimis" in n:
+                return 0
+            if "optimis" in n:
+                return 2
+            return 1
+        ordered = sorted(scen, key=_order)
+        scen_num = " / ".join(f"{_fmt(s['prob'], 0)} %" for s in ordered)
+
+    hv = (report.get("cover") or {}).get("headline_value")
+    exp_num = _scaled_cover_str(hv, scale) if hv not in (None, "") else None
+
+    delta = vf.get("bridge_delta_teur")
+    delta_num = None
+    if delta is not None:
+        div, unit_lab, dec = scale
+        delta_num = f"{'+' if delta >= 0 else '−'} {_fmt(abs(delta) / div, dec)} {unit_lab}"
+
+    wacc_num = f"{_fmt(vf['wacc_pct'], 1)} %" if vf.get("wacc_pct") is not None else None
+    ev_num = _fmt_scaled(vf.get("ev_teur"), scale) if vf.get("ev_teur") is not None else None
+    equity_num = (_fmt_scaled(vf.get("equity_teur"), scale)
+                  if vf.get("equity_teur") is not None else None)
+
     steps = [
-        ("Ennustetut kassavirrat", "yhtiön toteutuneista luvuista ja ennusteesta"),
-        ("Diskonttaus nykyhetkeen", "tuottovaatimuksella (WACC)"),
-        ("Yritysarvo", "koko liiketoiminnan arvo"),
-        ("− velat + kassa", "rahoitusrakenteen vaikutus"),
-        ("Oman pääoman arvo", "omistajien osuus"),
-        ("Skenaariopainotus", "kolme skenaariota todennäköisyyksin"),
-        ("Odotusarvo", "kannen ja tiivistelmän johtava luku"),
+        ("Ennustetut kassavirrat", "yhtiön toteutuneista luvuista ja ennusteesta",
+         vf.get("forecast_years")),
+        ("Diskonttaus nykyhetkeen", "tuottovaatimuksella (WACC)", wacc_num),
+        ("Yritysarvo", "koko liiketoiminnan arvo", ev_num),
+        ("− velat + kassa", "rahoitusrakenteen vaikutus", delta_num),
+        ("Oman pääoman arvo", "omistajien osuus", equity_num),
+        ("Skenaariopainotus", "kolme skenaariota todennäköisyyksin", scen_num),
+        ("Odotusarvo", "kannen ja tiivistelmän johtava luku", exp_num),
     ]
     box = ('<div style="background:#fff;border:1px solid #D8DED8;padding:8px 10px;'
            'border-radius:2px;break-inside:avoid">'
            '<div style="font-weight:700;font-size:9pt">{t}</div>'
-           '<div class="muted" style="font-size:7.5pt">{s}</div></div>')
+           '<div class="muted" style="font-size:7.5pt">{s}</div>{n}</div>')
+    num_html = ('<div style="font-family:var(--head);font-variant-numeric:tabular-nums;'
+                'font-weight:700;font-size:10pt;color:#1B6B3F;margin-top:3px">{n}</div>')
     arrow = ('<div style="text-align:center;color:var(--lime-deep);'
              'font-size:10pt;line-height:1;margin:2px 0">↓</div>')
-    inner = arrow.join(box.format(t=_esc(t), s=_esc(s)) for t, s in steps)
+    inner = arrow.join(
+        box.format(t=_esc(t), s=_esc(s), n=(num_html.format(n=_esc(n)) if n else ""))
+        for t, s, n in steps)
     return (
         '<div>'
         '<div class="section-lab" style="margin-bottom:4mm">'
         'Miten arvo muodostuu — laskennan periaate</div>'
         f'{inner}'
         '<p class="muted" style="font-size:7.5pt;margin-top:4mm">'
-        'Kaavio kuvaa pääperiaatteen. Käytetyt menetelmät, niiden painot ja '
-        'perustelut esitetään seuraavissa osioissa; termit selitetään '
-        'sanasto-liitteessä.</p></div>'
+        'Kaavio kuvaa pääperiaatteen ja tämän yhtiön luvut. Käytetyt menetelmät, '
+        'niiden painot ja perustelut esitetään seuraavissa osioissa; termit '
+        'selitetään sanasto-liitteessä.</p></div>'
     )
 
 
@@ -2295,7 +2333,7 @@ def render_html(report):
                 "Menetelmät, laskelmat, herkkyydet ja riskit — miten arvio "
                 "muodostuu ja mikä sitä liikuttaisi.",
                 listing_of(_PART_VALUATION_IDS),
-                extra=_value_flow_html()))
+                extra=_value_flow_html(report, derived)))
             valuation_shown = True
         if not appendix_shown and sid in APPENDIX_SECTION_IDS:
             section_html_parts.append(_appendix_divider(report))
