@@ -1566,7 +1566,6 @@ def _cover(report, derived):
     bcv = cover.get("base_case_value")  # conservative base case (DCF/EVA-based)
     rng = derived.get("range")
     industry = _display_industry(meta)
-    conf = (report.get("confidence") or {}).get("level")
 
     # Cover hierarchy (2026-08-04, CEO decision): the scenario expected value
     # is the hero. It is still labeled as resting on AI-authored, editable
@@ -1638,13 +1637,11 @@ def _cover(report, derived):
         f'{_esc(meta.get("company_name"))}</div>'
         f'<div class="sub">{_esc(industry)}</div>'
         '</div>'
-        '<div class="meta" style="grid-template-columns:repeat(3,1fr)">'
+        '<div class="meta" style="grid-template-columns:repeat(2,1fr)">'
         '<div><div class="lab">Y-tunnus</div>'
         f'<div class="val">{_esc(meta.get("y_tunnus"))}</div></div>'
         '<div><div class="lab">Raportin päivä</div>'
         f'<div class="val">{_esc(meta.get("report_date"))}</div></div>'
-        '<div><div class="lab">Luottamustaso</div>'
-        f'<div class="val">{_esc(conf)}</div></div>'
         '</div>'
     )
 
@@ -1673,12 +1670,29 @@ def _cover(report, derived):
         def _h(v):
             return f"{max(0.3, min(100.0, 100 * v / max_val)):.1f}%" if v and v > 0 else "0.3%"
 
+        # Probability weights per scenario, so the reader can see WHY the
+        # expected value sits where it does, not just the three inputs to it.
+        prob_by_key = {}
+        for s in (scen or []):
+            n = s["name"].lower()
+            key = ("pess" if "pessimis" in n else
+                   "opt" if "optimis" in n else
+                   "base" if any(k in n for k in ("konservat", "realistinen", "base")) else None)
+            if key and s.get("prob") is not None:
+                prob_by_key[key] = s["prob"]
+
+        def _wt(key):
+            p = prob_by_key.get(key)
+            if p is None:
+                return ""
+            return f'<br><span class="wt">{_fmt(p, 0)}&nbsp;%</span>'
+
         cols = [
-            (lo, "#C9CFC9", "", "Pessimistinen<br>skenaario"),
-            (base_num, "#8FB79D", "", "Konservatiivinen<br>perusskenaario"),
+            (lo, "#C9CFC9", "", f"Pessimistinen skenaario{_wt('pess')}"),
+            (base_num, "#8FB79D", "", f"Konservatiivinen perusskenaario{_wt('base')}"),
             (exp_num, "#1B6B3F", ' style="color:#1B6B3F"',
-             '<span style="color:#1B6B3F;font-weight:600">Skenaarioiden<br>odotusarvo</span>'),
-            (hi, "#C9CFC9", "", "Optimistinen<br>skenaario"),
+             '<span style="color:#1B6B3F;font-weight:600">Skenaarioiden odotusarvo</span>'),
+            (hi, "#C9CFC9", "", f"Optimistinen skenaario{_wt('opt')}"),
         ]
         col_html = "".join(
             f'<div class="col"><div class="cval"{cval_style}>{_esc(_lab(v))}</div>'
@@ -1707,6 +1721,37 @@ def _cover(report, derived):
             f'<p class="hero-desc" style="margin-top:5mm">{method_txt}</p>'
         )
 
+    # --- perustiedot (liikevaihto / oma pääoma / tase [/ verottajan malli]) --
+    # Deterministic, from `_basics` (valuation_equivalence.normalize_report) —
+    # no model involvement, so it can't drift from the source financials.
+    basics_html = ""
+    basics = report.get("_basics") or {}
+    if basics:
+        def _bfmt(v):
+            return f"{_fmt(v / div, dec)} {unit_lab}"
+
+        cards = []
+        if basics.get("revenue_teur") is not None:
+            cards.append(("Liikevaihto", _bfmt(basics["revenue_teur"])))
+        if basics.get("equity_teur") is not None:
+            cards.append(("Oma pääoma", _bfmt(basics["equity_teur"])))
+        if basics.get("balance_sheet_total_teur") is not None:
+            cards.append(("Tase", _bfmt(basics["balance_sheet_total_teur"])))
+        if basics.get("verottaja_value_teur") is not None:
+            cards.append(("Verottajan malli", _bfmt(basics["verottaja_value_teur"])))
+        if cards:
+            yr = basics.get("fiscal_year")
+            cap = "Viimeisin tilinpäätös" + (f" {_esc(yr)}" if yr else "")
+            card_html = "".join(
+                f'<div><div class="lab">{_esc(k)}</div><div class="val">{_esc(v)}</div></div>'
+                for k, v in cards)
+            basics_html = (
+                '<div style="margin-top:8mm">'
+                f'<div class="section-lab">{cap}</div>'
+                f'<div class="basics" style="grid-template-columns:repeat({len(cards)},1fr)">'
+                f'{card_html}</div></div>'
+            )
+
     foot = ('<div class="footnote"><p><b>Voit muuttaa oletuksia.</b> Skenaarioiden '
             'todennäköisyydet ja ennusteparametrit ovat muokattavissa Valuatumin '
             'järjestelmässä — muutokset päivittävät arvion, ja raportin voi tuottaa '
@@ -1716,7 +1761,7 @@ def _cover(report, derived):
         '<section class="page cover">'
         + band
         + '<div class="cbody">'
-        + meta_row + hero + chart_html + expl_html + foot
+        + meta_row + hero + chart_html + expl_html + basics_html + foot
         + '</div></section>'
     )
 
@@ -2450,6 +2495,14 @@ a.secref{ color:var(--lime); text-decoration:none; border-bottom:1px dotted var(
 .cover .chart-labels{ display:grid; grid-template-columns:repeat(4,1fr); gap:6mm; margin-top:3px;
   padding-top:3px; border-top:1px solid #E3E7E3; }
 .cover .chart-labels div{ font-size:7.4pt; color:#7C837C; line-height:1.3; }
+.cover .chart-labels .wt{ display:inline-block; margin-top:3px; font-family:var(--head);
+  font-variant-numeric:tabular-nums; font-weight:700; font-size:8.6pt; color:#1B6B3F;
+  background:#E8F0EA; border-radius:3px; padding:1.5px 7px; }
+.cover .basics{ display:grid; gap:6mm; }
+.cover .basics .lab{ font-size:7pt; letter-spacing:.08em; color:#7C837C; text-transform:uppercase;
+  min-height:7.6mm; }
+.cover .basics .val{ font-size:11pt; font-weight:700; margin-top:2px; color:#1C201C;
+  font-family:var(--head); font-variant-numeric:tabular-nums; }
 .cover .expl{ margin-top:7mm; display:grid; grid-template-columns:1fr 1fr 1fr; gap:6mm; }
 .cover .expl h4{ font-size:7.8pt; font-weight:700; margin:0 0 2px; color:#1C201C; }
 .cover .expl p{ font-size:7.4pt; line-height:1.45; color:#5C625C; margin:0; }

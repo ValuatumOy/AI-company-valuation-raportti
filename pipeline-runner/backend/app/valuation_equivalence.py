@@ -60,9 +60,10 @@ def _avg_last(xs, k=3):
     return (sum(vals) / len(vals)) if vals else None
 
 
-def _verottaja_blocks(input_data, value):
-    """DCF/EVA vs. the Finnish tax authority's substance+income valuation, as a
-    reader-facing cross-check (mirrors Asiakastieto's substanssiarvo/tuottoarvo)."""
+def _verottaja_kaypa(input_data):
+    """Tuottoarvo/substanssiarvo/käypä arvo per Verohallinto's unlisted-company
+    model. Shared by the section-8 cross-check and the cover's basics strip so
+    the two never drift onto different numbers."""
     actuals = (input_data or {}).get("actuals") or {}
     inc = actuals.get("income_statement") or {}
     bs = actuals.get("balance_sheet") or {}
@@ -72,12 +73,53 @@ def _verottaja_blocks(input_data, value):
     avg_ni = _avg_last(inc.get("net_earnings") or inc.get("net_income"), 3)
     equity = _last_num(bs.get("equity_excl_capital_loans") or bs.get("equity"))
     if avg_ni is None or equity is None:
-        return []
+        return None
     tuottoarvo = max(0.0, avg_ni) / _VEROTTAJA_RATE
     # Verohallinto counts negative net assets as 0; also keeps the cross-check from
     # printing a negative reference value for distressed companies.
     substanssiarvo = max(0.0, equity)
     kaypa = (tuottoarvo + substanssiarvo) / 2 if tuottoarvo > substanssiarvo else substanssiarvo
+    return {"avg_ni": avg_ni, "equity": equity, "tuottoarvo": tuottoarvo,
+            "substanssiarvo": substanssiarvo, "kaypa": kaypa}
+
+
+def _basics(input_data):
+    """Perustiedot for the cover: latest actual liikevaihto / oma pääoma / tase,
+    plus the Verohallinto reference value when the underlying figures allow it.
+    Deterministic — pulled straight from `actuals`, no model involvement."""
+    actuals = (input_data or {}).get("actuals") or {}
+    inc = actuals.get("income_statement") or {}
+    bs = actuals.get("balance_sheet") or {}
+    out = {}
+    revenue = _last_num(inc.get("net_sales"))
+    equity = _last_num(bs.get("equity_excl_capital_loans") or bs.get("equity"))
+    assets = _last_num(bs.get("total_assets"))
+    if revenue is not None:
+        out["revenue_teur"] = revenue
+    if equity is not None:
+        out["equity_teur"] = equity
+    if assets is not None:
+        out["balance_sheet_total_teur"] = assets
+    years = actuals.get("years") or []
+    if years:
+        out["fiscal_year"] = years[-1]
+    kaypa = _verottaja_kaypa(input_data)
+    if kaypa is not None:
+        out["verottaja_value_teur"] = round(kaypa["kaypa"], 1)
+    return out or None
+
+
+def _verottaja_blocks(input_data, value):
+    """DCF/EVA vs. the Finnish tax authority's substance+income valuation, as a
+    reader-facing cross-check (mirrors Asiakastieto's substanssiarvo/tuottoarvo)."""
+    kaypa_data = _verottaja_kaypa(input_data)
+    if kaypa_data is None:
+        return []
+    avg_ni = kaypa_data["avg_ni"]
+    equity = kaypa_data["equity"]
+    tuottoarvo = kaypa_data["tuottoarvo"]
+    substanssiarvo = kaypa_data["substanssiarvo"]
+    kaypa = kaypa_data["kaypa"]
     # Explain floored zeros explicitly — a bare 0 next to the report's positive
     # book equity (which includes capital loans) reads as a contradiction.
     floor_notes = []
@@ -373,6 +415,11 @@ def _normalize_section10(sections, input_data, value):
 
 
 def normalize_report(report, input_data):
+    # Runs regardless of EVA presence — the cover's basics strip needs
+    # liikevaihto/oma pääoma/tase on every report, not just DCF+EVA ones.
+    basics = _basics(input_data)
+    if basics is not None:
+        report["_basics"] = basics
     value = _dcf_equity(input_data)
     if not (_is_num(value) and _has_eva(input_data)):
         return report
