@@ -55,6 +55,13 @@ def _last_num(xs):
     return None
 
 
+def _first_num(xs):
+    for x in xs or []:
+        if _is_num(x):
+            return x
+    return None
+
+
 def _avg_last(xs, k=3):
     vals = [x for x in (xs or []) if _is_num(x)][-k:]
     return (sum(vals) / len(vals)) if vals else None
@@ -333,8 +340,22 @@ def _normalize_section10(sections, input_data, value):
     ic = eva.get("invested_capital")
     pv_exp = _sum_nums(eva.get("discounted_eva"))
     pv_term = eva.get("pv_of_trm_eva")
+    if not _is_num(pv_term):
+        # `pv_of_eva_ty` comes back null from /modeldata for every company.
+        # `cumulative_discounted_eva` is Valuatum's own "Cum. disc. EVA" row —
+        # a reverse remaining-PV series that already contains the terminal
+        # (verified: cum[t] − cum[t+1] == disc_eva[t] to the last decimal), so
+        # cum[0] − sum(discounted_eva) is the engine's terminal EVA. No DCF
+        # figure enters this derivation; the backsolve warned about below is a
+        # different, forbidden one.
+        cum0 = _first_num(eva.get("cumulative_discounted_eva"))
+        if _is_num(cum0):
+            pv_term = cum0 - pv_exp
     cap_change = eva.get("pv_of_cap_base_change")
     raw = eva.get("equity_value_before_floor_raw")
+    bridge = eva.get("bridge") or {}
+    debt = bridge.get("interest_bearing_debt")
+    cash = bridge.get("cash")
 
     # Every row comes from a source field as-is. A missing component is shown
     # as missing — NEVER backsolved as `value − ic − pv_exp` so the sum "adds
@@ -348,9 +369,24 @@ def _normalize_section10(sections, input_data, value):
                  _fmt_num(pv_term) if _is_num(pv_term) else "ei saatavilla lähdedatassa"])
     if _is_num(cap_change):
         rows.append(["Pääomapohjan muutoksen nykyarvo", _fmt_num(cap_change)])
-    complete = _is_num(ic) and _is_num(pv_term)
+    if _is_num(debt):
+        rows.append(["− Korolliset velat", _fmt_num(debt)])
+    if _is_num(cash):
+        rows.append(["+ Kassa", _fmt_num(cash)])
+    total = (
+        (ic if _is_num(ic) else 0) + pv_exp + (pv_term if _is_num(pv_term) else 0)
+        + (cap_change if _is_num(cap_change) else 0)
+        + (debt if _is_num(debt) else 0) + (cash if _is_num(cash) else 0)
+    )
+    # Only claim a reconciliation when the components actually add up to the
+    # EVA engine's own equity value. If a field this code does not model shows
+    # up (a non-null pv_of_cap_base_change that is already inside cum[0], say),
+    # the sum silently drifts — so verify per run instead of trusting the shape.
+    complete = (
+        _is_num(ic) and _is_num(pv_term) and _is_num(raw)
+        and abs(total - raw) <= max(1.0, 0.005 * abs(raw))
+    )
     if complete:
-        total = ic + pv_exp + pv_term + (cap_change if _is_num(cap_change) else 0)
         rows.append(["Komponenttien summa", _fmt_num(total)])
     if _is_num(raw):
         rows.append(["EVA-moottorin oma arvo ennen normalisointia", _fmt_num(raw)])
@@ -360,15 +396,17 @@ def _normalize_section10(sections, input_data, value):
         intro = (
             "EVA rakentaa oman pääoman arvon eri suunnasta kuin DCF: yhtiöön jo "
             "sitoutunut pääoma (investoitu pääoma) plus tulevien EVA-erien "
-            "nykyarvo (ennustejakso ja terminaali). Alla olevat erät ovat "
-            "laskentamoottorin tuottamia sellaisenaan."
+            "nykyarvo (ennustejakso ja terminaali) on yritysarvo, josta "
+            "korolliset velat ja kassa vievät oman pääoman arvoon. Alla olevat "
+            "erät ovat laskentamoottorin tuottamia sellaisenaan."
         )
     else:
         intro = (
-            "EVA-erittelyn kaikkia komponentteja ei ole saatavilla lähdedatassa "
-            "(terminaali-EVA:n nykyarvo puuttuu), joten täsmäytyssummaa ei "
-            "esitetä. Raportin arvostus perustuu DCF-menetelmään; EVA on tässä "
-            "raportissa DCF:n rinnakkaisnäkymä, ei itsenäinen menetelmäarvo."
+            "EVA-erittelyn komponentit eivät täsmää EVA-moottorin omaan "
+            "arvoon tai jokin komponentti puuttuu lähdedatasta, joten "
+            "täsmäytyssummaa ei esitetä. Raportin arvostus perustuu "
+            "DCF-menetelmään; EVA on tässä raportissa DCF:n rinnakkaisnäkymä, "
+            "ei itsenäinen menetelmäarvo."
         )
     diff_note = None
     if _is_num(raw) and abs(raw - value) > max(1.0, 0.01 * abs(value)):

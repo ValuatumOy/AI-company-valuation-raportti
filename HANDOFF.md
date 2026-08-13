@@ -1,5 +1,61 @@
 # Handoff — 2026-08-11 (read this first)
 
+## 2026-08-13 — terminal EVA is in the data after all (`cum_disc_eva`)
+
+The open question from the EVA/MVA mockup work — can we show the EVA value bar
+honestly, when `pv_of_trm_eva` is null in every export — is **answered yes**.
+
+`cum_disc_eva` ("Cum. disc. EVA") was already requested from `/modeldata`
+(`fetch_modeldata.py` TABLE 19) but never made it into the export payload. It
+is the EVA twin of `cum_disc_fcff`: a **reverse remaining-PV series that
+already contains the terminal**, not a running total. Verified live on 5 fresh
+models (OGOship, Teippimestarit, AWAKE.AI, SaaShop, Valuatum Oy) plus Star
+Asfaltti:
+
+- recurrence `cum[t] − cum[t+1] == disc_eva[t]` holds to the last decimal, so
+  the residual after the last forecast year IS the terminal;
+- `invested_capital + cum_disc_eva[0] + debt + cash == value_of_equity_eva`
+  closes at **delta 0,0** on every one of them.
+
+So: `PV(terminal EVA) = cum_disc_eva[0] − sum(discounted_eva)`, straight from
+the engine's own row — not the DCF backsolve that fabricated SaaShop's
++3 891 tEUR. Star Asfaltti (fid 20031): 866,5 − 590,1 = **276,4 tEUR**, 32 % of
+MVA. On AWAKE.AI the forecast-period EVA is negative and the whole MVA is
+terminal (+1 008 tEUR) — the bar is unbuildable without it.
+
+Shipped:
+- `valuatum_kit/export_modeldata_json.py` — exports
+  `valuation_engine.eva.cumulative_discounted_eva` (raw series; the consumer
+  derives, same as the DCF side).
+- `app/valuation_equivalence.py::_normalize_section10` — derives the terminal
+  when `pv_of_trm_eva` is null, adds the debt/cash bridge rows, and gates
+  "Komponenttien summa" on the components actually closing against
+  `equity_value_before_floor_raw` (±0,5 %). If they don't close, it falls back
+  to the old "ei saatavilla lähdedatassa" path — the anti-fabrication rule is
+  now verified per run, not assumed.
+- Prompts: `singlewriter.txt` rule 34 and `3_pisteytys_numero_osiot.txt` OSIO
+  10 row (3) repointed. OSIO 10 previously **instructed** the circular
+  derivation (`DCF equity − invested capital − sum`) — that is gone.
+
+Caveats: `pv_of_eva_ty` and `pv_of_cap_base_change` are null on every company
+checked (so nothing double-counts today). Stale models can lack the EVA rows
+entirely — Virnex fid 178209 (2023-vintage forecast) returns `cum_disc_eva`
+empty; the code tolerates it. EVA equity ≠ DCF equity in Valuatum (gap up to
+718 tEUR on SaaShop); the report still normalizes to DCF and the existing
+divergence callout explains it.
+
+Tests 277 → 279. Verified end-to-end against live `/modeldata` (read-only, no
+report run): re-exported fid 20031 and the §10 table closes 1 259 + 590 + 276
+− 31 + 470 = 2 564 = `value_of_equity_eva`.
+
+**Not done:** the MVA bar chart itself. The plumbing is what was missing.
+
+Local `.env` for the backend now exists (Railway `VALUATUM_TOKEN` +
+`OPENROUTER_API_KEY` + `GEMINI_API_KEY`, no `DATABASE_URL`/Stripe/AWS). The
+system Python does not trust Valuatum's cert chain on this machine — use
+`.venv/bin/python`, and for the stdlib-only kit scripts prefix
+`SSL_CERT_FILE=$(.venv/bin/python -c "import certifi;print(certifi.where())")`.
+
 ## 2026-08-11 — three fixes on top of the Smartly run (`24b05ec`, `7e15ebf`) — VERIFIED ON PROD
 
 1. **Restated derived figures corrected deterministically.** Root cause was ONE

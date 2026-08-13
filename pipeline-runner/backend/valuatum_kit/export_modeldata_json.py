@@ -558,6 +558,11 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                 "cost_of_capital": arr(data_map, forecast_years, "cost_of_cap_abs", money=True),
                 "eva": arr(data_map, forecast_years, "eva", money=True),
                 "discounted_eva": arr(data_map, forecast_years, "disc_eva", money=True),
+                # Reverse remaining-PV series, terminal included — the EVA twin
+                # of cumulative_discounted_fcff. `pv_of_eva_ty` comes back null
+                # from /modeldata, so this row is the only source for the
+                # terminal EVA: cum[0] - sum(discounted_eva).
+                "cumulative_discounted_eva": arr(data_map, forecast_years, "cum_disc_eva", money=True),
                 "pv_of_trm_eva": scalar(data_map, first_forecast, "pv_of_eva_ty", money=True),
                 "pv_of_cap_base_change": scalar(data_map, first_forecast, "pv_of_cap_base_change", money=True),
                 "invested_capital": scalar(data_map, first_forecast, "prol_cap_invested", money=True),

@@ -853,6 +853,54 @@ def test_eva_reconciliation_uses_source_terminal_when_present():
     assert not any(b.get("variant") == "warning" for b in sections[0]["blocks"])
 
 
+def test_eva_reconciliation_derives_terminal_from_cumulative_row():
+    """Star Asfaltti (fid 20031), live /modeldata figures in tEUR. Valuatum
+    returns pv_of_eva_ty as null for every company, but its "Cum. disc. EVA"
+    row is a remaining-PV series that already carries the terminal, so
+    cum[0] − sum(discounted_eva) = 276.4 is engine output, not a backsolve."""
+    from app import valuation_equivalence as veq
+    disc = [130.6, 105.7, 85.5, 75.0, 61.7, 48.3, 36.1, 25.3, 15.6, 6.3]
+    cum = [866.5, 735.9, 630.3, 544.7, 469.7, 408.0, 359.7, 323.6, 298.3, 282.7]
+    input_data = {"valuation_engine": {
+        "dcf": {"equity_value_before_floor": 2880.8},
+        "eva": {
+            "invested_capital": 1258.8,
+            "discounted_eva": disc,
+            "cumulative_discounted_eva": cum,
+            "pv_of_trm_eva": None,
+            "bridge": {"interest_bearing_debt": -31.0, "cash": 470.0},
+            "equity_value_before_floor_raw": 2564.3,
+        },
+    }}
+    sections = [{"id": "10", "blocks": []}]
+    veq._normalize_section10(sections, input_data, 2880.8)
+    table = next(b for b in sections[0]["blocks"] if b.get("type") == "table")
+    assert ["Jatkuvan arvon (terminaali-EVA) nykyarvo", "276"] in table["rows"]
+    assert ["− Korolliset velat", "-31"] in table["rows"]
+    assert ["Komponenttien summa", "2 564"] in table["rows"]
+
+
+def test_eva_reconciliation_hides_sum_when_components_do_not_close():
+    """A component this code does not model (or a stale engine row) must not
+    produce a reconciliation that silently misses part of the value."""
+    from app import valuation_equivalence as veq
+    input_data = {"valuation_engine": {
+        "dcf": {"equity_value_before_floor": 500.0},
+        "eva": {
+            "invested_capital": 300.0,
+            "discounted_eva": [50.0, 50.0],
+            "cumulative_discounted_eva": [200.0],
+            "pv_of_trm_eva": None,
+            "equity_value_before_floor_raw": 900.0,
+        },
+    }}
+    sections = [{"id": "10", "blocks": []}]
+    veq._normalize_section10(sections, input_data, 500.0)
+    table = next(b for b in sections[0]["blocks"] if b.get("type") == "table")
+    assert ["Jatkuvan arvon (terminaali-EVA) nykyarvo", "100"] in table["rows"]
+    assert not any(r[0] == "Komponenttien summa" for r in table["rows"])
+
+
 def test_verottaja_crosscheck_income_and_substance_branches():
     from app import valuation_equivalence as veq
 
