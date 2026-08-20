@@ -563,6 +563,14 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                 # from /modeldata, so this row is the only source for the
                 # terminal EVA: cum[0] - sum(discounted_eva).
                 "cumulative_discounted_eva": arr(data_map, forecast_years, "cum_disc_eva", money=True),
+                # The engine's own closing term, not a reconstruction:
+                # -IB debt + cash + dividends + associates + minorities. The
+                # `bridge` below carries only the first two, so rebuilding this
+                # from it silently drops the last three — null on most SMEs,
+                # not on a company with associates or minority interests.
+                # value_of_equity_eva = prol_cap_invested + cum_disc_eva
+                #                       + eva_additional (verified live, delta 0).
+                "additional": scalar(data_map, first_forecast, "eva_additional", money=True),
                 "pv_of_trm_eva": scalar(data_map, first_forecast, "pv_of_eva_ty", money=True),
                 "pv_of_cap_base_change": scalar(data_map, first_forecast, "pv_of_cap_base_change", money=True),
                 "invested_capital": scalar(data_map, first_forecast, "prol_cap_invested", money=True),
