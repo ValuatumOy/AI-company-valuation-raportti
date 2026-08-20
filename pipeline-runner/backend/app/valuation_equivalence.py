@@ -452,6 +452,76 @@ def _normalize_section10(sections, input_data, value):
             return
 
 
+def eva_bar_figures(input_data):
+    """Deterministic inputs for the EVA/MVA bar drawn on the section-10 page.
+
+    The identity comes straight from the engine's own three fields:
+
+        value_of_equity_eva = prol_cap_invested + cum_disc_eva[0] + eva_additional
+
+    The bar splits the first term so the reader starts from a figure they
+    recognise from their own accounts:
+
+        oma pääoma (kirja) + pääomapohjan oikaisu + MVA + muut erät
+
+    where the oikaisu is `prol_cap_invested − oma pääoma`. Valuatum's capital
+    base is the financing side (equity + interest-bearing debt) rolled forward
+    from the last closed accounts to the valuation date, so it is a different
+    number from book equity and the gap has to be shown, not hidden.
+
+    Returns None unless every component is present AND the four blocks actually
+    add up to the engine's own equity value. A bar that does not reconcile is
+    not drawn at all — the figure never shows an approximation as if it closed.
+    """
+    if not _has_eva(input_data):
+        return None
+    ve = (input_data or {}).get("valuation_engine") or {}
+    eva = ve.get("eva") or {}
+    ic = eva.get("invested_capital")
+    add = eva.get("additional")
+    if not _is_num(add):
+        # Payloads exported before `eva_additional` was carried through only
+        # have the two-item bridge. Rebuilding it here is safe ONLY because the
+        # reconciliation check below has the final say: on a company where the
+        # three missing terms (dividends, associates, minorities) are non-zero
+        # the sum simply will not close, and the figure is not drawn.
+        bridge = eva.get("bridge") or {}
+        parts = [bridge.get("interest_bearing_debt"), bridge.get("cash")]
+        add = sum(x for x in parts if _is_num(x)) if any(_is_num(x) for x in parts) else None
+    raw = eva.get("equity_value_before_floor_raw")
+    cum = [x for x in (eva.get("cumulative_discounted_eva") or []) if _is_num(x)]
+    mva = cum[0] if cum else None
+    bs = ((input_data or {}).get("actuals") or {}).get("balance_sheet") or {}
+    opo = _last_num(bs.get("equity_excl_capital_loans") or bs.get("equity"))
+    if not all(_is_num(x) for x in (ic, add, raw, mva, opo)):
+        return None
+    total = ic + mva + add
+    if abs(total - raw) > max(1.0, 0.005 * abs(raw)):
+        return None
+
+    years = eva.get("years") or []
+    noplat = [x for x in (eva.get("noplat") or []) if _is_num(x)]
+    charge = [-x for x in (eva.get("cost_of_capital") or []) if _is_num(x)]
+    per_year = [x for x in (eva.get("eva") or []) if _is_num(x)]
+    explicit = _sum_nums(eva.get("discounted_eva"))
+    ok = len(years) == len(noplat) == len(charge) == len(per_year) and years
+    wacc = (ve.get("wacc_parameters") or {}).get("wacc_pct")
+    return {
+        "opo_teur": opo,
+        "capital_adj_teur": ic - opo,
+        "mva_teur": mva,
+        "additional_teur": add,
+        "equity_eva_teur": total,
+        "explicit_teur": explicit,
+        "terminal_teur": mva - explicit,
+        "wacc_pct": wacc if _is_num(wacc) else None,
+        "years": list(years) if ok else [],
+        "noplat": noplat if ok else [],
+        "capital_charge": charge if ok else [],
+        "eva": per_year if ok else [],
+    }
+
+
 def normalize_report(report, input_data):
     # Runs regardless of EVA presence — the cover's basics strip needs
     # liikevaihto/oma pääoma/tase on every report, not just DCF+EVA ones.
@@ -464,6 +534,9 @@ def normalize_report(report, input_data):
     scoring = report.get("_scoring")
     if isinstance(scoring, dict):
         _normalize_scoring(scoring, value)
+    bar = eva_bar_figures(input_data)
+    if bar is not None:
+        report["_eva_bar"] = bar
     sections = report.get("sections") or []
     _normalize_section8(sections, input_data, value)
     _normalize_section10(sections, input_data, value)

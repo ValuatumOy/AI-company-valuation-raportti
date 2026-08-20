@@ -1938,6 +1938,10 @@ def _dedup_captions(blocks):
 def _section(report, sec, derived=None, display_no=None):
     blocks = "".join(x for x in (_render_block(b)
                                  for b in _dedup_captions(sec.get("blocks"))) if x)
+    # Section 10 (EVA) leads with the capital + MVA figure; the
+    # reconciliation table that follows carries the same numbers as text.
+    if str(sec.get("id")) == "10":
+        blocks = _eva_bar_html(report, derived) + blocks
     # Section 8 (arvonmääritys) already carries the model's own method table +
     # method-value chart, so we do NOT inject derived visuals here — on distressed
     # companies the derived donut/bars duplicated and contradicted them (scenario
@@ -2097,6 +2101,183 @@ def _value_flow_html(report, derived):
         'Kaavio kuvaa pääperiaatteen ja tämän yhtiön luvut. Käytetyt menetelmät, '
         'niiden painot ja perustelut esitetään seuraavissa osioissa; termit '
         'selitetään sanasto-liitteessä.</p></div>'
+    )
+
+
+def _spread_labels(ys, gap, lo, hi):
+    """Push label anchors apart so none overlap, preserving order and bounds.
+    Without this the thin segments' labels land on top of each other whenever
+    two figures are close together."""
+    order = sorted(range(len(ys)), key=lambda i: ys[i])
+    pos = [ys[i] for i in order]
+    for k in range(1, len(pos)):
+        if pos[k] - pos[k - 1] < gap:
+            pos[k] = pos[k - 1] + gap
+    over = pos[-1] - hi
+    if over > 0:
+        pos = [p - over for p in pos]
+    for k in range(len(pos) - 2, -1, -1):
+        if pos[k + 1] - pos[k] < gap:
+            pos[k] = pos[k + 1] - gap
+    pos = [max(lo, p) for p in pos]
+    out = [0.0] * len(ys)
+    for slot, i in enumerate(order):
+        out[i] = pos[slot]
+    return out
+
+
+def _eva_bar_html(report, derived):
+    """EVA/MVA figure for section 10: what the owners have on the books, what
+    the forecast adds on top, and where that addition comes from.
+
+    Every number is a deterministic reuse of `_eva_bar`
+    (valuation_equivalence.eva_bar_figures) â nothing is computed here, so the
+    figure cannot drift from the reconciliation table below it."""
+    fig = (report or {}).get("_eva_bar") or {}
+    if not fig:
+        return ""
+    div, unit_lab, dec = _report_scale(report, derived)
+
+    def sc(v):
+        return v / div
+
+    def num(v):
+        return _fmt(sc(v), dec)
+
+    mva = fig["mva_teur"]
+    segs = [("Oma pääoma (kirja-arvo)", fig["opo_teur"], C["green"]),
+            ("Pääomapohjan oikaisu", fig["capital_adj_teur"], "#8FA89C"),
+            ("MVA — tulevien EVA:iden nykyarvo", mva,
+             C["lime"] if mva >= 0 else C["red"]),
+            ("Velat, kassa ja muut erät", fig["additional_teur"], "#B0C0B6")]
+
+    W, H = 600, 300
+    bx, bw, top, bot = 178, 52, 60, 232
+    bounds, run = [0.0], 0.0
+    for _l, v, _c in segs:
+        run += v
+        bounds.append(run)
+    total = run
+    lo, hi, _st, _cnt = _nice_scale(min(sc(b) for b in bounds),
+                                    max(sc(b) for b in bounds))
+
+    def y(v):
+        return bot - (bot - top) * (sc(v) - lo) / ((hi - lo) or 1)
+
+    g = []
+    for i in range(5):
+        yy = bot - (bot - top) * i / 4
+        g.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="%s"/>'
+                 % (bx - 4, yy, bx + bw + 4, yy, C["line"]))
+    mids = [(y(bounds[i]) + y(bounds[i + 1])) / 2 for i in range(len(segs))]
+    labs = _spread_labels(mids, 26, top + 4, bot + 42)
+    for i, (label, v, col) in enumerate(segs):
+        y0, y1 = y(bounds[i]), y(bounds[i + 1])
+        g.append('<rect x="%d" y="%.1f" width="%d" height="%.1f" fill="%s"/>'
+                 % (bx, min(y0, y1), bw, max(abs(y1 - y0), 2.5), col))
+        ly = labs[i]
+        g.append('<path d="M %d %.1f H %d V %.1f H %d" fill="none" stroke="%s" '
+                 'stroke-width="0.8"/>'
+                 % (bx - 4, mids[i], bx - 12, ly - 4, bx - 17, C["lineStrong"]))
+        g.append('<text x="%d" y="%.1f" text-anchor="end" font-size="7.5" '
+                 'fill="%s">%s</text>' % (bx - 21, ly - 7, C["gray"], _esc(label)))
+        g.append('<text x="%d" y="%.1f" text-anchor="end" font-size="10" '
+                 'font-weight="700" fill="%s" font-family="var(--head)">%s</text>'
+                 % (bx - 21, ly + 5, C["ink"], _esc(num(v))))
+    g.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="%s" '
+             'stroke-width="1.1"/>'
+             % (bx - 4, y(0), bx + bw + 4, y(0), C["lineStrong"]))
+    g.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="%s" '
+             'stroke-width="1.4" stroke-dasharray="4 3"/>'
+             % (bx - 4, y(total), bx + bw + 6, y(total), C["green"]))
+    g.append('<text x="%d" y="%.1f" font-size="7.5" font-weight="700" '
+             'fill="%s">Oman pääoman arvo</text>'
+             % (bx + bw + 10, y(total) - 3, C["green"]))
+    g.append('<text x="%d" y="%.1f" font-size="9.5" font-weight="700" fill="%s" '
+             'font-family="var(--head)">%s %s</text>'
+             % (bx + bw + 10, y(total) + 8, C["green"], _esc(num(total)),
+                _esc(unit_lab)))
+
+    years = fig.get("years") or []
+    if years:
+        pl, pr, pt, pb = 330, 12, 86, 226
+        plotW = W - pl - pr
+        noplat, charge, evas = fig["noplat"], fig["capital_charge"], fig["eva"]
+        lo2, hi2, _s2, _c2 = _nice_scale(min(sc(x) for x in noplat + charge),
+                                         max(sc(x) for x in noplat + charge))
+
+        def y2(v):
+            return pb - (pb - pt) * (sc(v) - lo2) / ((hi2 - lo2) or 1)
+
+        for i in range(5):
+            yy = pb - (pb - pt) * i / 4
+            val = lo2 + (hi2 - lo2) * i / 4
+            g.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="%s"/>'
+                     % (pl, yy, W - pr, yy, C["line"]))
+            g.append('<text x="%d" y="%.1f" text-anchor="end" font-size="7" '
+                     'fill="%s">%s</text>' % (pl - 4, yy + 3, C["gray"],
+                                              _fmt(val, dec)))
+        n = len(years)
+        gw = plotW / n
+        bwid = gw * 0.5
+        pts = " ".join("%.1f,%.1f" % (pl + gw * i, y2(charge[i])) for i in range(n))
+        pts += " %.1f,%.1f" % (pl + plotW, y2(charge[-1]))
+        g.append('<polygon points="%d,%.1f %s %.1f,%.1f" fill="%s" opacity="0.55"/>'
+                 % (pl, y2(0), pts, pl + plotW, y2(0), C["greenSoft"]))
+        for i, yr in enumerate(years):
+            gx = pl + gw * i + (gw - bwid) / 2
+            a, b = y2(0), y2(noplat[i])
+            g.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" fill="%s"/>'
+                     % (gx, min(a, b), bwid, max(abs(b - a), 1.5),
+                        C["lime"] if noplat[i] >= 0 else C["red"]))
+            g.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" '
+                     'stroke-width="0.9" stroke-dasharray="2 2" opacity="0.75"/>'
+                     % (gx + bwid / 2, y2(noplat[i]), gx + bwid / 2, y2(charge[i]),
+                        C["red"] if evas[i] < 0 else C["limeDeep"]))
+            if i % 3 == 0 or i == n - 1:
+                g.append('<text x="%.1f" y="%d" text-anchor="middle" font-size="7" '
+                         'fill="%s">%s</text>'
+                         % (pl + gw * i + gw / 2, pb + 12, C["gray"],
+                            _esc(str(yr)[-2:])))
+        g.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="1.4" '
+                 'stroke-dasharray="4 3"/>' % (pts, C["green"]))
+        g.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="%s" '
+                 'stroke-width="1"/>' % (pl, y2(0), W - pr, y2(0), C["lineStrong"]))
+        mid = n // 2
+        g.append('<text x="%.1f" y="%.1f" text-anchor="middle" font-size="7.5" '
+                 'font-weight="700" fill="%s" paint-order="stroke" '
+                 'stroke="#FFFFFF" stroke-width="2.5" stroke-linejoin="round">'
+                 'Tuottovaatimus</text>'
+                 % (pl + gw * mid + gw / 2, y2(charge[mid]) - 6, C["green"]))
+        g.append('<text x="%d" y="%d" font-size="8.5" font-weight="700" fill="%s" '
+                 'font-family="var(--head)">Mistä MVA syntyy</text>'
+                 % (pl, pt - 22, C["ink"]))
+        g.append('<text x="%d" y="%d" font-size="7" fill="%s">Tulos verojen '
+                 'jälkeen vs. tuottovaatimus — väli on EVA</text>'
+                 % (pl, pt - 11, C["gray"]))
+    g.append('<text x="8" y="20" font-size="8.5" font-weight="700" fill="%s" '
+             'font-family="var(--head)">Mistä oman pääoman arvo '
+             'muodostuu</text>' % C["ink"])
+    g.append('<text x="8" y="31" font-size="7" fill="%s">kaikki luvut %s</text>'
+             % (C["gray"], _esc(unit_lab)))
+
+    term = fig.get("terminal_teur")
+    share = ""
+    if term is not None and mva:
+        share = (" (josta ennustejakson jälkeinen aika %s, %s %%)"
+                 % (_fmt(sc(term), dec), _fmt(abs(term) / abs(mva) * 100, 0)))
+    return (
+        '<div class="chart-host" style="break-inside:avoid">'
+        + _svg(W, H, "".join(g))
+        + '<p class="muted" style="font-size:7.5pt;margin-top:2mm">'
+          'Palkki lähtee yhtiön omasta taseesta ja päätyy '
+          'EVA-mallin oman pääoman arvoon' + share + '. '
+          'Pääomapohjan oikaisu on ero taseen oman pääoman '
+          'ja laskentamallin pääomapohjan välillä: malli '
+          'käyttää rahoituspuolta (oma pääoma ja '
+          'korolliset velat) rullattuna tilinpäätöspäivästä '
+          'arvonmäärityshetkeen. Raportin arvostus perustuu '
+          'DCF-menetelmään; EVA on sen rinnakkaisnäkymä.</p></div>'
     )
 
 
