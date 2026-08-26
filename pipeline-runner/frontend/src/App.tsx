@@ -677,6 +677,14 @@ export default function App() {
               </span>
             )}
             <button
+              disabled={!runId}
+              onClick={() => setShowComments(true)}
+              className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40"
+              title="Mitä asiakas on kirjoittanut tästä raportista, kierros kierrokselta"
+            >
+              💬 Kommentit
+            </button>
+            <button
               disabled={!runId || reportBusy}
               onClick={openPreview}
               className="text-xs px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40"
@@ -719,9 +727,6 @@ export default function App() {
                 </MenuItem>
                 <MenuItem onClick={() => { setShowOrders(true); setMenuOpen(false); }}>
                   📥 Tilaukset{openOrders > 0 ? ` (${openOrders} avointa)` : ""}
-                </MenuItem>
-                <MenuItem onClick={() => { setShowComments(true); setMenuOpen(false); }} disabled={!runId}>
-                  💬 Asiakkaan kommentit
                 </MenuItem>
                 <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-neutral-800 cursor-pointer text-neutral-200">
                   <input
