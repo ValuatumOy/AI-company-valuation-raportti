@@ -129,3 +129,96 @@ def test_comments_are_admin_only(monkeypatch):
     assert c.get(
         f"/api/runs/{rid}/comments", headers={"Authorization": "Bearer admin-token"}
     ).status_code == 200
+
+
+VALUBUILD_TOLERANCE_ERROR = (
+    "Ennusteiden tuonti epäonnistui (job 1): Forecast values were not applied "
+    "within tolerance: [ns:2031 submitted 3.5 but the model settled at 2.7892391, "
+    "ns:2032 submitted 4.5 but the model settled at 2.9099418042938217, "
+    "ebit:2030 submitted 0.25 but the model settled at -2.21422485]"
+)
+
+
+def test_refused_forecast_import_is_recorded_emailed_and_explained(monkeypatch):
+    """NoCFO, 2026-08-26. ValuBuild refused the import because the model
+    recalculates the late forecast years from its own growth and margin drivers.
+    The round never starts, so nothing else in the system records the attempt."""
+    from app import forecast_import
+
+    main, store, rid = _seed_run(monkeypatch)
+    store.set_run_status(rid, "awaiting_forecast")
+
+    async def refuse(base_fid, values):
+        raise forecast_import.ForecastImportError(VALUBUILD_TOLERANCE_ERROR)
+
+    sent = {}
+
+    async def fake_customer_mail(run_id, cells, reason=""):
+        sent["rid"] = run_id
+        sent["cells"] = cells
+        return {"sent": True}
+
+    monkeypatch.setattr(main.forecast_import, "import_and_wait", refuse)
+    monkeypatch.setattr(main.email_delivery, "send_forecast_import_failed",
+                        fake_customer_mail)
+    c = _client()
+
+    response = c.post(f"/api/runs/{rid}/generate-forecast", json={
+        "forecast_edits": [
+            {"varname": "ns", "year": 2026, "value": 5.3},
+            {"varname": "ebit", "year": 2026, "value": 0.25},
+        ],
+    })
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    # Finnish, names the years, says nothing was charged — not ValuBuild's dump.
+    assert "Liikevaihto 2031–2032" in detail
+    assert "EBIT 2030" in detail
+    assert "veloitettu" in detail
+    assert "submitted" not in detail
+
+    # The customer was told.
+    assert sent["rid"] == rid
+    assert {(x["varname"], x["year"]) for x in sent["cells"]} == {
+        ("ns", 2031), ("ns", 2032), ("ebit", 2030)
+    }
+
+    # The attempt survives on the run, and the run is back where it was.
+    run = store.get_run(rid)
+    assert run["status"] == "awaiting_forecast"
+    failure = run["params"]["forecast_import_failures"][0]
+    assert failure["edits"][0] == {"varname": "ns", "year": 2026, "value": 5.3}
+    assert failure["reason"] == VALUBUILD_TOLERANCE_ERROR
+    assert len(failure["rejected_cells"]) == 3
+
+    # And it is visible where a human will actually look.
+    body = c.get(f"/api/runs/{rid}/comments").json()
+    assert body["rounds"][0]["forecast_import_failures"][0]["reason"] == (
+        VALUBUILD_TOLERANCE_ERROR
+    )
+    assert body["rounds"][0]["empty"] is False
+
+
+def test_non_tolerance_import_error_falls_back_to_the_raw_reason(monkeypatch):
+    from app import forecast_import
+
+    main, store, rid = _seed_run(monkeypatch)
+    store.set_run_status(rid, "awaiting_forecast")
+
+    async def refuse(base_fid, values):
+        raise forecast_import.ForecastImportError("ValuBuild ei vastannut (HTTP 503).")
+
+    async def fake_customer_mail(run_id, cells, reason=""):
+        return {"sent": True}
+
+    monkeypatch.setattr(main.forecast_import, "import_and_wait", refuse)
+    monkeypatch.setattr(main.email_delivery, "send_forecast_import_failed",
+                        fake_customer_mail)
+
+    response = _client().post(f"/api/runs/{rid}/generate-forecast", json={
+        "forecast_edits": [{"varname": "ns", "year": 2026, "value": 5.3}],
+    })
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "ValuBuild ei vastannut (HTTP 503)."

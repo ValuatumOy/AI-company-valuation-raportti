@@ -1192,7 +1192,7 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
         new_fid = await forecast_import.import_and_wait(base_fid, payload)
     except forecast_import.ForecastImportError as exc:
         store.set_run_status(rid, "awaiting_forecast")
-        raise HTTPException(502, str(exc))
+        raise await _forecast_import_failed(rid, payload, exc)
     except asyncio.CancelledError:
         store.set_run_status(rid, "awaiting_forecast")
         raise
@@ -1219,6 +1219,66 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
     }
 
 
+async def _forecast_import_failed(rid: str, payload: list[dict],
+                                 exc: Exception) -> HTTPException:
+    """Record the refused import, tell the customer, alert the inbox, and return
+    the 502 to raise.
+
+    The import runs before any paid stage, so a failure writes nothing anywhere:
+    no stage result, no child run, and params still hold the pre-edit state. It
+    used to be visible only to whoever was watching the browser tab (NoCFO,
+    2026-08-26). Returns rather than raises so the caller keeps its own
+    status-reset ordering.
+    """
+    reason = str(exc)
+    cells = forecast_import.parse_tolerance_cells(reason)
+    store.append_forecast_import_failure(rid, {
+        "edits": payload,
+        "reason": reason,
+        "rejected_cells": cells,
+    })
+    await _admin_notify(
+        email_delivery.send_forecast_import_failed(rid, cells, reason),
+        rid, "forecast import failure notice",
+    )
+    await _admin_notify(
+        email_delivery.send_admin_alert(
+            f"Ennusteiden tuonti epäonnistui — {rid[:8]}",
+            "ValuBuild hylkäsi asiakkaan ennustemuutokset. Mitään ei veloitettu.",
+            [("Run id", rid), ("Hylättyjä soluja", len(cells)), ("Syy", reason[:500])],
+            tag="forecast-import",
+        ),
+        rid, "forecast import alert",
+    )
+    return HTTPException(502, _forecast_import_message(cells, reason))
+
+
+def _forecast_import_message(cells: list[dict], reason: str) -> str:
+    """What the browser shows. ValuBuild's own text is English and lists every
+    cell twice over; the customer needs the years and what to do instead."""
+    if not cells:
+        return reason
+    by_var: dict[str, list[int]] = {}
+    for cell in cells:
+        by_var.setdefault(cell.get("varname") or "", []).append(cell.get("year"))
+    parts = []
+    for varname, years in by_var.items():
+        years = sorted(y for y in years if isinstance(y, int))
+        if not years:
+            continue
+        label = _FORECAST_LABELS.get(varname, varname)
+        span = f"{years[0]}" if len(years) == 1 else f"{years[0]}\u2013{years[-1]}"
+        parts.append(f"{label} {span}")
+    return (
+        "Ennustemuutoksia ei voitu viedä laskentamalliin: "
+        + ", ".join(parts)
+        + ". Malli laskee näiden vuosien luvut omilla kasvu- ja "
+          "kannattavuusoletuksillaan, joten niille ei voi asettaa suoraa "
+          "euromäärää. Muokkaa ennustejakson alkuvuosia ja jätä loppuvuodet "
+          "ennalleen. Raporttiasi ei muutettu eikä tästä veloitettu mitään."
+    )
+
+
 async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
                                        clarifications_free_text="",
                                        show_old_numbers=False,
@@ -1242,7 +1302,7 @@ async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
         new_fid = await forecast_import.import_and_wait(parent_fid, payload)
     except forecast_import.ForecastImportError as exc:
         # Import failed → no round starts, no quota/lineage consumed.
-        raise HTTPException(502, str(exc))
+        raise await _forecast_import_failed(rid, payload, exc)
     summary = _forecast_change_summary(parent, edits)
     return _start_refinement_round(
         rid, parent, clarifications or [], clarifications_free_text or "",
@@ -1441,10 +1501,14 @@ def run_comments(rid: str, request: Request):
             "forecast_changes": params.get("forecast_changes") or "",
             # Written on every AI forecast-preview request, accepted or not.
             "forecast_previews": previews,
+            # Edits ValuBuild refused. These never became a round, so this is
+            # the only place they exist.
+            "forecast_import_failures": params.get("forecast_import_failures") or [],
         }
         entry["empty"] = not any(
             entry[k] for k in ("user_input", "clarifications", "clarifications_free_text",
-                               "forecast_changes", "forecast_previews")
+                               "forecast_changes", "forecast_previews",
+                               "forecast_import_failures")
         )
         rounds.append(entry)
     return {"run_id": rid, "rounds": rounds}

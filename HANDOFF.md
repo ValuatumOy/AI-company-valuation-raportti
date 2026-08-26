@@ -1,5 +1,62 @@
 # Handoff — 2026-08-26 (read this first)
 
+## 2026-08-26 (cont.) — ValuBuild refuses forecast edits to the fade years
+
+Esa hit this on NoCFO: `Forecast values were not applied within tolerance:
+[ns:2031 submitted 3.5 but the model settled at 2.7892391, ...]` — twelve cells,
+ns 2031-2035 and ebit 2030-2035. That message is ValuBuild's, not ours; our code
+relays it and correctly aborts before any paid stage.
+
+**Mechanism, proven to the last decimal.** The refused years are not "not
+applied" — they are recomputed from the model's own drivers:
+
+    settled_ns[y]   == settled_ns[y-1] * (1 + net_sales_growth_pct[y]/100)   delta 0.0
+    settled_ebit[y] == settled_ns[y]   * ebit_pct[y]/100                     delta 0.0
+
+on all of them, using the ORIGINAL model's `ns_growth` / `ebit_percent` series.
+NoCFO's forecast is system-generated (`is_system_deterministic`) with a growth
+fade to 3 % and a linear EBIT-margin ramp, and in that region the percentage is
+the stored estimate while the absolute is derived. Esa's ns 2030 = 2,5 M€ DID
+apply (back-solved from settled 2031 / 1.11569564 = 2.500000 exactly); the
+boundary sits at ns >= 2031 and ebit >= 2030 on this model.
+
+**Do NOT "fix" this by sending `ns_growth`/`ebit_percent` instead.** The
+boundary is per-year: the near years accept absolutes, so submitting a driver
+there may be overridden the same way and tolerance-fail in mirror image. It is a
+guess about ValuBuild internals.
+
+Three questions for Sami / Valuatum, none answerable from our side:
+1. What is in `EstimateController.ALLOWED_VARNAMES` — are `ns_growth` and
+   `ebit_percent` importable?
+2. On a system-generated model, which years accept an absolute `ns`/`ebit`, and
+   is that boundary exposed anywhere in `/modeldata`? Nothing we fetch says it;
+   our `is_system_deterministic` is a hardcoded `True`, not a signal.
+3. Is a prod import's `resultFid` readable with our token? "job 1" in Esa's
+   error says his was probably the first import job in `arvonmaaritys-fi`. Every
+   historic success (fids 846121-846137) was profindertest, and that token is no
+   longer valid there, so prod end-to-end is unproven past the tolerance issue.
+
+**Workaround today:** edit only the early forecast years. Everything below the
+boundary applied cleanly.
+
+Shipped instead (the half that needs no ValuBuild answer):
+- A refused import is recorded on the run (`forecast_import_failures`: the
+  edits, ValuBuild's reason, the parsed cells) in BOTH paths — round-1
+  `generate-forecast` and round-2 — and shows in the comments overlay in red.
+  Before this the import wrote nothing anywhere: no stage result, no child run,
+  params still pre-edit, so the only person who ever knew was whoever was
+  looking at the tab.
+- The customer gets an email (`send_forecast_import_failed`): Finnish, names the
+  years by variable, says the report was not changed and nothing was charged,
+  suggests editing only the early years, links back. Sent only when the run has
+  a `delivery_email`. `REPORT_EMAIL_ENABLED=1` in Railway and mail goes via SES.
+- The shared inbox gets an alert.
+- The browser gets Finnish naming the years instead of ValuBuild's English dump.
+- `forecast_import.parse_tolerance_cells` parses that message for DISPLAY ONLY —
+  never for retry logic. It is another service's prose.
+
+Tests 282 -> 284.
+
 ## 2026-08-26 — NoCFO: the refinement round that changed nothing
 
 Toimari ran NoCFO Oy (fid 356362) on 2026-08-25 (`2429d74b`, $0,62) and a

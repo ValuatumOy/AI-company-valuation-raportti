@@ -294,6 +294,113 @@ async def send_forecast_ready(rid: str) -> dict:
     return await _dispatch(message, region=region, sender=sender, to=to, rid=rid)
 
 
+SUPPORT_EMAIL = "company-valuation@valuatum.com"
+
+_VARNAME_LABELS = {"ns": "Liikevaihto", "ebit": "EBIT"}
+
+
+def _failed_year_lines(cells: list[dict]) -> list[str]:
+    """"Liikevaihto 2031-2035" per variable, so the customer sees the shape of
+    the problem instead of a list of twelve near-identical rows."""
+    by_var: dict[str, list[int]] = {}
+    for cell in cells:
+        by_var.setdefault(cell.get("varname") or "", []).append(cell.get("year"))
+    lines = []
+    for varname, years in by_var.items():
+        years = sorted(y for y in years if isinstance(y, int))
+        if not years:
+            continue
+        label = _VARNAME_LABELS.get(varname, varname)
+        span = f"{years[0]}" if len(years) == 1 else f"{years[0]}\u2013{years[-1]}"
+        lines.append(f"{label}: {span}")
+    return lines
+
+
+async def send_forecast_import_failed(rid: str, cells: list[dict],
+                                      reason: str = "") -> dict:
+    """Tell the buyer their forecast edits did not go through.
+
+    Without this the import fails, the run stays parked where it was, and the
+    only person who ever learns is whoever happened to be looking at the browser
+    tab. Nothing was charged and nothing was lost: the run is untouched and the
+    same edits can be retried, which is the whole message.
+    """
+    run = store.get_run(rid)
+    if not run:
+        return {"sent": False, "reason": "run-not-found"}
+    to = _recipient(run)
+    if not to:
+        return {"sent": False, "reason": "no-recipient"}
+    if not _truthy_env("REPORT_EMAIL_ENABLED", "1"):
+        return {"sent": False, "reason": "disabled"}
+    region = _aws_region()
+    sender = _sender()
+    if not region:
+        return {"sent": False, "reason": "missing-aws-region"}
+    if not sender:
+        return {"sent": False, "reason": "missing-sender"}
+
+    company = _company_name(run)
+    link = _report_link(rid, run)
+    year_lines = _failed_year_lines(cells or [])
+
+    if year_lines:
+        detail_text = (
+            "Arvonmääritysmalli laskee näiden vuosien luvut omilla kasvu- ja "
+            "kannattavuusoletuksillaan, joten niille ei voi asettaa suoraa "
+            "euromäärää:\n"
+            + "\n".join(f"  - {line}" for line in year_lines)
+            + "\n\nAiempien vuosien muutokset olisivat menneet läpi. Voit "
+              "kokeilla uudelleen niin, että muokkaat vain ennustejakson "
+              "alkuvuosia ja jätät loppuvuodet ennalleen."
+        )
+        detail_html = (
+            "<p>Arvonmääritysmalli laskee näiden vuosien luvut omilla kasvu- ja "
+            "kannattavuusoletuksillaan, joten niille ei voi asettaa suoraa "
+            "euromäärää:</p><ul>"
+            + "".join(f"<li>{html.escape(line)}</li>" for line in year_lines)
+            + "</ul><p>Aiempien vuosien muutokset olisivat menneet läpi. Voit "
+              "kokeilla uudelleen niin, että muokkaat vain ennustejakson "
+              "alkuvuosia ja jätät loppuvuodet ennalleen.</p>"
+        )
+    else:
+        shown = (reason or "").strip()[:300] or "tekninen virhe"
+        detail_text = f"Syy: {shown}"
+        detail_html = f"<p>Syy: {html.escape(shown)}</p>"
+
+    subject = f"Ennustemuutokset eivät menneet läpi: {company}"
+    link_text = f"\n\nPalaa raporttiin: {link}" if link else ""
+    link_html = (
+        f'<p><a href="{html.escape(link)}">Palaa raporttiin</a></p>' if link else ""
+    )
+    text_body = (
+        f"Hei,\n\nTeit muutoksia {company} -arvonmäärityksen ennusteisiin, "
+        "mutta muutoksia ei saatu vietyä laskentamalliin. Raporttiasi ei "
+        "muutettu eikä tästä veloitettu mitään.\n\n"
+        f"{detail_text}{link_text}\n\n"
+        f"Jos tämä ei ratkea, vastaa tähän viestiin tai ota yhteyttä: "
+        f"{SUPPORT_EMAIL}\n\nYstävällisin terveisin,\nValuatum"
+    )
+    html_body = (
+        "<p>Hei,</p>"
+        f"<p>Teit muutoksia {html.escape(company)} -arvonmäärityksen "
+        "ennusteisiin, mutta muutoksia ei saatu vietyä laskentamalliin. "
+        "Raporttiasi ei muutettu eikä tästä veloitettu mitään.</p>"
+        f"{detail_html}{link_html}"
+        "<p>Jos tämä ei ratkea, vastaa tähän viestiin tai ota yhteyttä: "
+        f'<a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a></p>'
+        "<p>Ystävällisin terveisin,<br>Valuatum</p>"
+    )
+
+    message = EmailMessage(policy=policy.SMTP)
+    message["From"] = sender
+    message["To"] = to
+    message["Subject"] = subject
+    message.set_content(text_body, cte="quoted-printable")
+    message.add_alternative(html_body, subtype="html", cte="quoted-printable")
+    return await _dispatch(message, region=region, sender=sender, to=to, rid=rid)
+
+
 # ---- internal (Valuatum-facing) mail -----------------------------------------
 # Nobody here watches the Railway logs, so the things that used to be a lone
 # print() — a report held back by its readiness checks, a run that died with a

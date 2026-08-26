@@ -14,6 +14,12 @@ type Round = {
   clarifications_free_text: string;
   forecast_changes: string;
   forecast_previews: { at: string; text: string; summary: string; rows: any[] }[];
+  forecast_import_failures: {
+    at: string;
+    reason: string;
+    edits: { varname: string; year: number; value: number }[];
+    rejected_cells: { varname: string; year: number }[];
+  }[];
   empty: boolean;
 };
 
@@ -99,6 +105,24 @@ export function CommentsOverlay({ rid, onClose }: { rid: string; onClose: () => 
               {r.forecast_changes && (
                 <Block label="Ennustemuutokset (viety malliin)">{r.forecast_changes}</Block>
               )}
+
+              {(r.forecast_import_failures || []).map((f, i) => {
+                const years = f.rejected_cells?.map((c) => `${c.varname} ${c.year}`) || [];
+                return (
+                  <div key={`fail-${i}`} className="mt-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-red-400">
+                      Ennustemuutos hylätty {f.at?.slice(0, 16).replace("T", " ")}
+                    </div>
+                    <div className="mt-1 whitespace-pre-wrap text-xs text-neutral-200 bg-neutral-950 border border-red-900/60 rounded p-2">
+                      {years.length
+                        ? `Malli ei hyväksynyt: ${years.join(", ")}`
+                        : f.reason}
+                      {"\n\n"}
+                      {f.edits?.map((e) => `${e.varname} ${e.year}: ${e.value}`).join(", ")}
+                    </div>
+                  </div>
+                );
+              })}
 
               {r.forecast_previews.map((p, i) => (
                 <Block

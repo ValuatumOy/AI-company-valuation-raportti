@@ -294,6 +294,28 @@ def append_forecast_preview(rid, entry):
     db.execute("UPDATE runs SET params=? WHERE id=?", (db.jdump(params), rid))
 
 
+def append_forecast_import_failure(rid, entry):
+    """Record a forecast import that ValuBuild refused.
+
+    The import runs before any paid stage, so a failure leaves no stage result,
+    no child run and no trace of what the customer tried to do — the edits never
+    reach params, because params are only written once the import succeeds.
+    Without this the whole attempt is invisible to everyone but the person who
+    saw the error on screen.
+
+    ponytail: same read-modify-write as append_forecast_preview; a record, not a
+    transaction.
+    """
+    row = db.query_one("SELECT params FROM runs WHERE id=?", (rid,))
+    if not row:
+        return
+    params = db.jload(row.get("params")) or {}
+    failures = params.get("forecast_import_failures") or []
+    failures.append({"at": _now(), **entry})
+    params["forecast_import_failures"] = failures[-20:]
+    db.execute("UPDATE runs SET params=? WHERE id=?", (db.jdump(params), rid))
+
+
 def refinement_count(rid):
     """How many refinement runs already exist in `rid`'s report FAMILY (every
     descendant of the root round-1 run). Used to cap total refinements per

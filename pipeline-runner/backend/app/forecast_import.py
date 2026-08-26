@@ -12,12 +12,40 @@ carries a JSON body, and success yields the new resultFid rather than nothing.
 """
 import asyncio
 import os
+import re
 import time
 from typing import Any
 
 import httpx
 
 from valuatum_kit.config import api_base_url
+
+
+# ValuBuild rejects the whole import when a submitted value does not survive the
+# model's own recalculation, and names every offending cell in one free-text
+# line: "ns:2031 submitted 3.5 but the model settled at 2.7892391, ...".
+# We parse it ONLY to say which years failed in Finnish. Never for retry logic:
+# it is another service's prose and it may change without warning.
+_TOLERANCE_CELL = re.compile(
+    r"(?P<varname>[a-z_]+):(?P<year>\d{4})\s+submitted\s+(?P<submitted>-?[\d.eE+]+)"
+    r"\s+but the model settled at\s+(?P<settled>-?[\d.eE+]+)"
+)
+
+
+def parse_tolerance_cells(message: str) -> list[dict]:
+    """Cells ValuBuild refused to set, in millions. Empty for any other error."""
+    cells = []
+    for m in _TOLERANCE_CELL.finditer(message or ""):
+        try:
+            cells.append({
+                "varname": m.group("varname"),
+                "year": int(m.group("year")),
+                "submitted": float(m.group("submitted")),
+                "settled": float(m.group("settled")),
+            })
+        except ValueError:
+            continue
+    return cells
 
 
 POLL_INTERVAL_SECONDS = 10.0
