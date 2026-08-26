@@ -514,8 +514,9 @@ async def _run_stages(run, stages, only=None, from_order=None):
     )
 
     # Round-2 only: swap the writer model (the highest-order LLM stage that
-    # produces the report). Round 1 writes fresh with Fable; round 2's careful
-    # maximal-preserve refinement can use Opus. Override rides in params.
+    # produces the report). Model only — the stage keeps its own
+    # reasoning_effort and max_tokens. Override rides in params
+    # (ROUND2_WRITER_MODEL, stamped at round creation).
     _writer_ovr = (params or {}).get("round2_writer_model")
     _writer_order = max(
         (s["order"] for s in stages if s.get("model") != DATA_FETCHER_MODEL),

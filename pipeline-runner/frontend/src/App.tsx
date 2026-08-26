@@ -6,6 +6,7 @@ import type {
 import { wasAutoCorrected } from "./status";
 import { StageList } from "./components/StageList";
 import { StageEditor } from "./components/StageEditor";
+import { CommentsOverlay } from "./components/CommentsOverlay";
 import { ResultPanel } from "./components/ResultPanel";
 import { CostOverlay } from "./components/CostOverlay";
 import { OrdersOverlay } from "./components/OrdersOverlay";
@@ -48,6 +49,7 @@ export default function App() {
   const [cmp, setCmp] = useState<{ order: number; results: any[] } | null>(null);
   const [showCosts, setShowCosts] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
+  const [showComments, setShowComments] = useState(false);
   const [openOrders, setOpenOrders] = useState(0);
   const [reportCaps, setReportCaps] = useState({ generator: false, pdf: false });
   const [reportBusy, setReportBusy] = useState(false);
@@ -718,6 +720,9 @@ export default function App() {
                 <MenuItem onClick={() => { setShowOrders(true); setMenuOpen(false); }}>
                   📥 Tilaukset{openOrders > 0 ? ` (${openOrders} avointa)` : ""}
                 </MenuItem>
+                <MenuItem onClick={() => { setShowComments(true); setMenuOpen(false); }} disabled={!runId}>
+                  💬 Asiakkaan kommentit
+                </MenuItem>
                 <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-neutral-800 cursor-pointer text-neutral-200">
                   <input
                     type="checkbox"
@@ -866,6 +871,9 @@ export default function App() {
         <CostOverlay pipeline={pipeline} results={results} onClose={() => setShowCosts(false)} />
       )}
       {showOrders && <OrdersOverlay onClose={() => setShowOrders(false)} />}
+      {showComments && runId && (
+        <CommentsOverlay rid={runId} onClose={() => setShowComments(false)} />
+      )}
       {previewUrl && (
         <PreviewOverlay
           url={previewUrl}

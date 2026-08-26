@@ -268,6 +268,32 @@ def _family_ids(rid):
     return row["id"], descendants
 
 
+def family_run_ids(rid):
+    """Every run id in `rid`'s report family, root first."""
+    root, descendants = _family_ids(rid)
+    return ([root] + descendants) if root else []
+
+
+def append_forecast_preview(rid, entry):
+    """Keep what the user typed into the forecast-description box, plus the AI's
+    proposal. /forecast-preview is otherwise stateless: before this, a customer
+    could describe the forecast change they wanted, see a good proposal, never
+    click "use these", and leave no trace of having asked at all.
+
+    ponytail: read-modify-write on runs.params, no row lock. A concurrent
+    generate-forecast could drop one preview entry; the trail is a record, not
+    a transaction, so that trade is fine.
+    """
+    row = db.query_one("SELECT params FROM runs WHERE id=?", (rid,))
+    if not row:
+        return
+    params = db.jload(row.get("params")) or {}
+    previews = params.get("forecast_previews") or []
+    previews.append({"at": _now(), **entry})
+    params["forecast_previews"] = previews[-20:]
+    db.execute("UPDATE runs SET params=? WHERE id=?", (db.jdump(params), rid))
+
+
 def refinement_count(rid):
     """How many refinement runs already exist in `rid`'s report FAMILY (every
     descendant of the root round-1 run). Used to cap total refinements per

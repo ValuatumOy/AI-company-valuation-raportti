@@ -59,11 +59,15 @@ _APP_TOKEN = os.getenv("APP_TOKEN", "")
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
 BUILD = "2026-08-05-checkout-product-check"
 
-# Round-2 refinement writer. Preserve-and-patch is an editing task, not creative
-# writing — Sonnet 5 ($2/$10) does it at 1/2.5 of Opus 4.8's price; round-1
-# authorship stays Fable. Env-overridable for A/B.
+# Round-2 refinement writer. Same model as round 1 (the stage's own
+# `openai/gpt-5.6-sol`) — a refinement has to preserve the previous report
+# verbatim where the user did not correct it, and swapping authors mid-family
+# is what makes that hard. The NoCFO round (2026-08-26) refined under
+# claude-sonnet-5 and dropped the user's correction while keeping everything
+# else. The stage's own reasoning_effort ("medium") is untouched: the override
+# below swaps the model only. Env-overridable for A/B.
 ROUND2_WRITER_MODEL = (
-    os.getenv("ROUND2_WRITER_MODEL") or "anthropic/claude-sonnet-5"
+    os.getenv("ROUND2_WRITER_MODEL") or "openai/gpt-5.6-sol"
 )
 
 # Paid extra refinement rounds (round 3+, once ROUND2_MAX_PER_RUN's free
@@ -1099,6 +1103,14 @@ async def forecast_preview(rid: str, body: ForecastPreviewIn, request: Request):
     notes = list(proposal.get("notes") or [])
     notes.extend(forecast_interpret.magnitude_notes(forecast, edits))
     notes = list(dict.fromkeys(notes))
+    # Record the ask before returning it. The user may never accept the proposal
+    # (nothing forces them to), and without this the description they wrote is
+    # gone the moment the tab closes — see GET /api/runs/{rid}/comments.
+    store.append_forecast_preview(rid, {
+        "text": text,
+        "summary": proposal.get("summary") or "",
+        "rows": rows,
+    })
     return {
         "edits": [edit.model_dump() for edit in edits],
         "summary": proposal.get("summary") or "",
@@ -1386,6 +1398,56 @@ def _require_ready(rid: str, force: int):
 def run_readiness(rid: str, request: Request):
     _require_run_access(rid, request)
     return store.report_readiness(rid)
+
+
+@app.get("/api/runs/{rid}/comments")
+def run_comments(rid: str, request: Request):
+    """Everything the customer wrote about this report, oldest round first.
+
+    Their words were always stored (runs.params) but nothing ever displayed
+    them, so after a refinement round nobody could tell what had actually been
+    asked for — which is how a round that dropped the user's correction looked
+    identical to one that applied it (NoCFO, 2026-08-26). Family-wide, because
+    each refinement is a separate run.
+    """
+    _require_run_access(rid, request)
+    rounds = []
+    # A refinement round clones its parent's params, so the order note and any
+    # earlier forecast previews come along for the ride. Show each one once, on
+    # the round it was actually written.
+    seen_previews = set()
+    for i, fid_ in enumerate(store.family_run_ids(rid)):
+        run = store.get_run(fid_)
+        if not run:
+            continue
+        params = run.get("params") or {}
+        previews = []
+        for preview in params.get("forecast_previews") or []:
+            key = (preview.get("at"), preview.get("text"))
+            if key in seen_previews:
+                continue
+            seen_previews.add(key)
+            previews.append(preview)
+        entry = {
+            "run_id": fid_,
+            "round": i + 1,
+            "created_at": run.get("created_at"),
+            "status": run.get("status"),
+            # The note typed at order time — round 1's, inherited by the rest.
+            "user_input": (params.get("user_input") or "") if i == 0 else "",
+            "clarifications": params.get("clarifications") or [],
+            "clarifications_free_text": params.get("clarifications_free_text") or "",
+            # Set only when the edits were actually submitted and imported.
+            "forecast_changes": params.get("forecast_changes") or "",
+            # Written on every AI forecast-preview request, accepted or not.
+            "forecast_previews": previews,
+        }
+        entry["empty"] = not any(
+            entry[k] for k in ("user_input", "clarifications", "clarifications_free_text",
+                               "forecast_changes", "forecast_previews")
+        )
+        rounds.append(entry)
+    return {"run_id": rid, "rounds": rounds}
 
 
 @app.get("/api/runs/{rid}/report-source")

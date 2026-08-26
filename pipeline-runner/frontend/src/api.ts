@@ -145,6 +145,10 @@ export const api = {
 
   runs: () => req("/api/runs").then((r) => j<any[]>(r)),
   orders: () => req("/api/orders").then((r) => j<any[]>(r)),
+
+  // Everything the customer wrote about this report, every round of the family.
+  runComments: (rid: string) =>
+    req(`/api/runs/${rid}/comments`).then((r) => j<{ rounds: any[] }>(r)),
   setOrderStatus: (oid: string, status: string) =>
     req(`/api/orders/${oid}`, {
       method: "PATCH",

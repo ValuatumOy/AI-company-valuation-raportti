@@ -1,4 +1,78 @@
-# Handoff — 2026-08-11 (read this first)
+# Handoff — 2026-08-26 (read this first)
+
+## 2026-08-26 — NoCFO: the refinement round that changed nothing
+
+Toimari ran NoCFO Oy (fid 356362) on 2026-08-25 (`2429d74b`, $0,62) and a
+refinement on 2026-08-26 (`a13e34a5`, $0,70). He reported that the forecast
+editor looked right but the new report showed no change. It didn't. Diffing the
+two RENDERED reports (`GET /api/runs/{rid}/report.html`, the ground truth —
+don't diff stage-2 `parsed_json`, the assembled output differs from it) gives 15
+changed lines: one EV→equity waterfall chart and one WACC/credit-risk callout,
+both writer-generic. **Zero numbers changed. Nothing the customer asked for
+appeared.** Two independent root causes:
+
+**1. The AI forecast proposal was never accepted, and nothing said so.**
+Railway logs show exactly one `POST /forecast-preview` (200) followed straight
+by `POST /round2`. `a13e34a5` has the same fid as its parent and no
+`forecast_edits`/`forecast_changes` in params, so no ValuBuild import ran.
+`ForecastEditor`'s AI proposal is local state until "Käytä nämä muutokset" is
+clicked; "Tarkenna raporttia" ignored it and was enabled anyway (free text alone
+satisfied `nothingToSend`). The import path itself is fine — `04f83507` and
+`2f0554e0` both imported successfully on prod.
+
+**2. The writer silently dropped the free-text correction.** Esa wrote that
+Holvi's 2025 600 tEUR investment was probably ~20 % of equity → ~3 M€ implied
+valuation, to be stated as an assumption. Stage 1 absorbed it perfectly
+(`market_signals[0]` gained `value_basis: equity`, the 3 M€ figure, the 10–40 %
+reasoning; `reliability` Vahva → Kohtalainen). Stage 2's request contained that
+enriched signal. **Stage 2's output contains none of it** — the round-2 report
+still says the investment "ei kerro yhtiön arvostusta". `singlewriter.txt` rule
+0's preserve-check listed only market size / TAM / SAM / competitor figures, so
+market_signals fell through maximal-preserve, and the writer never saw the
+user's own words: rule 37 names `clarifications` as a source but the prompt had
+no `{{clarifications}}` placeholder (`runner.py` has always populated the
+context key — only the prompt was missing).
+
+Shipped (NOT deployed, NOT verified on a live run):
+- `prompts/singlewriter.txt` — `{{clarifications}}` context block; new rule 0c
+  (walk the user's verbatim asks and confirm each appears); rule 0's diff
+  checklist extended to `market_signals`.
+- `GET /api/runs/{rid}/comments` (admin-only) — the whole family's order note,
+  clarification answers, free text, applied forecast changes and forecast-preview
+  requests, oldest round first. Inherited params are shown once, on the round
+  that wrote them.
+- `store.append_forecast_preview` — `/forecast-preview` now records the user's
+  description + the AI proposal on the run. It was stateless; an un-accepted ask
+  left no trace anywhere, which is why nobody could see what Esa had asked for.
+- Admin UI: `⋯ → 💬 Asiakkaan kommentit` (`CommentsOverlay.tsx`). A forecast
+  request on a round with no applied `forecast_changes` is labelled
+  **EI VIETY MALLIIN** — exactly the NoCFO case.
+- Client site (`Company_valuation_nettisivut`): both submit buttons block while
+  an AI proposal is pending, with a red "hyväksy tai hylkää ensin" line.
+- `ROUND2_WRITER_MODEL` default `anthropic/claude-sonnet-5` →
+  `openai/gpt-5.6-sol`, i.e. the same writer round 1 uses. Confirmed from
+  `stage_results.model`: round 1 wrote with `openai/gpt-5.6-sol`, round 2 with
+  `anthropic/claude-sonnet-5`; the Railway env var is unset, so the code default
+  is what runs. The override swaps the model only — the stage keeps its own
+  `reasoning_effort: "medium"` and 96k `max_tokens`. Old comments claiming round
+  1 uses Fable and round 2 Opus were stale and are corrected.
+
+Tests 279 → 282 (`tests/test_run_comments.py`). One pre-existing test
+(`test_truncation_retry_respects_spend_cap`) hand-builds a stage context and had
+to gain `"clarifications": ""` — the new placeholder is a hard dependency.
+
+**Open:** Esa's forecast-description text from 2026-08-26 is unrecoverable —
+that endpoint was stateless at the time. Only the free text survives (it is in
+`a13e34a5`'s params, and now visible in the comments overlay).
+Neither the prompt fix nor the writer-model change is verified until a real
+refinement run goes through — that costs money, so ask first. After deploy,
+confirm the DB copy of the writer prompt actually contains `{{clarifications}}`
+(`GET /api/pipelines/{pid}`); if reseed did not run at boot, `POST /api/reseed`
+(admin, free).
+
+## Older
+
+# Handoff — 2026-08-11
 
 ## 2026-08-13 — terminal EVA is in the data after all (`cum_disc_eva`)
 
