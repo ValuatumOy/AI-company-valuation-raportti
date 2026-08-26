@@ -74,8 +74,8 @@ pipeline is missing or looks legacy; `sync_prompt_patches()` touches stage 1
 only. So a prompt change reaches prod ONLY via `POST /api/reseed` (admin, free,
 no LLM calls). Prod was still serving a pre-2026-08-13 writer prompt — the
 `cumulative_discounted_eva` rule-34 change from `d0f212c` had never gone live
-either. One reseed brought both (`updated: 3`; a snapshot of the previous stage
-rows is in the session scratchpad). It rewrote the writer prompt on the default
+either. One reseed brought both (`updated: 3`). It rewrote the writer prompt on
+the default
 AND the ARKISTO pipeline and touched nothing else — models, reasoning_effort and
 max_tokens were already identical to the seed. **Add a reseed to the checklist
 after any `prompts/*.txt` change.**
