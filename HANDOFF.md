@@ -64,11 +64,21 @@ to gain `"clarifications": ""` — the new placeholder is a hard dependency.
 **Open:** Esa's forecast-description text from 2026-08-26 is unrecoverable —
 that endpoint was stateless at the time. Only the free text survives (it is in
 `a13e34a5`'s params, and now visible in the comments overlay).
-Neither the prompt fix nor the writer-model change is verified until a real
-refinement run goes through — that costs money, so ask first. After deploy,
-confirm the DB copy of the writer prompt actually contains `{{clarifications}}`
-(`GET /api/pipelines/{pid}`); if reseed did not run at boot, `POST /api/reseed`
-(admin, free).
+**Deployed 2026-08-26** (`88d64e2`, site `dfa6713`). Railway redeployed,
+`/api/runs/{rid}/comments` is live, both Vercel projects rebuilt
+(`frontend-one-phi-77.vercel.app` and `www.arvonmaaritys.fi` both serve the new
+bundles). Nothing has been run through it — that costs money and needs a yes.
+
+**Boot does not reseed prompts.** `ensure_seeded()` only force-reseeds when the
+pipeline is missing or looks legacy; `sync_prompt_patches()` touches stage 1
+only. So a prompt change reaches prod ONLY via `POST /api/reseed` (admin, free,
+no LLM calls). Prod was still serving a pre-2026-08-13 writer prompt — the
+`cumulative_discounted_eva` rule-34 change from `d0f212c` had never gone live
+either. One reseed brought both (`updated: 3`; a snapshot of the previous stage
+rows is in the session scratchpad). It rewrote the writer prompt on the default
+AND the ARKISTO pipeline and touched nothing else — models, reasoning_effort and
+max_tokens were already identical to the seed. **Add a reseed to the checklist
+after any `prompts/*.txt` change.**
 
 ## Older
 
