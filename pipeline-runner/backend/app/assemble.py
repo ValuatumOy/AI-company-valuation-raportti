@@ -295,12 +295,10 @@ def _inject_financial_statement_blocks(sections, input_data):
         if not (isinstance(sec, dict) and str(sec.get("id")) == _HISTORY_SECTION_ID):
             continue
         current = list(sec.get("blocks") or [])
-        if any(
-            isinstance(b, dict) and b.get("table_id") == "deterministic_income_statement"
-            for b in current
-        ):
-            return sections
-        sec["blocks"] = current + blocks
+        have = {b.get("table_id") for b in current if isinstance(b, dict)}
+        fresh = [b for b in blocks if b.get("table_id") not in have]
+        if fresh:
+            sec["blocks"] = current + fresh
         break
     return sections
 

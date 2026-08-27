@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "admin-frontend",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "VITE_PROXY_TARGET=https://valu-pipeline-production-88f2.up.railway.app npm --prefix pipeline-runner/frontend run dev"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "nettisivut-dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "npm --prefix '../Company_valuation_nettisivut' run dev"
+      ],
+      "port": 3000
+    }
+  ]
+}
