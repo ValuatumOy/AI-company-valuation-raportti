@@ -3748,7 +3748,7 @@ def _example_input_data():
 
 def test_financial_statements_cover_every_actual_year():
     data = _example_input_data()
-    blocks = financials.build_financial_statement_blocks(data)
+    blocks = financials.build_financial_statement_blocks(data)["5"]
     inc = next(b for b in blocks if b["table_id"] == "deterministic_income_statement")
     bs = next(b for b in blocks if b["table_id"] == "deterministic_balance_sheet")
     years = [str(y) for y in data["actuals"]["years"]]
@@ -3768,7 +3768,7 @@ def test_financial_statement_forecast_years_are_marked_with_e():
     data = {"forecast": {"years": [2026, 2027],
                          "income_statement": {"net_sales": [100, 110]},
                          "balance_sheet": {"total_assets": [200, 220]}}}
-    blocks = financials.build_financial_statement_blocks(data)
+    blocks = financials.build_financial_statement_blocks(data)["6"]
     ids = [b["table_id"] for b in blocks]
     assert ids == ["deterministic_income_statement_forecast",
                    "deterministic_balance_sheet_forecast"]
@@ -3782,15 +3782,29 @@ def test_financial_statements_drop_years_that_are_empty_on_every_row():
     data = {"actuals": {"years": [2020, 2021, 2022],
                         "income_statement": {"net_sales": [None, 1, 2]},
                         "balance_sheet": {"total_assets": [None, 5, 6]}}}
-    blocks = financials.build_financial_statement_blocks(data)
+    blocks = financials.build_financial_statement_blocks(data)["5"]
     assert blocks[0]["columns"] == ["Erä", "2021", "2022"]
     assert blocks[0]["rows"] == [["Liikevaihto", "1", "2"]]
     assert blocks[1]["columns"] == ["Erä", "2021", "2022"]
 
 
 def test_financial_statements_empty_without_actuals():
-    assert financials.build_financial_statement_blocks({}) == []
-    assert financials.build_financial_statement_blocks({"actuals": {"years": []}}) == []
+    assert financials.build_financial_statement_blocks({})["5"] == []
+    assert financials.build_financial_statement_blocks({"actuals": {"years": []}})["5"] == []
+
+
+def test_forecast_table_falls_back_to_an_old_runs_flat_forecast_keys():
+    """Runs exported before the forecast statements existed still carry
+    net_sales / ebitda / ebit / equity / debt in the forecast block itself."""
+    data = {"forecast": {"years": [2026, 2027], "net_sales": [455, 1241],
+                         "ebit": [-717, -1742],
+                         "equity_excl_capital_loans": [100, 90],
+                         "interest_bearing_debt": [50, 60]}}
+    inc, bs = financials.build_financial_statement_blocks(data)["6"]
+    assert inc["columns"] == ["Erä", "2026e", "2027e"]
+    assert [r[0] for r in inc["rows"]] == ["Liikevaihto", "Liiketulos (EBIT)"]
+    assert [r[0] for r in bs["rows"]] == [
+        "Oma pääoma (ilman pääomalainoja)", "Korolliset velat"]
 
 
 def test_assemble_injects_financial_statements_into_section_5_once():

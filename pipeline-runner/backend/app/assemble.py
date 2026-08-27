@@ -286,20 +286,21 @@ def _inject_headcount_efficiency_blocks(sections, input_data):
 
 
 def _inject_financial_statement_blocks(sections, input_data):
-    """Append the full tuloslaskelma + taseen päärivit to section 5 — straight
-    from the export (see app/financials.py), never written by the LLM."""
-    blocks = financials.build_financial_statement_blocks(input_data)
-    if not blocks:
-        return sections
+    """Append the full tuloslaskelma + taseen päärivit — actual years to
+    section 5, forecast years to section 6 — straight from the export (see
+    app/financials.py), never written by the LLM."""
+    by_section = financials.build_financial_statement_blocks(input_data)
     for sec in sections:
-        if not (isinstance(sec, dict) and str(sec.get("id")) == _HISTORY_SECTION_ID):
+        if not isinstance(sec, dict):
+            continue
+        blocks = by_section.get(str(sec.get("id")))
+        if not blocks:
             continue
         current = list(sec.get("blocks") or [])
         have = {b.get("table_id") for b in current if isinstance(b, dict)}
         fresh = [b for b in blocks if b.get("table_id") not in have]
         if fresh:
             sec["blocks"] = current + fresh
-        break
     return sections
 
 

@@ -87,7 +87,11 @@ def _statement_blocks(source, suffix, title_suffix, id_suffix):
         (INCOME_ROWS, "income_statement", "Tuloslaskelma", "deterministic_income_statement"),
         (BALANCE_ROWS, "balance_sheet", "Taseen päärivit", "deterministic_balance_sheet"),
     ):
-        rows = _rows(source.get(key) or {}, spec, n)
+        # Runs exported before 2026-08-27 have no forecast statements, but
+        # their forecast block carries net_sales / ebitda / ebit / equity /
+        # interest_bearing_debt under those same names — so an old run still
+        # gets a per-year forecast table, just a shorter one.
+        rows = _rows(source.get(key) or source, spec, n)
         shown, rows = _drop_empty_years(years, rows)
         columns = ["Erä"] + [f"{y}{suffix}" for y in shown]
         if rows:
@@ -103,11 +107,10 @@ def _statement_blocks(source, suffix, title_suffix, id_suffix):
 
 
 def build_financial_statement_blocks(input_data):
-    """Actual years first, then the engine's own forecast years (marked "e").
-
-    The forecast statements only exist on runs exported after 2026-08-27; older
-    runs simply get the actuals half.
-    """
+    """Blocks per section id: the actual years belong to section 5 (history),
+    the forecast years (marked "e") to section 6 (ennusteet)."""
     data = input_data or {}
-    return (_statement_blocks(data.get("actuals"), "", "", "")
-            + _statement_blocks(data.get("forecast"), "e", " (ennuste)", "_forecast"))
+    return {
+        "5": _statement_blocks(data.get("actuals"), "", "", ""),
+        "6": _statement_blocks(data.get("forecast"), "e", " (ennuste)", "_forecast"),
+    }
