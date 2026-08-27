@@ -377,6 +377,69 @@ def build_flags(data_map: dict[str, dict[str, Any]], years: list[int]) -> list[d
     return flags
 
 
+def income_statement(data_map: dict[str, dict[str, Any]], years: list[int]) -> dict[str, Any]:
+    """Statement rows for any year range — actuals AND forecast.
+
+    /modeldata returns these varNames for estimate years too (verified live on
+    fid 356362, Y+0..Y+9), so one mapping serves both.
+    """
+    return {
+        "net_sales": arr(data_map, years, "ns", money=True),
+        "other_operating_income": arr(data_map, years, "cr_other_operating_income", money=True),
+        "gross_profit": arr(data_map, years, ["cr_gross_profit", "gross_profit"], money=True),
+        # cr_employee_expenses is the absolute figure (= wages and
+        # salaries + social security expenses). Do NOT derive it from
+        # per_employee x headcount: headcount_efficiency.py uses this
+        # row to sanity-check headcount, which that derivation would
+        # make circular.
+        "personnel_costs": arr(data_map, years, "cr_employee_expenses", money=True),
+        "other_operating_costs": arr(data_map, years, "cr_other_oper_expenses", money=True),
+        "depreciation_total": arr(data_map, years, "cr_depreciation", money=True),
+        "ebitda": arr(data_map, years, ["cr_ebitda_xml", "ebitda"], money=True),
+        "ebit": arr(data_map, years, "ebit", money=True),
+        "ebit_without_extras": arr(data_map, years, "ebit_without_extras", money=True),
+        "extras_in_ebit": arr(data_map, years, "extras_in_ebit", money=True),
+        "interest_expenses": arr(data_map, years, ["cr_interest_expenses", "interest_expenses"], money=True),
+        "net_earnings": arr(data_map, years, ["cr_net_earnings", "net_earnings"], money=True),
+    }
+
+
+def balance_sheet(data_map: dict[str, dict[str, Any]], years: list[int]) -> dict[str, Any]:
+    return {
+        "development_costs": arr(data_map, years, "cr_development_expenditure", money=True),
+        "intangibles_total": arr(data_map, years, ["cr_intangible_assets_total", "other_intangible_rights"], money=True),
+        "tangible_assets": arr(data_map, years, ["cr_tangibles_assets_total", "tangible_ass"], money=True),
+        "inventories": arr(data_map, years, "inventories", money=True),
+        "trade_receivables": arr(data_map, years, "cr_curr_trade_debtors", money=True),
+        "cash_and_equivalents": arr(data_map, years, "cr_cash_and_bank_deposits", money=True),
+        "total_assets": arr(data_map, years, "bs_total_assets", money=True),
+        "equity_excl_capital_loans": arr(data_map, years, "cr_shareholders_equity", money=True),
+        "equity_incl_capital_loans": arr(data_map, years, "fundu_equity_incl_cap_loans", money=True),
+        "capital_loans": arr_sum(
+            data_map, years, ["cr_capital_loan_lt", "cr_capital_loan_st"], money=True),
+        "loans_from_fin_institutions": arr_sum(
+            data_map, years,
+            ["cr_non_current_loans_from_credit_ins", "cr_current_loans_from_credit_ins"],
+            money=True),
+        "loans_from_associated": arr_sum(
+            data_map, years,
+            ["cr_non_current_owed_to_participating", "cr_current_owed_to_participating"],
+            money=True),
+        "advances_received": arr_sum(
+            data_map, years,
+            ["cr_non_current_advances_received", "cr_current_advances_received"],
+            money=True),
+        "trade_payables": arr(data_map, years, "cr_current_trade_creditors", money=True),
+        # liab_ib_total EXCLUDES capital loans; interest_bearing_liabilities_calc
+        # is the same series plus them. The valuation engine treats a capital
+        # loan as equity-like (singlewriter.txt rule 25), so the debt line must
+        # be the excluding one or the net-debt bridge double-counts it.
+        "interest_bearing_debt": arr(data_map, years, "liab_ib_total", money=True),
+        "non_interest_bearing_debt": arr(
+            data_map, years, "non_interest_bearing_liabilities_calc", money=True),
+    }
+
+
 def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     data_map = model.get("dataMap", {})
     years = sorted((int(year) for year in data_map), key=int)
@@ -400,6 +463,8 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         "free_cash_flow_to_firm": arr(data_map, forecast_years, "free_cash_flow_to_firm", money=True),
         "interest_bearing_debt": arr(data_map, forecast_years, "liab_ib_total", money=True),
         "equity_excl_capital_loans": arr(data_map, forecast_years, "cr_shareholders_equity", money=True),
+        "income_statement": income_statement(data_map, forecast_years),
+        "balance_sheet": balance_sheet(data_map, forecast_years),
     }
 
     return {
@@ -429,58 +494,8 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         "actuals": {
             "years": actual_years,
             "unit": "tEUR",
-            "income_statement": {
-                "net_sales": arr(data_map, actual_years, "ns", money=True),
-                "other_operating_income": arr(data_map, actual_years, "cr_other_operating_income", money=True),
-                "gross_profit": arr(data_map, actual_years, ["cr_gross_profit", "gross_profit"], money=True),
-                # cr_employee_expenses is the absolute figure (= wages and
-                # salaries + social security expenses). Do NOT derive it from
-                # per_employee x headcount: headcount_efficiency.py uses this
-                # row to sanity-check headcount, which that derivation would
-                # make circular.
-                "personnel_costs": arr(data_map, actual_years, "cr_employee_expenses", money=True),
-                "other_operating_costs": arr(data_map, actual_years, "cr_other_oper_expenses", money=True),
-                "depreciation_total": arr(data_map, actual_years, "cr_depreciation", money=True),
-                "ebitda": arr(data_map, actual_years, ["cr_ebitda_xml", "ebitda"], money=True),
-                "ebit": arr(data_map, actual_years, "ebit", money=True),
-                "ebit_without_extras": arr(data_map, actual_years, "ebit_without_extras", money=True),
-                "extras_in_ebit": arr(data_map, actual_years, "extras_in_ebit", money=True),
-                "interest_expenses": arr(data_map, actual_years, ["cr_interest_expenses", "interest_expenses"], money=True),
-                "net_earnings": arr(data_map, actual_years, ["cr_net_earnings", "net_earnings"], money=True),
-            },
-            "balance_sheet": {
-                "development_costs": arr(data_map, actual_years, "cr_development_expenditure", money=True),
-                "intangibles_total": arr(data_map, actual_years, ["cr_intangible_assets_total", "other_intangible_rights"], money=True),
-                "tangible_assets": arr(data_map, actual_years, ["cr_tangibles_assets_total", "tangible_ass"], money=True),
-                "inventories": arr(data_map, actual_years, "inventories", money=True),
-                "trade_receivables": arr(data_map, actual_years, "cr_curr_trade_debtors", money=True),
-                "cash_and_equivalents": arr(data_map, actual_years, "cr_cash_and_bank_deposits", money=True),
-                "total_assets": arr(data_map, actual_years, "bs_total_assets", money=True),
-                "equity_excl_capital_loans": arr(data_map, actual_years, "cr_shareholders_equity", money=True),
-                "equity_incl_capital_loans": arr(data_map, actual_years, "fundu_equity_incl_cap_loans", money=True),
-                "capital_loans": arr_sum(
-                    data_map, actual_years, ["cr_capital_loan_lt", "cr_capital_loan_st"], money=True),
-                "loans_from_fin_institutions": arr_sum(
-                    data_map, actual_years,
-                    ["cr_non_current_loans_from_credit_ins", "cr_current_loans_from_credit_ins"],
-                    money=True),
-                "loans_from_associated": arr_sum(
-                    data_map, actual_years,
-                    ["cr_non_current_owed_to_participating", "cr_current_owed_to_participating"],
-                    money=True),
-                "advances_received": arr_sum(
-                    data_map, actual_years,
-                    ["cr_non_current_advances_received", "cr_current_advances_received"],
-                    money=True),
-                "trade_payables": arr(data_map, actual_years, "cr_current_trade_creditors", money=True),
-                # liab_ib_total EXCLUDES capital loans; interest_bearing_liabilities_calc
-                # is the same series plus them. The valuation engine treats a capital
-                # loan as equity-like (singlewriter.txt rule 25), so the debt line must
-                # be the excluding one or the net-debt bridge double-counts it.
-                "interest_bearing_debt": arr(data_map, actual_years, "liab_ib_total", money=True),
-                "non_interest_bearing_debt": arr(
-                    data_map, actual_years, "non_interest_bearing_liabilities_calc", money=True),
-            },
+            "income_statement": income_statement(data_map, actual_years),
+            "balance_sheet": balance_sheet(data_map, actual_years),
             # Per-employee ratios the engine already computes, in tEUR/employee —
             # confirmed live: unscaled values rounded to 0/-0 across every year
             # (e.g. 66 200 €/employee came back as 0.0662), so these are millions

@@ -7,7 +7,7 @@ arrays from every stage into one list sorted by the canonical section order
 1,2,3,4,5,6,8,9,10,11,12,13,14,15,16 (there is no section 7), and returns the
 final report object that feeds the renderer.
 """
-from . import (dcf_detail, headcount_efficiency, scenario_compare,
+from . import (dcf_detail, financials, headcount_efficiency, scenario_compare,
                scenario_waterfall, sensitivity, valuation_equivalence)
 from .runner import SECTION_ORDER
 
@@ -285,6 +285,26 @@ def _inject_headcount_efficiency_blocks(sections, input_data):
     return sections
 
 
+def _inject_financial_statement_blocks(sections, input_data):
+    """Append the full tuloslaskelma + taseen päärivit to section 5 — straight
+    from the export (see app/financials.py), never written by the LLM."""
+    blocks = financials.build_financial_statement_blocks(input_data)
+    if not blocks:
+        return sections
+    for sec in sections:
+        if not (isinstance(sec, dict) and str(sec.get("id")) == _HISTORY_SECTION_ID):
+            continue
+        current = list(sec.get("blocks") or [])
+        if any(
+            isinstance(b, dict) and b.get("table_id") == "deterministic_income_statement"
+            for b in current
+        ):
+            return sections
+        sec["blocks"] = current + blocks
+        break
+    return sections
+
+
 def assemble(run):
     """Build the final report dict from a finished run. Best-effort: returns
     whatever can be assembled even if stage 6 did not complete."""
@@ -306,6 +326,7 @@ def assemble(run):
     _inject_dcf_detail_blocks(sections, outputs.get(0))
     _inject_dcf_caveats(sections, outputs.get(0))
     _inject_sensitivity_blocks(sections, outputs.get(0))
+    _inject_financial_statement_blocks(sections, outputs.get(0))
     _inject_headcount_efficiency_blocks(sections, outputs.get(0))
     wrapper["sections"] = sections
     vf = dcf_detail.value_flow_figures(outputs.get(0))

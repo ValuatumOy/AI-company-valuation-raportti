@@ -8,8 +8,8 @@ import os
 import pytest
 
 from app import (
-    assemble, dcf_detail, headcount_efficiency, render, revenue_anomalies, runner,
-    scenario_compare, sensitivity, validators,
+    assemble, dcf_detail, financials, headcount_efficiency, render,
+    revenue_anomalies, runner, scenario_compare, sensitivity, validators,
 )
 
 VDIR = os.path.join(os.path.dirname(__file__), "..", "validators_seed")
@@ -3733,3 +3733,71 @@ def test_qa_flags_an_optimistic_scenario_that_barely_beats_the_base_case():
     # an optimistic scenario BELOW the base case is always wrong
     rep["machine_readable"]["scenarios"][2]["value_teur"] = 50000
     assert any("MATALAMPI" in x for x in report_qa.warnings(rep))
+
+
+# ------------------------------------------------- financial statements
+EXAMPLE_EXPORT = os.path.join(
+    os.path.dirname(__file__), "..", "valuatum_kit", "examples",
+    "ogoship_oy_213194_modeldata_fresh.json")
+
+
+def _example_input_data():
+    with open(EXAMPLE_EXPORT, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_financial_statements_cover_every_actual_year():
+    data = _example_input_data()
+    blocks = financials.build_financial_statement_blocks(data)
+    inc = next(b for b in blocks if b["table_id"] == "deterministic_income_statement")
+    bs = next(b for b in blocks if b["table_id"] == "deterministic_balance_sheet")
+    years = [str(y) for y in data["actuals"]["years"]]
+    assert inc["columns"] == ["Erä"] + years
+    assert bs["columns"] == ["Erä"] + years
+    assert inc["unit"] == bs["unit"] == "tEUR"
+    labels = [r[0] for r in inc["rows"]]
+    assert labels[0] == "Liikevaihto" and "Nettotulos" in labels
+    # every row carries a cell per year, and an all-null row is dropped
+    assert all(len(r) == len(years) + 1 for r in inc["rows"] + bs["rows"])
+    assert "Kertaerät liiketuloksessa" not in labels  # null on all 5 years
+    ns = next(r for r in inc["rows"] if r[0] == "Liikevaihto")
+    assert ns[1:] == [financials._fmt_num(v) for v in data["actuals"]["income_statement"]["net_sales"]]
+
+
+def test_financial_statement_forecast_years_are_marked_with_e():
+    data = {"forecast": {"years": [2026, 2027],
+                         "income_statement": {"net_sales": [100, 110]},
+                         "balance_sheet": {"total_assets": [200, 220]}}}
+    blocks = financials.build_financial_statement_blocks(data)
+    ids = [b["table_id"] for b in blocks]
+    assert ids == ["deterministic_income_statement_forecast",
+                   "deterministic_balance_sheet_forecast"]
+    assert blocks[0]["columns"] == ["Erä", "2026e", "2027e"]
+    assert blocks[0]["title"].endswith("(ennuste)")
+    assert blocks[0]["rows"] == [["Liikevaihto", "100", "110"]]
+
+
+def test_financial_statements_empty_without_actuals():
+    assert financials.build_financial_statement_blocks({}) == []
+    assert financials.build_financial_statement_blocks({"actuals": {"years": []}}) == []
+
+
+def test_assemble_injects_financial_statements_into_section_5_once():
+    data = {"actuals": _example_input_data()["actuals"]}
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": data},
+        {"order": 3, "status": "ok", "parsed_json": {"sections": [
+            {"id": "5", "title": "HISTORIA", "blocks": [{"type": "heading", "text": "x"}]}]}},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"}]}},
+    ]}
+    rep = assemble.assemble(run)
+    sec5 = next(s for s in rep["sections"] if str(s["id"]) == "5")
+    ids = [b.get("table_id") for b in sec5["blocks"]]
+    assert ids.count("deterministic_income_statement") == 1
+    assert ids.count("deterministic_balance_sheet") == 1
+    # re-assembling an already-assembled section must not duplicate them
+    assemble._inject_financial_statement_blocks(rep["sections"], data)
+    ids = [b.get("table_id") for b in sec5["blocks"]]
+    assert ids.count("deterministic_income_statement") == 1

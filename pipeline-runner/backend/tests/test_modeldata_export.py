@@ -245,3 +245,25 @@ def test_payment_defaults_empty_when_no_entry_has_any(monkeypatch):
             {"followedModelId": 256219, "paymentDefaults": []}]
     monkeypatch.setattr(export, "_creditrisk_rows", lambda code, token: rows)
     assert export.rest_payment_defaults("16123988", "tok") == []
+
+
+def test_forecast_carries_the_same_statement_rows_as_actuals():
+    """/modeldata returns the cr_ statement varNames for estimate years too
+    (verified live, fid 356362 Y+0..Y+9), so the forecast block exports the
+    full tuloslaskelma/tase — not just net sales and EBIT."""
+    model = _model(ns=1.0)
+    model["dataMap"]["2025"] = {
+        "ns": 2.0, "cr_gross_profit": 1.2, "cr_employee_expenses": -0.7,
+        "bs_total_assets": 3.0, "cr_shareholders_equity": 1.5,
+    }
+    forecast = export.build_payload(model, None)["forecast"]
+    assert forecast["years"] == [2025]
+    assert forecast["income_statement"]["net_sales"] == [2000]
+    assert forecast["income_statement"]["gross_profit"] == [1200]
+    assert forecast["income_statement"]["personnel_costs"] == [-700]
+    assert forecast["balance_sheet"]["total_assets"] == [3000]
+    assert forecast["balance_sheet"]["equity_excl_capital_loans"] == [1500]
+    # the actuals mapping is the same function, so its keys still match
+    actuals = export.build_payload(model, None)["actuals"]
+    assert set(actuals["income_statement"]) == set(forecast["income_statement"])
+    assert set(actuals["balance_sheet"]) == set(forecast["balance_sheet"])

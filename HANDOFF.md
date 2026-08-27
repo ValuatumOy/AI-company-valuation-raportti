@@ -1,4 +1,39 @@
-# Handoff — 2026-08-26 (read this first)
+# Handoff — 2026-08-27 (read this first)
+
+## 2026-08-27 — Tuloslaskelma ja tase raporttiin (toteutuneet + ennustevuodet)
+
+Esa: raportissa ei ole tuloslaskelmaa eikä tasetta. Oikea diagnoosi: data on
+haettu koko ajan (`actuals.income_statement` 12 riviä, `actuals.balance_sheet`
+16 riviä, kaikki toteutuneet vuodet), mutta mikään ei renderöinyt sitä — osiossa
+5 oli vain kirjoittajamallin poimima "Historialliset avainluvut".
+
+Uusi `app/financials.py` rakentaa taulukot suoraan exportista (ei LLM:ää) ja
+`assemble._inject_financial_statement_blocks` liittää ne osioon 5, samalla
+kaavalla kuin henkilöstötehokkuus. Tyhjä rivi (kaikki vuodet null) pudotetaan.
+Tase on exportin poimimat päärivit, ei täsmäävä tase — otsikko "Taseen
+päärivit", vastaavaa ei summaudu vastattavaa vastaan.
+
+**Ennustevuodet mukaan.** Varmistettu livenä (POST /modeldata, fid 356362,
+Y+0..Y+9): /modeldata palauttaa samat `cr_`-tilinpäätösmuuttujat myös
+ennustevuosille. `export_modeldata_json` refaktoroitu niin, että sama mappaus
+(`income_statement()` / `balance_sheet()`) tuottaa nyt sekä actuals- että
+forecast-lohkon rivit, ja forecast-taulukot renderöityvät omina "(ennuste)"
+-taulukoinaan sarakkeilla 2026e… Yhteensä siis jopa 9 toteutunutta + 10
+ennustevuotta.
+
+Vaikutus olemassa oleviin ajoihin: assemble ajetaan renderöinnissä, joten
+**jokainen vanha prod-ajo saa toteutuneiden vuosien taulukot pelkällä
+`GET /report.html`-kutsulla** deployn jälkeen. Ennustetaulukot vaativat uuden
+ajon (stage-0 export uusiksi). Ei maksullista ajoa missään vaiheessa.
+
+`singlewriter.txt` rule 26 päivitetty (koodi liittää taulukot, älä väitä
+puuttuviksi äläkä tee omaa versiota) → **vaatii `POST /api/reseed` deployn
+jälkeen**.
+
+Testit 287 -> 289. Layout tarkistettu 9 vuoden datalla: 10 saraketta, `tbl wide`,
+ei ylivuotoa.
+
+## 2026-08-26
 
 ## 2026-08-26 (cont.) — ValuBuild refuses forecast edits to the fade years
 
