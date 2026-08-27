@@ -38,7 +38,14 @@ Deployattu ja `POST /api/reseed` ajettu 2026-08-27 (updated: 3). Varmistettu
 prodissa ilman uutta ajoa: `GET /api/runs/2429d74b896543b5bead259bd0cc90b8/report.html`
 -> 200, sisältää Tuloslaskelma + Taseen päärivit, sarakkeet 2021-2025.
 
-Testit 287 -> 290. Layout tarkistettu 9 vuoden datalla: 10 saraketta, `tbl wide`,
+Ennustetaulukot menevät osioon 6 (ENNUSTEET), toteutuneet osioon 5. Vanhassa
+ajossa ei ole forecast-lohkon tuloslaskelmaa/tasetta, mutta sen forecast-lohko
+kantaa jo net_sales / ebitda / ebit / equity / interest_bearing_debt samoilla
+nimillä — `_statement_blocks` putoaa niihin, joten VANHATKIN raportit saavat
+vuosikohtaisen ennustetaulukon 2026e-2035e ilman uutta ajoa. Varmistettu
+prodissa ajolla 2429d74b: neljä taulukkoa, ennuste 2026e-2035e.
+
+Testit 287 -> 291. Layout tarkistettu 9 vuoden datalla: 10 saraketta, `tbl wide`,
 ei ylivuotoa.
 
 ## 2026-08-26
