@@ -30,7 +30,15 @@ ajon (stage-0 export uusiksi). Ei maksullista ajoa missään vaiheessa.
 puuttuviksi äläkä tee omaa versiota) → **vaatii `POST /api/reseed` deployn
 jälkeen**.
 
-Testit 287 -> 289. Layout tarkistettu 9 vuoden datalla: 10 saraketta, `tbl wide`,
+Tyhjät vuodet pudotetaan: /modeldata haetaan 9 vuodelle, joten 2021
+perustettu NoCFO sai 2017-2020 tyhjinä sarakkeina — vuosi jätetään pois, jos
+yksikään rivi ei sisällä sille arvoa (9 saraketta -> 5).
+
+Deployattu ja `POST /api/reseed` ajettu 2026-08-27 (updated: 3). Varmistettu
+prodissa ilman uutta ajoa: `GET /api/runs/2429d74b896543b5bead259bd0cc90b8/report.html`
+-> 200, sisältää Tuloslaskelma + Taseen päärivit, sarakkeet 2021-2025.
+
+Testit 287 -> 290. Layout tarkistettu 9 vuoden datalla: 10 saraketta, `tbl wide`,
 ei ylivuotoa.
 
 ## 2026-08-26
