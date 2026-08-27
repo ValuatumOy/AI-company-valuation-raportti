@@ -68,18 +68,28 @@ def _rows(block, spec, n):
     return out
 
 
+def _drop_empty_years(years, rows):
+    """A company younger than the 9 requested years has leading columns that
+    are empty on every row (NoCFO: 2017-2020). Drop those years entirely."""
+    keep = [i for i in range(len(years))
+            if any(r[i + 1] for r in rows)]
+    return ([years[i] for i in keep],
+            [[r[0]] + [r[i + 1] for i in keep] for r in rows])
+
+
 def _statement_blocks(source, suffix, title_suffix, id_suffix):
     years = (source or {}).get("years")
     if not isinstance(years, list) or not years:
         return []
     n = len(years)
-    columns = ["Erä"] + [f"{y}{suffix}" for y in years]
     blocks = []
     for spec, key, title, table_id in (
         (INCOME_ROWS, "income_statement", "Tuloslaskelma", "deterministic_income_statement"),
         (BALANCE_ROWS, "balance_sheet", "Taseen päärivit", "deterministic_balance_sheet"),
     ):
         rows = _rows(source.get(key) or {}, spec, n)
+        shown, rows = _drop_empty_years(years, rows)
+        columns = ["Erä"] + [f"{y}{suffix}" for y in shown]
         if rows:
             blocks.append({
                 "type": "table",

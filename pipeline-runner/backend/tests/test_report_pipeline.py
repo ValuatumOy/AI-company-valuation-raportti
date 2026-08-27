@@ -3777,6 +3777,17 @@ def test_financial_statement_forecast_years_are_marked_with_e():
     assert blocks[0]["rows"] == [["Liikevaihto", "100", "110"]]
 
 
+def test_financial_statements_drop_years_that_are_empty_on_every_row():
+    """NoCFO (founded 2021) got 2017-2020 as blank columns across the board."""
+    data = {"actuals": {"years": [2020, 2021, 2022],
+                        "income_statement": {"net_sales": [None, 1, 2]},
+                        "balance_sheet": {"total_assets": [None, 5, 6]}}}
+    blocks = financials.build_financial_statement_blocks(data)
+    assert blocks[0]["columns"] == ["Erä", "2021", "2022"]
+    assert blocks[0]["rows"] == [["Liikevaihto", "1", "2"]]
+    assert blocks[1]["columns"] == ["Erä", "2021", "2022"]
+
+
 def test_financial_statements_empty_without_actuals():
     assert financials.build_financial_statement_blocks({}) == []
     assert financials.build_financial_statement_blocks({"actuals": {"years": []}}) == []
