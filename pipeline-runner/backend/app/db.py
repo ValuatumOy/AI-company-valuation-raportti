@@ -169,6 +169,9 @@ if IS_PG:
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS access_key TEXT",
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS run_id TEXT",
                 "ALTER TABLE orders ADD COLUMN IF NOT EXISTS fid INTEGER",
+                "ALTER TABLE orders ADD COLUMN IF NOT EXISTS "
+                "amount_total_cents INTEGER",
+                "ALTER TABLE orders ADD COLUMN IF NOT EXISTS currency TEXT",
                 "ALTER TABLE pending_rounds ADD COLUMN IF NOT EXISTS "
                 "scenario_probabilities TEXT",
                 "ALTER TABLE pending_rounds ADD COLUMN IF NOT EXISTS "
@@ -225,6 +228,8 @@ else:
             "ALTER TABLE orders ADD COLUMN access_key TEXT",
             "ALTER TABLE orders ADD COLUMN run_id TEXT",
             "ALTER TABLE orders ADD COLUMN fid INTEGER",
+            "ALTER TABLE orders ADD COLUMN amount_total_cents INTEGER",
+            "ALTER TABLE orders ADD COLUMN currency TEXT",
             "ALTER TABLE pending_rounds ADD COLUMN scenario_probabilities TEXT",
             "ALTER TABLE pending_rounds ADD COLUMN forecast_edits TEXT",
         ):

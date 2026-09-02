@@ -781,16 +781,22 @@ def get_order_by_session(stripe_session_id):
     )
 
 
-def create_paid_order(company, email, user_input, stripe_session_id, fid, access_key, run_id):
+def create_paid_order(company, email, user_input, stripe_session_id, fid, access_key,
+                      run_id, amount_total_cents=None, currency=None):
     """A paid, auto-generated order (client-site checkout -> instant pipeline
     run), as opposed to create_order's manual-fulfilment intake. Kept in the
-    same table so the operator dashboard sees both kinds together."""
+    same table so the operator dashboard sees both kinds together.
+
+    The amount comes from the Stripe session the caller already fetched to
+    verify payment — promo codes and Stripe Tax both move it off the list price.
+    Going forward only; orders predating this have no amount."""
     oid = _uuid()
     db.execute(
         "INSERT INTO orders(id,company,email,user_input,status,created_at,"
-        "stripe_session_id,fid,access_key,run_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "stripe_session_id,fid,access_key,run_id,amount_total_cents,currency) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         (oid, company, email, user_input, "in_progress", _now(),
-         stripe_session_id, fid, access_key, run_id),
+         stripe_session_id, fid, access_key, run_id, amount_total_cents, currency),
     )
     return oid
 
@@ -901,3 +907,92 @@ def mark_credit_refunded(rid):
     params = (db.jload(row.get("params")) if row else None) or {}
     params["_credit_refunded"] = True
     db.execute("UPDATE runs SET params=? WHERE id=?", (db.jdump(params), rid))
+
+
+# ---- report monitor ---------------------------------------------------------
+
+def monitor_summary(from_iso, to_iso):
+    """One entry per report FAMILY whose root run was created in the range.
+
+    A sale buys a root run plus its refinement rounds, so cost and paid rounds
+    are summed over the family. `status` and the timing are the root run's —
+    that is the run the customer paid for and waited on.
+    """
+    roots = db.query(
+        "SELECT id,status,created_at,params FROM runs "
+        "WHERE parent_run_id IS NULL AND created_at BETWEEN ? AND ? "
+        "ORDER BY created_at DESC",
+        (from_iso, to_iso),
+    )
+    if not roots:
+        return []
+    # One query per generation rather than a walk per family; chains are short.
+    family_of = {r["id"]: r["id"] for r in roots}
+    frontier = list(family_of)
+    while frontier:
+        children = db.query(
+            "SELECT id,parent_run_id FROM runs WHERE parent_run_id IN (%s)"
+            % ",".join("?" * len(frontier)),
+            tuple(frontier),
+        )
+        frontier = []
+        for c in children:
+            if c["id"] in family_of:  # guards a cycle looping this forever
+                continue
+            family_of[c["id"]] = family_of[c["parent_run_id"]]
+            frontier.append(c["id"])
+
+    ids = list(family_of)
+    holes = ",".join("?" * len(ids))
+    cost, started, finished, size = {}, {}, {}, {}
+    for root in family_of.values():
+        size[root] = size.get(root, 0) + 1
+    for s in db.query(
+        "SELECT run_id,cost_usd,started_at,finished_at FROM stage_results "
+        "WHERE run_id IN (%s)" % holes, tuple(ids)
+    ):
+        f = family_of[s["run_id"]]
+        cost[f] = cost.get(f, 0.0) + (s["cost_usd"] or 0)
+        # Timing is the root run's alone: a family spans the hours a customer
+        # takes to ask for a round, which is not generation time.
+        if s["run_id"] != f:
+            continue
+        # Timestamps are all _now(), one format — string min/max is chronological.
+        if s["started_at"]:
+            started[f] = min(started.get(f, s["started_at"]), s["started_at"])
+        if s["finished_at"]:
+            finished[f] = max(finished.get(f, s["finished_at"]), s["finished_at"])
+
+    orders = {}
+    for o in db.query(
+        "SELECT run_id,email,company,amount_total_cents,currency,created_at "
+        "FROM orders WHERE run_id IN (%s) ORDER BY created_at" % holes, tuple(ids)
+    ):
+        f = family_of[o["run_id"]]
+        agg = orders.setdefault(f, {
+            "email": o["email"], "company": o["company"],
+            "amountTotalCents": None, "currency": None, "sales": 0,
+        })
+        agg["sales"] += 1
+        # The base sale plus every paid extra round on the same report.
+        if o["amount_total_cents"] is not None:
+            agg["amountTotalCents"] = (
+                (agg["amountTotalCents"] or 0) + o["amount_total_cents"])
+        agg["currency"] = agg["currency"] or o["currency"]
+
+    out = []
+    for r in roots:
+        rid = r["id"]
+        params = db.jload(r.get("params")) or {}
+        out.append({
+            "runId": rid,
+            "createdAt": r["created_at"],
+            "company": params.get("company_name") or "",
+            "status": r["status"],
+            "costUsd": cost.get(rid, 0.0),
+            "startedAt": started.get(rid),
+            "finishedAt": finished.get(rid),
+            "rounds": size.get(rid, 1) - 1,
+            "order": orders.get(rid),
+        })
+    return out

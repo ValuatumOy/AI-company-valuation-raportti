@@ -7,10 +7,11 @@ import os
 import re
 import traceback
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import ValidationError
@@ -1404,6 +1405,18 @@ async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
         # (CancelledError), and the paid token must survive that too.
         store.release_pending_round(body.token)
         raise
+    # The round is a second sale on the same report: an order row on the new run
+    # puts it in the same family as the base purchase.
+    params = parent.get("params") or {}
+    fid = parent.get("identifier")  # stored as text; orders.fid is an integer
+    store.create_paid_order(
+        params.get("company_name") or "", params.get("delivery_email") or "",
+        "Lisätarkennuskierros", body.stripe_session_id,
+        int(fid) if str(fid or "").isdigit() else None,
+        parent.get("access_key"), new_rid,
+        amount_total_cents=session.get("amount_total"),
+        currency=session.get("currency"),
+    )
     return {"run_id": new_rid, "parent_run_id": rid}
 
 
@@ -1434,6 +1447,19 @@ async def rerun_from(rid: str, order: int):
 @app.get("/api/costs")
 def get_costs():
     return store.costs_summary()
+
+
+@app.get("/api/monitor/summary")
+def monitor_summary(from_: str = Query(alias="from"), to: str = Query()):
+    """Per-report figures for the report monitor (admin token only)."""
+    try:
+        # created_at is TEXT compared as a string, so the bounds must be stored
+        # in the same shape _now() writes — "Z" would not sort against "+00:00".
+        rng = [datetime.fromisoformat(v).astimezone(timezone.utc).isoformat()
+               for v in (from_, to)]
+    except ValueError:
+        raise HTTPException(400, "invalid from/to date")
+    return {"from": rng[0], "to": rng[1], "reports": store.monitor_summary(*rng)}
 
 
 @app.get("/api/report-capabilities")
@@ -1802,6 +1828,7 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
     # session — the endpoint is unauthenticated, so without this check anyone
     # could start a paid pipeline with a made-up session id. Demo mode (no
     # Stripe key) deliberately skips this: the whole flow is a free demo then.
+    session = None
     if STRIPE_SECRET_KEY:
         try:
             session = await _stripe_get_checkout_session(
@@ -1863,6 +1890,8 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
         store.create_paid_order(
             body.company_name, body.email, body.user_input, body.stripe_session_id,
             candidate["fid"], key, rid,
+            amount_total_cents=(session or {}).get("amount_total"),
+            currency=(session or {}).get("currency"),
         )
         return {"run_id": rid, "key": key}
 
