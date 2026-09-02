@@ -84,3 +84,35 @@ def test_range_is_bounded_by_the_root_s_creation():
 
     _run("D", "2026-07-01T09:00:00+00:00", "ok")
     assert store.monitor_summary(FROM, TO) == []
+
+
+def _client(monkeypatch):
+    from starlette.testclient import TestClient
+
+    from app import main
+
+    monkeypatch.setattr(main, "_APP_TOKEN", "secret")
+    return TestClient(main.app)
+
+
+QUERY = "/api/monitor/summary?from=2026-08-01T00:00:00Z&to=2026-09-01T00:00:00Z"
+
+
+def test_the_endpoint_is_admin_only(monkeypatch):
+    from app import store
+
+    c = _client(monkeypatch)
+    key = store.create_access_key("a customer", 1)["key"]
+    assert c.get(QUERY).status_code == 401
+    # A customer's report key must not read every buyer on the platform.
+    assert c.get(QUERY, headers={"authorization": f"Bearer {key}"}).status_code == 403
+    assert c.get(QUERY, headers={"authorization": "Bearer secret"}).status_code == 200
+
+
+def test_the_bounds_are_restated_in_the_shape_created_at_is_stored_in(monkeypatch):
+    c = _client(monkeypatch)
+    body = c.get(QUERY, headers={"authorization": "Bearer secret"}).json()
+    # "Z" would not sort against the "+00:00" _now() writes.
+    assert body["from"] == "2026-08-01T00:00:00+00:00"
+    assert c.get("/api/monitor/summary?from=nope&to=x",
+                 headers={"authorization": "Bearer secret"}).status_code == 400
