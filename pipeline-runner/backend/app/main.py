@@ -1414,17 +1414,21 @@ async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
         store.release_pending_round(body.token)
         raise
     # The round is a second sale on the same report: an order row on the new run
-    # puts it in the same family as the base purchase.
-    params = parent.get("params") or {}
-    fid = parent.get("identifier")  # stored as text; orders.fid is an integer
-    store.create_paid_order(
-        params.get("company_name") or "", params.get("delivery_email") or "",
-        "Lisätarkennuskierros", body.stripe_session_id,
-        int(fid) if str(fid or "").isdigit() else None,
-        parent.get("access_key"), new_rid,
-        amount_total_cents=session.get("amount_total"),
-        currency=session.get("currency"),
-    )
+    # puts it in the same family as the base purchase. Bookkeeping only, and the
+    # round is already running — never fail a paid round over it.
+    try:
+        params = parent.get("params") or {}
+        fid = parent.get("identifier")  # stored as text; orders.fid is an integer
+        store.create_paid_order(
+            params.get("company_name") or "", params.get("delivery_email") or "",
+            "Lisätarkennuskierros", body.stripe_session_id,
+            int(fid) if str(fid or "").isdigit() else None,
+            parent.get("access_key"), new_rid,
+            amount_total_cents=session.get("amount_total"),
+            currency=session.get("currency"),
+        )
+    except Exception as e:
+        print(f"round2 redeem: order row failed for {new_rid}: {e}", flush=True)
     return {"run_id": new_rid, "parent_run_id": rid}
 
 
