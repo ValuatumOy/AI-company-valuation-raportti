@@ -88,6 +88,15 @@ Supabase provides the Postgres database; Vercel serves the static UI.
 `APP_TOKEN` is the shared password the whole team uses. Keep it secret — anyone
 with it can spend the OpenRouter/Valuatum tokens. Rotate by changing the var.
 
+Optional, for the report monitor:
+```
+MONITOR_TOKEN           = <run: openssl rand -hex 24>
+```
+It opens `GET /api/monitor/summary` and nothing else, so the monitor never needs
+`APP_TOKEN`. Unset = that endpoint stays admin-only. Rotate by changing the var
+on both sides (the monitor reads it from the AWS secret
+`report-monitor/valuation-api`).
+
 ### SES prerequisites (report email)
 
 Finished reports are delivered through Amazon SES. Before setting

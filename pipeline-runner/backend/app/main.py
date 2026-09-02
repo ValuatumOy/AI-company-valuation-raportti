@@ -57,6 +57,11 @@ app.add_middleware(
 #   Authorization: Bearer <APP_TOKEN>
 _APP_TOKEN = os.getenv("APP_TOKEN", "")
 
+# Read-only token for the report monitor, good for MONITOR_PATH and nothing
+# else. Unset = only APP_TOKEN opens that endpoint; APP_TOKEN always does.
+MONITOR_PATH = "/api/monitor/summary"
+_MONITOR_TOKEN = (os.getenv("MONITOR_TOKEN") or "").strip()
+
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
 BUILD = "2026-08-05-checkout-product-check"
 
@@ -190,6 +195,9 @@ async def auth_gate(request, call_next):
             sent = request.headers.get("authorization", "")
             if hmac.compare_digest(sent, f"Bearer {_APP_TOKEN}"):
                 pass  # full admin access
+            elif (_MONITOR_TOKEN and path == MONITOR_PATH
+                  and hmac.compare_digest(sent, f"Bearer {_MONITOR_TOKEN}")):
+                pass  # read-only monitor: this one endpoint, no run access
             elif sent.startswith("Bearer exp_"):
                 key = sent[len("Bearer "):]
                 row = store.get_access_key(key)
@@ -1449,7 +1457,7 @@ def get_costs():
     return store.costs_summary()
 
 
-@app.get("/api/monitor/summary")
+@app.get(MONITOR_PATH)
 def monitor_summary(from_: str = Query(alias="from"), to: str = Query()):
     """Per-report figures for the report monitor (admin token only)."""
     try:

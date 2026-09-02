@@ -86,12 +86,13 @@ def test_range_is_bounded_by_the_root_s_creation():
     assert store.monitor_summary(FROM, TO) == []
 
 
-def _client(monkeypatch):
+def _client(monkeypatch, monitor_token=""):
     from starlette.testclient import TestClient
 
     from app import main
 
     monkeypatch.setattr(main, "_APP_TOKEN", "secret")
+    monkeypatch.setattr(main, "_MONITOR_TOKEN", monitor_token)
     return TestClient(main.app)
 
 
@@ -116,3 +117,20 @@ def test_the_bounds_are_restated_in_the_shape_created_at_is_stored_in(monkeypatc
     assert body["from"] == "2026-08-01T00:00:00+00:00"
     assert c.get("/api/monitor/summary?from=nope&to=x",
                  headers={"authorization": "Bearer secret"}).status_code == 400
+
+
+def test_the_monitor_token_opens_this_endpoint_and_nothing_else(monkeypatch):
+    c = _client(monkeypatch, monitor_token="mon")
+    h = {"authorization": "Bearer mon"}
+    assert c.get(QUERY, headers=h).status_code == 200
+    # The whole point of a second token: no runs, no orders, no report bodies.
+    for path in ("/api/runs", "/api/orders", "/api/costs", "/api/access-keys",
+                 "/api/pipelines"):
+        assert c.get(path, headers=h).status_code == 401, path
+    assert c.post("/api/reseed", headers=h).status_code == 401
+
+
+def test_without_a_monitor_token_only_the_admin_one_opens_the_endpoint(monkeypatch):
+    c = _client(monkeypatch)
+    assert c.get(QUERY, headers={"authorization": "Bearer mon"}).status_code == 401
+    assert c.get(QUERY, headers={"authorization": "Bearer secret"}).status_code == 200
