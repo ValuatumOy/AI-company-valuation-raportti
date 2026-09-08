@@ -294,6 +294,29 @@ def append_forecast_preview(rid, entry):
     db.execute("UPDATE runs SET params=? WHERE id=?", (db.jdump(params), rid))
 
 
+def mark_report_opened(rid):
+    """Timestamp the first and latest time the CUSTOMER opened the report.
+
+    The delivery email attaches the PDF, so this is not "has the report been
+    read" — it is "has the link been opened", which is the thing that decides
+    whether a customer has seen the refinement round at all. Without it the only
+    way to answer that was grepping the Railway log before it rolled over
+    (2026-09-08).
+
+    Admin fetches carry the bearer token and never land here, so an operator
+    reading a report cannot make it look like the customer did.
+    """
+    row = db.query_one("SELECT params FROM runs WHERE id=?", (rid,))
+    if not row:
+        return
+    params = db.jload(row.get("params")) or {}
+    now = _now()
+    params.setdefault("report_opened_at", now)
+    params["report_opened_last"] = now
+    params["report_opened_count"] = int(params.get("report_opened_count") or 0) + 1
+    db.execute("UPDATE runs SET params=? WHERE id=?", (db.jdump(params), rid))
+
+
 def append_forecast_import_failure(rid, entry):
     """Record a forecast import that ValuBuild refused.
 
@@ -600,6 +623,9 @@ def list_runs(limit=100):
     out = []
     for r in rows:
         inp = db.jload(r.get("input_data"))
+        params = db.jload(r.get("params"))
+        if not isinstance(params, dict):
+            params = {}
         company = None
         if isinstance(inp, dict):
             company = (inp.get("meta") or {}).get("company_name")
@@ -607,9 +633,7 @@ def list_runs(limit=100):
             # Self-serve runs (expert/checkout) are created with input_data=None
             # — stage 0 fills it in later, but only inside stage_results, never
             # back onto runs.input_data. The company name lives in params instead.
-            params = db.jload(r.get("params"))
-            if isinstance(params, dict):
-                company = params.get("company_name")
+            company = params.get("company_name")
         out.append({
             "id": r["id"],
             "pipeline_id": r["pipeline_id"],
@@ -617,6 +641,9 @@ def list_runs(limit=100):
             "total_cost_usd": r["total_cost_usd"],
             "created_at": r["created_at"],
             "company_name": company,
+            "delivery_email": params.get("delivery_email"),
+            "report_opened_at": params.get("report_opened_at"),
+            "report_opened_count": params.get("report_opened_count"),
         })
     return out
 

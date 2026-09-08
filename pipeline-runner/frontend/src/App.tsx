@@ -1002,6 +1002,26 @@ function RunsOverlay({
                 {r.company_name ? `${r.company_name} · ` : ""}
                 {r.created_at?.slice(0, 16)} · {r.status} · ${r.total_cost_usd?.toFixed(4)}
               </span>
+              {/* Whether the BUYER opened the link — the delivery email carries the
+                  PDF as an attachment, so an unopened link does not mean unread.
+                  It does mean they have not seen the refinement round. */}
+              {r.delivery_email && (
+                <span
+                  title={
+                    r.report_opened_at
+                      ? `Asiakas avasi raportin ${r.report_opened_at.slice(0, 16)}` +
+                        (r.report_opened_count ? ` (${r.report_opened_count}x)` : "")
+                      : "Asiakas ei ole avannut raporttilinkkiä"
+                  }
+                  className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] ${
+                    r.report_opened_at
+                      ? "bg-emerald-900 text-emerald-300"
+                      : "bg-neutral-800 text-neutral-500"
+                  }`}
+                >
+                  {r.report_opened_at ? "avattu" : "ei avattu"}
+                </span>
+              )}
               <button
                 onClick={() => onLoad(r.id)}
                 className="px-2 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300"

@@ -1576,6 +1576,19 @@ def preview_report(body: dict):
         raise HTTPException(400, str(e))
 
 
+def _note_customer_opened(rid: str, request: Request) -> None:
+    """Record that the customer opened their report, not that we did.
+
+    request.state.access_key is None for the admin bearer token and set for the
+    key in the emailed link, so an operator reading a report cannot make it look
+    like the buyer has."""
+    if getattr(request.state, "access_key", None):
+        try:
+            store.mark_report_opened(rid)
+        except Exception as e:  # a bookkeeping write must never fail a delivery
+            print(f"report-opened bookkeeping failed for {rid}: {e}", flush=True)
+
+
 @app.get("/api/runs/{rid}/report.html")
 def report_html(rid: str, request: Request, force: int = 0):
     _require_run_access(rid, request)
@@ -1587,6 +1600,7 @@ def report_html(rid: str, request: Request, force: int = 0):
         path = report.generate_html(rid, j)
     except Exception as e:
         raise HTTPException(500, str(e))
+    _note_customer_opened(rid, request)
     return HTMLResponse(open(path, encoding="utf-8").read())
 
 
@@ -1601,6 +1615,7 @@ def report_pdf(rid: str, request: Request, force: int = 0):
         path = report.generate_pdf(rid, j)
     except Exception as e:
         raise HTTPException(503, str(e))
+    _note_customer_opened(rid, request)
     return FileResponse(path, media_type="application/pdf",
                         filename=f"raportti-{rid[:8]}.pdf")
 
