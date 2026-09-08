@@ -74,7 +74,19 @@ _PLACEHOLDER_RE = re.compile(r"\[\[[^\]]*\]\]")
 # the inflected token doesn't slip past a \b boundary. The suffix carries over to
 # the replacement noun, which also ends in -data, so it stays grammatical.
 _INPUT_TOK = re.compile(r"\[?\binput[_ ]?data([a-zäöå]*)\]?", re.IGNORECASE)
-_ENRICH_TOK = re.compile(r"\[?\benrichment[a-zäöå]*\]?", re.IGNORECASE)
+# The writer sometimes names its own input block in prose ("[enrichment]-aineiston
+# mukaan"). Swapping the token for the fixed nominative "julkinen lähde" left the
+# adjective disagreeing with the case the model had already written — Apogee Oy's
+# report shipped with "julkinen lähde-aineiston mukaan" three times. So when the
+# token carries a compound, keep the model's own inflection and replace only the
+# head noun; a bare token still becomes the standalone phrase.
+_ENRICH_TOK = re.compile(
+    r"\[?\benrichment([a-zäöå]*)\]?(?:[- ]?aineisto([a-zäöå]*))?", re.IGNORECASE)
+# A bare token the model already inflected ("enrichmentin mukaan") carries an
+# English stem, so its ending cannot be reused verbatim — map the cases that
+# actually occur onto "lähdeaineisto" and fall back to the standalone phrase.
+_ENRICH_CASES = {"in": "n", "issa": "ssa", "issä": "ssa", "ista": "sta",
+                 "istä": "sta", "iin": "on", "illa": "lla", "ille": "lle"}
 # Raw schema field names the model quotes from its instructions/context
 # ("market_signals ja client_reported_signals ovat tyhjät", "(tukee_kasvua)").
 # Each maps to reader-facing Finnish; inflections are handled by matching the
@@ -144,6 +156,16 @@ def _defloor(s):
     return _FLOOR_KASITTELY_RE.sub(r"lattia\1", _FLOOR_WORD_RE.sub(repl, s))
 
 
+def _enrichment_phrase(m) -> str:
+    """Reader-facing name for the writer's own input block, in the case the
+    writer already used."""
+    compound = m.group(2)
+    if compound is not None:          # "[enrichment]-aineiston" -> keep its ending
+        return f"lähdeaineisto{compound}"
+    case = _ENRICH_CASES.get((m.group(1) or "").lower())
+    return f"lähdeaineisto{case}" if case else "julkinen lähde"
+
+
 def _clean(s):
     """Strip leaked pipeline tokens; the reader must never see [input_data]."""
     if s is None:
@@ -156,7 +178,7 @@ def _clean(s):
     s = _VAR_RE.sub("", s)
     s = _PLACEHOLDER_RE.sub("", s)
     s = _INPUT_TOK.sub(lambda m: "tilinpäätösdata" + m.group(1), s)
-    s = _ENRICH_TOK.sub("julkinen lähde", s)
+    s = _ENRICH_TOK.sub(_enrichment_phrase, s)
     for pat, repl in _SCHEMA_TOKENS:
         s = pat.sub(repl, s)
     return _defloor(s)
