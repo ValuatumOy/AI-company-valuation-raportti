@@ -533,6 +533,26 @@ def _customer_run(rid: str) -> tuple[dict, str] | dict:
     return run, _company_name(run)
 
 
+async def send_admin_forecast_parked(rid: str) -> dict:
+    """A paid run is now waiting on the buyer to confirm forecasts.
+
+    The buyer gets send_forecast_ready; this is the copy for us. Without it a
+    parked run is invisible: the first paying customer's run sat in
+    awaiting_forecast for two hours (2026-09-08, Apogee Oy) and the only reason
+    anyone noticed was that somebody happened to look at the run list."""
+    found = _customer_run(rid)
+    if isinstance(found, dict):
+        return found
+    run, company = found
+    return await send_admin_alert(
+        f"Odottaa asiakkaan vahvistusta: {company}",
+        "Maksettu ajo on pysähtynyt ennustenäyttöön. Raportti ei käynnisty ennen "
+        "kuin asiakas vahvistaa ennusteet linkin takana.",
+        _run_rows(rid, run),
+        tag="forecast-parked",
+    )
+
+
 async def send_admin_report_held(rid: str, issues: list[str]) -> dict:
     """The run finished but failed its readiness checks, so the customer was
     deliberately NOT sent anything. Someone has to look at it."""

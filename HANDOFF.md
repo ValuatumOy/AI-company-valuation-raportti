@@ -1,3 +1,35 @@
+# Handoff — 2026-09-08 (read this first)
+
+## 2026-09-08 — Maksettu ajo jäi näkymättömäksi ennustenäyttöön
+
+Ensimmäinen ulkopuolinen maksava asiakas (Apogee Oy, 79 €, run
+`e709ab3480c542ac945246ed27ba5837`) osti raportin `forecast_mode`-tilassa klo
+10.50. Ajo pysähtyi `awaiting_forecast`-tilaan eikä käynnistynyt kahteen
+tuntiin, koska raportti käynnistyy vasta kun ostaja painaa painiketta
+nettisivun ennustenäytöllä — ja painike oli siellä taitteen alla. Asiakas kävi
+sivulla kolmesti eikä löytänyt sitä. Käyttöliittymäkorjaus on
+nettisivut-repossa (`d2e5b1c`).
+
+`send_forecast_ready` toimi oikein ja lähti asiakkaalle; se EI ollut vika.
+
+Backendiin lisätty `email_delivery.send_admin_forecast_parked`: kun maksettu
+ajo parkkeeraa ennustenäyttöön, siitä lähtee hälytys myös meille. Aiemmin
+parkkeerattu ajo näkyi vain jos joku sattui katsomaan run-listaa — tämä
+löytyi juuri siten.
+
+Ajo käynnistettiin käsin käyttäjän luvalla:
+`POST /api/runs/{rid}/generate-forecast` bodylla `{"forecast_edits": []}`.
+
+Sama asiakas menetti myös taustatekstinsä 500 merkin jälkeen (Stripen metadata
+-katkaisu nettisivujen `/api/checkout`-reitissä) — korjaus ja koko selitys
+nettisivut-repon HANDOFF.md:ssä (`f878109`). Backendin `user_input` -kenttä
+sallii 4000 merkkiä eikä ollut osallisena.
+
+Seuraava askel jos toistuu: ajastettu muistutus kun ajo on ollut
+`awaiting_forecast` yli ~20 min. Nyt hälytys lähtee vain parkkeeraushetkellä,
+eikä backendissä ole toistuvaa taustasilmukkaa (vain käynnistyksen
+orphan-sweep).
+
 # Handoff — 2026-08-27 (read this first)
 
 ## 2026-08-27 — Tuloslaskelma ja tase raporttiin (toteutuneet + ennustevuodet)

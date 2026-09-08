@@ -804,6 +804,11 @@ async def _drive_run(rid: str, only=None, from_order=None, completion_status=Non
                             print(f"forecast email for {rid} not sent: {result}", flush=True)
                     except Exception as e:
                         print(f"forecast email delivery failed for {rid}: {e}", flush=True)
+                    # And tell us, so a run nobody confirms is not invisible.
+                    asyncio.create_task(_admin_notify(
+                        email_delivery.send_admin_forecast_parked(rid),
+                        rid, "forecast-parked alert",
+                    ))
             if final_run and final_run.get("status") == "ok":
                 readiness = store.report_readiness(rid)
                 if readiness["ready"]:
