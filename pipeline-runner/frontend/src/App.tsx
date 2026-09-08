@@ -238,11 +238,24 @@ export default function App() {
 
   async function openReport(format: "html" | "pdf") {
     if (!runId) return;
+    // Open the tab in the click's own task. Resolving the URL below fetches the
+    // report (a PDF is rendered by headless Chrome, several seconds), and a
+    // window.open after that await is no longer treated as a user gesture — the
+    // popup is blocked with no error and the button appears dead (2026-09-08).
+    const tab = window.open("", "_blank");
+    if (tab) tab.document.write("Ladataan raporttia…");
     setReportBusy(true);
     try {
       const url = await resolveReportUrl(format);
-      if (url) window.open(url, "_blank");
+      if (!url) {
+        tab?.close();
+      } else if (tab) {
+        tab.location.href = url;
+      } else {
+        window.open(url, "_blank");
+      }
     } catch (e: any) {
+      tab?.close();
       alert("Report generation failed:\n" + (e?.message || e));
     } finally {
       setReportBusy(false);
