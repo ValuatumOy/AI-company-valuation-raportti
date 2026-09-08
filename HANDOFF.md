@@ -1,5 +1,16 @@
 # Handoff — 2026-09-08 (read this first)
 
+## 2026-09-08 (korjaus) — parkkeerattu ajo ei ollut jumissa
+
+Asiakas vastasi: hän ei ollut löytämättä painiketta, vaan odotti tarkoituksella,
+koska hänen omat ennusteensa olivat kesken. Me käynnistimme ajon hänen
+puolestaan oletusennusteilla.
+
+**Sääntö tästä eteenpäin: `awaiting_forecast` ei ole vikatila.** Uusi
+`send_admin_forecast_parked`-hälytys kertoo vain, että ajo odottaa asiakasta.
+Älä jatka kenenkään maksettua ajoa hälytyksen perusteella ilman että asiakas
+on itse pyytänyt sitä.
+
 ## 2026-09-08 — Maksettu ajo jäi näkymättömäksi ennustenäyttöön
 
 Ensimmäinen ulkopuolinen maksava asiakas (Apogee Oy, 79 €, run
