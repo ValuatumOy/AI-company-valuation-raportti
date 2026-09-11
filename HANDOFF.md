@@ -1,3 +1,44 @@
+# Handoff — 2026-09-11 (read this first)
+
+## 2026-09-11 — Mihin järjestelmäennusteen "valuminen" perustuu (tarkistettu)
+
+Apogeen Niko valitti, että EBIT valuu kymmenessä vuodessa olemattomiin "ilman
+liiketaloudellista perustetta". Peruste on olemassa ja se on tarkistettu
+datasta, mutta raportti ei kerro sitä missään.
+
+**Sääntö: pääoman tuotto palautuu pääoman kustannuksen tasolle.** Ei siis
+"marginaali laskee", vaan ylituotto kilpaillaan pois. Toimii molempiin
+suuntiin, mikä on vahvin todiste siitä että kyse on konvergenssista eikä
+mekaanisesta laskusta (WACC kaikilla 9,46 %):
+
+| yhtiö | ROIC alussa | ROIC lopussa | EVA alussa -> lopussa |
+|---|---|---|---|
+| OGOship | −119,8 % | **+12,3 %** | −744,4 -> +16,6 |
+| Star-Asfaltti | 20,8 % | **10,2 %** | 123,6 -> 13,5 |
+| Teippimestarit | 20,6 % | **9,0 %** | 37,8 -> −2,8 |
+| Apogee | n. 13 % | **5,3 %** | 47,9 -> −11,1 |
+
+Laskettu EVA-lohkosta: pääomakanta = |cost_of_capital| / WACC, ROIC = noplat /
+pääomakanta.
+
+**Apogee alittaa WACCin selvästi** (5,3 % vs 9,46 %) ja EVA kääntyy
+negatiiviseksi 2034 alkaen. Muilla konvergenssi pysähtyy WACCin tuntumaan.
+Miksi Apogeen päätepiste on matalampi (EBIT-% 2,5 vs Star 5,8 ja Teippimestarit
+7,3) ei selviä meidän datastamme — toimiala 59.11. Payout on 80 % kaikilla
+kolmannesta vuodesta, joten kyse ei ole pääomakannan paisumisesta.
+
+**Kysymys Samille:** mistä marginaalin päätepiste johdetaan, ja onko
+tarkoitus että konvergenssi menee WACCin ALI (Apogee, Teippimestarit)?
+
+**Toinen pää samaa vipua:** käyttäjän syöttämä tasainen marginaali jatkuu
+terminaalissa ikuisuuteen, jolloin terminaali on n. 55 % arvosta. Nikon 15 %
+antoi 1 199 tEUR; sama ilman vahinkohyppyä 1 090; 15 % -> 10 % n. 880;
+15 % -> 8 % n. 780. Järjestelmän oma ura antoi 523. Ennustetaulukon alle
+lisättiin huomautus terminaalista (nettisivut `76f438e`).
+
+Herkkyysmatriisi ei vastaa tähän kysymykseen: se vaihtelee marginaalia 11-19 %
+mutta pitää sen joka solussa VAKIONA, eli ei näytä valumisnopeuden vaikutusta.
+
 # Handoff — 2026-09-08 (read this first)
 
 ## 2026-09-08 (korjaus) — parkkeerattu ajo ei ollut jumissa
