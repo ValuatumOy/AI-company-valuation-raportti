@@ -114,6 +114,17 @@ async def _stripe_create_checkout_session(*, success_url, cancel_url, metadata, 
         "line_items[0][price_data][currency]": "eur",
         "line_items[0][price_data][unit_amount]": str(amount_cents),
         "line_items[0][price_data][product_data][name]": name,
+        # Same VAT handling as the site's main checkout: the 5 € is VAT-inclusive,
+        # Stripe Tax splits the Finnish VAT out, an EU VAT id reverse-charges at the
+        # same gross, and a post-payment invoice carries the VAT breakdown.
+        "line_items[0][price_data][tax_behavior]": "inclusive",
+        "line_items[0][price_data][product_data][tax_code]": "txcd_10000000",
+        "automatic_tax[enabled]": "true",
+        "billing_address_collection": "required",
+        "tax_id_collection[enabled]": "true",
+        "locale": "fi",
+        "customer_creation": "always",
+        "invoice_creation[enabled]": "true",
         **{f"metadata[{k}]": v for k, v in metadata.items()},
     }
     async with httpx.AsyncClient(timeout=20) as client:
