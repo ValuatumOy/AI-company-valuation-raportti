@@ -1,3 +1,45 @@
+# Handoff — 2026-09-15 (read this first)
+
+## 2026-09-15 — Ennusteen alkuperä selitetään nyt raportissa, ja Apogeen "alle WACCin" on selvitetty datasta
+
+Nikon ainoa valitus (EBIT valuu "ilman perustetta") johtui siitä, ettei raportti
+kertonut mistä ura tulee. Nyt kertoo, eikä Samia tarvittu.
+
+**Mekanismi, tarkistettu kaikista prod-ajoista (11 järjestelmäennustetta):**
+- EBIT-% liukuu LINEAARISESTI ensimmäisestä ennustevuodesta yhtiökohtaiseen
+  päätepisteeseen (askel vakio per yhtiö: Apogee −1,25 pp/v, Star −0,55,
+  Supercell −3,05, Laitila −0,08). Suunta on kumpi tahansa.
+- Päätepiste EI tule historiasta (Apogee ka 16 % → 2,5 %) EIKÄ toimialasta
+  (TOL 6210 antaa 7,1 / 6,2 / 6,1 / 1,9). Se on lähellä marginaalia, jolla
+  ROIC = WACC viimeisen toteutuneen vuoden pääomakannalla:
+  `WACC / ((1 − vero) × pääoman kierto)` osuu Apogeella 2,58 vs 2,51,
+  Starilla 5,46 vs 5,76, Heeroksella 8,96 vs 8,0. Ei tarkka kaikilla
+  (key_ratios-kierto ≠ generaattorin pääomamääritelmä), mutta suunta on selvä.
+- **Miksi Apogee päätyy 5,3 %:iin, ei 9,46 %:iin:** mallin pääomakanta
+  (|cost_of_capital| / WACC) kaksinkertaistuu 121 → 242 tEUR vuosina
+  2026–27, koska kahtena ensimmäisenä ennustevuotena payout on null (kaikki
+  tulos jää taseeseen) ja 80 % vasta kolmannesta. Korkean ROE:n yhtiöllä se
+  on iso suhteellinen lisäys, eikä marginaaliuraa ratkaista uudelleen
+  kasvaneelle pääomalle. Muilla kasvu +24–65 % ja ROIC päätyy 9–12 %:iin.
+  Samille jää vain kaavan tarkka muoto; raportin teksti ei sitä tarvitse.
+
+**Shipattu (`80c81cf`):**
+- `financials.build_forecast_origin_block` → callout "Mistä ennuste tulee"
+  osion 6 alkuun, `assemble._inject_forecast_origin_block`. Deterministinen:
+  marginaaliura, konvergenssioletus, ROIC alussa/lopussa vs WACC, ja jos ROIC
+  jää selvästi alle WACCin JA pääomakanta kasvoi >20 %, lause pääomakannan
+  kasvusta. Ajon `params.forecast_edits/forecast_changes` → "tilaajan antama"
+  -sanamuoto ilman konvergenssipuhetta.
+- `singlewriter.txt` §6: kirjoittaja ei saa selittää marginaalin liikettä
+  omin sanoin, viittaa lohkoon; rule 26 lista päivitetty. **Reseed:** ks. alla.
+- Nettisivut `7c594e4`: ForecastGate kertoo saman lyhyesti ennen painiketta
+  (ensimmäinen → viimeinen EBIT-%, "mallin yleinen oletus, ei näkemys tästä
+  yhtiöstä"). Mock `?state=forecast` tarkistettu.
+- Testit 302 → 306.
+
+Vanhat ajot saavat lohkon pelkällä `GET /report.html` -kutsulla (assemble
+ajetaan renderöinnissä).
+
 # Handoff — 2026-09-11 (read this first)
 
 ## 2026-09-11 — Mihin järjestelmäennusteen "valuminen" perustuu (tarkistettu)
