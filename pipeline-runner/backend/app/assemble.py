@@ -285,6 +285,23 @@ def _inject_headcount_efficiency_blocks(sections, input_data):
     return sections
 
 
+def _inject_forecast_origin_block(sections, input_data, params):
+    """Prepend the deterministic 'Mistä ennuste tulee' callout to section 6
+    (see app/financials.build_forecast_origin_block)."""
+    block = financials.build_forecast_origin_block(input_data, params)
+    if not block:
+        return sections
+    for sec in sections:
+        if not (isinstance(sec, dict) and str(sec.get("id")) == "6"):
+            continue
+        current = list(sec.get("blocks") or [])
+        if any(isinstance(b, dict) and b.get("table_id") == block["table_id"] for b in current):
+            return sections
+        sec["blocks"] = [block] + current
+        break
+    return sections
+
+
 def _inject_financial_statement_blocks(sections, input_data):
     """Append the full tuloslaskelma + taseen päärivit — actual years to
     section 5, forecast years to section 6 — straight from the export (see
@@ -326,6 +343,7 @@ def assemble(run):
     _inject_dcf_caveats(sections, outputs.get(0))
     _inject_sensitivity_blocks(sections, outputs.get(0))
     _inject_financial_statement_blocks(sections, outputs.get(0))
+    _inject_forecast_origin_block(sections, outputs.get(0), run.get("params"))
     _inject_headcount_efficiency_blocks(sections, outputs.get(0))
     wrapper["sections"] = sections
     vf = dcf_detail.value_flow_figures(outputs.get(0))

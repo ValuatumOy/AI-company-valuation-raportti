@@ -3826,3 +3826,57 @@ def test_assemble_injects_financial_statements_into_section_5_once():
     assemble._inject_financial_statement_blocks(rep["sections"], data)
     ids = [b.get("table_id") for b in sec5["blocks"]]
     assert ids.count("deterministic_income_statement") == 1
+
+
+# ------------------------------------------------- forecast origin (§6)
+def test_forecast_origin_explains_the_margin_glide_and_roic_vs_wacc():
+    data = _example_input_data()
+    b = financials.build_forecast_origin_block(data, {})
+    assert b["type"] == "callout" and b["table_id"] == "deterministic_forecast_origin"
+    m = data["forecast"]["ebit_pct"]
+    assert financials._pct(m[0]) in b["text"] and financials._pct(m[-1]) in b["text"]
+    assert "pääoman kustannusta" in b["text"] and "WACC" in b["text"]
+    assert "Sijoitetun pääoman tuotto" in b["text"]
+    assert "ei yhtiökohtainen näkemys" in b["text"]
+
+
+def test_forecast_origin_names_capital_growth_when_roic_ends_below_wacc():
+    """Apogee 2026-09-08: ROIC 49 % -> 5,3 % against 9,46 % WACC because the
+    capital base doubled from retained earnings."""
+    data = {
+        "actuals": {"years": [2025], "income_statement": {"net_sales": [555], "ebit": [97]}},
+        "forecast": {"years": list(range(2026, 2036)),
+                     "ebit_pct": [13.7, 12.5, 11.2, 10.0, 8.7, 7.5, 6.2, 5.0, 3.8, 2.5]},
+        "valuation_engine": {"wacc_parameters": {"wacc_pct": 9.46},
+                             "eva": {"noplat": [59.3, 57.0, 52.1, 47.4, 42.6, 37.6, 32.3, 26.6, 20.6, 14.2],
+                                     "cost_of_capital": [-11.4, -17.3, -22.9, -23.5, -24.1, -24.6, -25.0, -25.2, -25.3, -25.3]}},
+    }
+    text = financials.build_forecast_origin_block(data, None)["text"]
+    assert "laskee tasaisesti 13,7 % (2026) → 2,5 % (2035)" in text
+    assert "alussa 49,2 % ja lopussa 5,3 %" in text
+    assert "pääoman kustannuksen alapuolelle" in text and "121 → 267 tEUR" in text
+    # a company whose ROIC lands at WACC gets no such sentence
+    data["valuation_engine"]["eva"]["noplat"][-1] = 25.3
+    assert "alapuolelle" not in financials.build_forecast_origin_block(data, None)["text"]
+
+
+def test_forecast_origin_switches_to_customer_wording_after_edits():
+    data = {"forecast": {"years": [2026, 2027], "ebit_pct": [10.0, 12.0]}}
+    b = financials.build_forecast_origin_block(data, {"forecast_edits": [{"var": "ns"}]})
+    assert "tilaajan antama" in b["text"] and "2027 EBIT-marginaali 12,0 %" in b["text"]
+    assert "pääoman kustannusta" not in b["text"]
+    assert financials.build_forecast_origin_block({}, {}) is None
+
+
+def test_assemble_prepends_forecast_origin_to_section_6_once():
+    data = _example_input_data()
+    run = {"params": {}, "results": [
+        {"order": 0, "status": "ok", "parsed_json": data},
+        {"order": 2, "status": "ok", "parsed_json": {
+            "sections": [{"id": "6", "title": "ENNUSTEET",
+                          "blocks": [{"type": "paragraph", "text": "x"}]}]}},
+    ]}
+    rep = assemble.assemble(run)
+    sec6 = next(s for s in rep["sections"] if str(s["id"]) == "6")
+    assert sec6["blocks"][0]["table_id"] == "deterministic_forecast_origin"
+    assert sum(1 for b in sec6["blocks"] if b.get("table_id") == "deterministic_forecast_origin") == 1
