@@ -804,6 +804,41 @@ def test_assemble_normalizes_dcf_eva_equivalence_in_sections_and_scoring():
     assert not any(r[0] == "Komponenttien summa" for r in rows)
 
 
+def test_section8_keeps_range_paragraph_and_drops_emptied_headings():
+    """Apogee 2026-09-08: the writer's Arvostusväli paragraph mentions DCF, EVA
+    and "menetelmä", so the old-weighting filter dropped it and the heading
+    rendered with nothing under it. Same for "Painotettu lopputulos" once its
+    table and weighting paragraph were stripped."""
+    from app import valuation_equivalence as veq
+    range_text = ("Menetelmäkohtainen hajonta ei muodosta käyttökelpoista arvostusväliä, "
+                  "koska DCF ja raportoitu EVA-arvo ovat samat 1 199 tEUR.")
+    sections = [{"id": "8", "blocks": [
+        {"type": "heading", "text": "Painotettu lopputulos"},
+        {"type": "table", "columns": ["Menetelmä", "Arvo", "Paino"], "rows": []},
+        {"type": "paragraph", "text": "DCF ja EVA painotetaan menetelmien pisteillä."},
+        {"type": "heading", "text": "Arvostusväli"},
+        {"type": "paragraph", "text": range_text},
+        {"type": "heading", "text": "Verrokkivertailu"},
+        {"type": "paragraph", "text": "Verrokkeja on viisi."},
+    ]}]
+    veq._normalize_section8(sections, {}, 1199)
+    blocks = sections[0]["blocks"]
+    texts = [b.get("text") for b in blocks]
+    assert "Painotettu lopputulos" not in texts
+    assert "DCF ja EVA painotetaan menetelmien pisteillä." not in texts
+    i = texts.index("Arvostusväli")
+    assert blocks[i + 1]["text"] == range_text
+
+    # a refinement round copies the already-normalized report, empty heading included
+    refined = [{"id": "8", "blocks": blocks[:i] + [
+        {"type": "heading", "text": "Arvostusväli"},
+        {"type": "heading", "text": "Verrokkivertailu"},
+        {"type": "paragraph", "text": "Verrokkeja on viisi."},
+    ]}]
+    veq._normalize_section8(refined, {}, 1199)
+    assert "Arvostusväli" not in [b.get("text") for b in refined[0]["blocks"]]
+
+
 def test_eva_reconciliation_never_fabricates_terminal_component():
     """Audit C2 (SaaShop): value −1507.7, invested capital 1577.8, discounted
     EVAs −6976.4 and a NULL terminal component used to backsolve a fabricated

@@ -322,15 +322,34 @@ def _normalize_section8(sections, input_data, value):
     for sec in sections:
         if not (isinstance(sec, dict) and str(sec.get("id")) == "8"):
             continue
-        kept = []
+        # A DCF+EVA paragraph is only the old weighting prose at the top of the
+        # section or under the weighting heading. Under e.g. "Arvostusväli" it is
+        # the writer's own answer, and dropping it left the heading empty.
+        kept, heading = [], ""
         for b in sec.get("blocks") or []:
-            if _is_old_weight_table(b) or _is_old_method_chart(b) or _is_old_method_paragraph(b):
+            if isinstance(b, dict) and b.get("type") == "heading":
+                heading = str(b.get("text") or "").lower()
+            under_weighting = not heading or "painot" in heading
+            if (_is_old_weight_table(b) or _is_old_method_chart(b)
+                    or (under_weighting and _is_old_method_paragraph(b))):
                 continue
             kept.append(b)
-        if any(isinstance(b, dict) and b.get("table_id") == "deterministic_dcf_eva_equivalence" for b in kept):
+        if any(isinstance(b, dict) and b.get("table_id") == "deterministic_dcf_eva_equivalence"
+               for b in sec.get("blocks") or []):
+            # Already normalized (a refinement round copies the previous report,
+            # empty headings included) — only clear the headings left empty.
+            sec["blocks"] = _drop_empty_headings(sec.get("blocks") or [])
             return
-        sec["blocks"] = new_blocks + kept
+        sec["blocks"] = new_blocks + _drop_empty_headings(kept)
         return
+
+
+def _drop_empty_headings(blocks):
+    def _is_heading(b):
+        return isinstance(b, dict) and b.get("type") == "heading"
+    return [b for i, b in enumerate(blocks)
+            if not (_is_heading(b) and not b.get("_from_section7")
+                    and (i + 1 == len(blocks) or _is_heading(blocks[i + 1])))]
 
 
 def _normalize_section10(sections, input_data, value):
