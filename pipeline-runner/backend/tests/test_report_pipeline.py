@@ -3974,3 +3974,22 @@ def test_dcf_detail_keeps_teur_for_ten_meur_company():
     blocks = dcf_detail.build_dcf_detail_blocks(data)
     table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
     assert table["unit"] == "tEUR"
+
+
+def test_eva_year_table_traces_each_year_to_terminal():
+    from app import valuation_equivalence as veq
+    data = _star_eva_input()
+    eva = data["valuation_engine"]["eva"]
+    eva["noplat"] = [226.7] + [200.0] * 9
+    eva["cost_of_capital"] = [-103.0] + [-120.0] * 9
+    eva["eva"] = [123.6] + [80.0] * 9
+    sections = [{"id": "10", "blocks": []}]
+    veq._normalize_section10(sections, data, 2880.8)
+    t = next(b for b in sections[0]["blocks"] if b.get("table_id") == "deterministic_eva_years")
+    assert t["columns"][-1] == "TRM" and len(t["columns"]) == 12
+    rows = {r[0]: r for r in t["rows"]}
+    assert rows["Diskontattu EVA"][-1] == "276"
+    assert rows["Kumulatiivinen diskontattu EVA"][-1] == "866"
+    assert rows["Sijoitettu pääoma (pääomakustannuksen pohja)"][1] == "1 089"  # 103 / 9,46 %
+    note = sections[0]["blocks"][[b.get("table_id") for b in sections[0]["blocks"]].index("deterministic_eva_years") + 1]
+    assert "poikkeaa vuoden 2025 pääomakustannuksen pohjasta (1 089 tEUR)" in note["text"]

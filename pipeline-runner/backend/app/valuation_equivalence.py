@@ -463,12 +463,71 @@ def _normalize_section10(sections, input_data, value):
             ),
         },
     ]
+    blocks[2:2] = _eva_year_blocks(input_data)
     if diff_note:
         blocks.append(diff_note)
     for sec in sections:
         if isinstance(sec, dict) and str(sec.get("id")) == "10":
             sec["blocks"] = blocks
             return
+
+
+def _eva_year_blocks(input_data):
+    """Year-by-year EVA table, the twin of the DCF FCFF table, so every figure
+    in the reconciliation can be traced to its year. The capital row is the
+    engine's own charge divided by WACC (the engine does not export the
+    capital series itself)."""
+    ve = (input_data or {}).get("valuation_engine") or {}
+    eva = ve.get("eva") or {}
+    years = eva.get("years") or []
+    n = len(years)
+    rows_in = {k: eva.get(k) or [] for k in
+               ("noplat", "cost_of_capital", "eva", "discounted_eva")}
+    if not n or any(len(v) != n or not all(_is_num(x) for x in v)
+                    for v in rows_in.values()):
+        return []
+    wacc = (ve.get("wacc_parameters") or {}).get("wacc_pct")
+    disc = rows_in["discounted_eva"]
+    cum0 = _first_num(eva.get("cumulative_discounted_eva"))
+    term = cum0 - sum(disc) if _is_num(cum0) else None
+    has_t = _is_num(term)
+
+    def row(label, vals, t=None):
+        cells = [_fmt_num(v) for v in vals]
+        if has_t:
+            cells.append(_fmt_num(t) if _is_num(t) else "")
+        return [label] + cells
+
+    rows = [row("NOPLAT", rows_in["noplat"])]
+    capital = None
+    if _is_num(wacc) and wacc > 0:
+        capital = [-c / (wacc / 100) for c in rows_in["cost_of_capital"]]
+        rows.append(row("Sijoitettu pääoma (pääomakustannuksen pohja)", capital))
+    rows.append(row("- Pääomakustannus", rows_in["cost_of_capital"]))
+    rows.append(row("EVA", rows_in["eva"]))
+    rows.append(row("Diskontattu EVA", disc, term))
+    running, acc = [], 0.0
+    for v in disc:
+        acc += v
+        running.append(acc)
+    rows.append(row("Kumulatiivinen diskontattu EVA", running, cum0))
+
+    note = ("Sijoitetun pääoman rivi on laskentamoottorin pääomakustannus "
+            "jaettuna WACCilla. Viimeisen sarakkeen kumulatiivinen summa on "
+            "tulevien EVA-erien nykyarvo yhteensä (ennustejakso ja terminaali).")
+    ic = eva.get("invested_capital")
+    if capital and _is_num(ic) and abs(ic - capital[0]) > max(1.0, 0.01 * abs(ic)):
+        note += (f" Huom: arvonmäärityshetken sijoitettu pääoma ({_fmt_num(ic)} tEUR), "
+                 "josta EVA-arvo lähtee, poikkeaa vuoden "
+                 f"{years[0]} pääomakustannuksen pohjasta ({_fmt_num(capital[0])} tEUR).")
+    return [
+        {"type": "table", "table_id": "deterministic_eva_years",
+         "title": "EVA-laskelma vuosittain", "unit": "tEUR",
+         "columns": ["Erä"] + [str(y) for y in years]
+                    + ([str(eva.get("terminal") or "TRM")] if has_t else []),
+         "rows": rows},
+        {"type": "paragraph", "text": note},
+    ]
 
 
 def eva_waterfall_figures(input_data, dcf_value=None):
