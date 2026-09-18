@@ -2079,8 +2079,8 @@ def _eva_waterfall_html(report):
     if not f:
         return ""
     ev = f["invested_capital"] + f["explicit"] + f["terminal"]
-    div, unit, dec = _scale_from_teur(max(abs(ev), abs(f["equity"]),
-                                          abs(f["invested_capital"])))
+    big = max(abs(ev), abs(f["equity"]), abs(f["invested_capital"]))
+    div, unit, dec = _scale_from_teur(big) if big >= 1_000_000 else (1.0, "tEUR", 0)
 
     def num(v, sign=False):
         s = _fmt(v / div, dec)

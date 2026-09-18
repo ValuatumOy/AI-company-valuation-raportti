@@ -262,13 +262,14 @@ def build_dcf_detail_blocks(input_data):
         cols.append(terminal_label)
 
     # Large caps: 12 columns of 9-digit tEUR figures overflow the fixed-layout
-    # wide table, so re-express the whole section in the same unit the cover
-    # picks for this magnitude (tEUR / M€ / mrd. €). Anchor on EV — the biggest
-    # number the section shows.
-    from .render import _scale_from_teur
+    # wide table, so switch to a bigger unit — but only once tEUR figures stop fitting
+    # (7+ digits). The cover's 10 M€ threshold printed a 10 M€ company's
+    # yearly rows as 0,1 / 0,2 M€ (Heeros 2026-09-18). Anchor on EV — the
+    # biggest number the section shows.
     ev = _first_num(_get_list(dcf, "cumulative_discounted_fcff"))
-    div, unit, dec = _scale_from_teur(max(
-        (abs(v) for v in [ev, terminal_pv] + fcff[:n] if _is_num(v)), default=0))
+    big = max((abs(v) for v in [ev, terminal_pv] + fcff[:n] if _is_num(v)), default=0)
+    from .render import _scale_from_teur
+    div, unit, dec = _scale_from_teur(big) if big >= 1_000_000 else (1.0, "tEUR", 0)
 
     def fmt(v, decimals=dec):
         return _fmt_num(v / div, decimals) if _is_num(v) else ""

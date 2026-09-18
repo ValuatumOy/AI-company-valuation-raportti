@@ -3963,3 +3963,14 @@ def test_assemble_prepends_forecast_origin_to_section_6_once():
     sec6 = next(s for s in rep["sections"] if str(s["id"]) == "6")
     assert sec6["blocks"][0]["table_id"] == "deterministic_forecast_origin"
     assert sum(1 for b in sec6["blocks"] if b.get("table_id") == "deterministic_forecast_origin") == 1
+
+
+def test_dcf_detail_keeps_teur_for_ten_meur_company():
+    # Heeros 2026-09-18: EV 10 777 tEUR switched the table to M€ and the
+    # yearly rows printed as 0,1 / 0,2.
+    data = _engine_input_data()
+    dcf = data["valuation_engine"]["dcf"]
+    dcf["cumulative_discounted_fcff"] = [10_777.0] + dcf["cumulative_discounted_fcff"][1:]
+    blocks = dcf_detail.build_dcf_detail_blocks(data)
+    table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
+    assert table["unit"] == "tEUR"
