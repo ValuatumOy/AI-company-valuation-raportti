@@ -1958,8 +1958,16 @@ def _dedup_captions(blocks):
 
 
 def _section(report, sec, derived=None, display_no=None):
-    blocks = "".join(x for x in (_render_block(b)
-                                 for b in _dedup_captions(sec.get("blocks"))) if x)
+    blist = _dedup_captions(sec.get("blocks")) or []
+    parts = [_render_block(b) for b in blist]
+    # The EVA waterfall goes right before the reconciliation it illustrates
+    # (and before that table's intro paragraph).
+    for i, b in enumerate(blist):
+        if isinstance(b, dict) and b.get("table_id") == "deterministic_eva_reconciliation":
+            at = i - 1 if i and (blist[i - 1] or {}).get("type") == "paragraph" else i
+            parts.insert(at, _eva_waterfall_html(report))
+            break
+    blocks = "".join(x for x in parts if x)
     # Section 8 (arvonmääritys) already carries the model's own method table +
     # method-value chart, so we do NOT inject derived visuals here — on distressed
     # companies the derived donut/bars duplicated and contradicted them (scenario
@@ -2050,6 +2058,209 @@ def _glossary_page(report):
 # its own existing divider.
 _PART_TAUSTA_IDS = {"3", "4", "5", "6"}
 _PART_VALUATION_IDS = {"8", "9", "10", "11", "12", "13", "14"}
+
+
+_HIST_GRAY = "#B7C4BC"
+
+
+def _hatch(pid, stripe):
+    return (f'<defs><pattern id="{pid}" width="6" height="6" '
+            f'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
+            f'<rect width="6" height="6" fill="#FFFFFF"/>'
+            f'<rect width="2.6" height="6" fill="{stripe}"/></pattern></defs>')
+
+
+def _eva_waterfall_html(report):
+    """Section-10 figure: invested capital + discounted EVA (forecast years and
+    terminal) = EVA enterprise value, bridged to equity; below it the per-year
+    EVA with the actual years before the forecast. Every number comes from
+    `_eva_waterfall` (valuation_equivalence.eva_waterfall_figures)."""
+    f = (report or {}).get("_eva_waterfall") or {}
+    if not f:
+        return ""
+    ev = f["invested_capital"] + f["explicit"] + f["terminal"]
+    div, unit, dec = _scale_from_teur(max(abs(ev), abs(f["equity"]),
+                                          abs(f["invested_capital"])))
+
+    def num(v, sign=False):
+        s = _fmt(v / div, dec)
+        return ("+" + s if sign and v >= 0 else s).replace("-", "−")
+
+    yrs = f["years"]
+    span = f"{yrs[0]}–{str(yrs[-1])[-2:]}" if len(yrs) > 1 else str(yrs[0])
+    steps = [("start", "Sijoitettu|pääoma", f["invested_capital"], C["green"]),
+             ("delta", f"EVA {span}", f["explicit"], None),
+             ("hatch", "Terminaali-EVA", f["terminal"], None),
+             ("total", "Yritysarvo|(EVA)", ev, C["limeDeep"])]
+    if f.get("debt") is not None:
+        steps.append(("delta", "Korolliset|velat", f["debt"], None))
+    if f.get("cash") is not None:
+        steps.append(("delta", "Kassa", f["cash"], None))
+    if f.get("other") is not None:
+        steps.append(("delta", "Muut|erät", f["other"], None))
+    steps.append(("total", "Oma|pääoma (EVA)", f["equity"], C["green"]))
+
+    # --- waterfall ---------------------------------------------------------
+    W, H, pt, pb, pl, pr = 600, 262, 24, 40, 6, 6
+    run, spans = 0.0, []
+    for kind, _l, v, _c in steps:
+        if kind in ("start", "total"):
+            spans.append((0.0, v))
+            run = v
+        else:
+            spans.append((run, run + v))
+            run += v
+    allv = [x for s in spans for x in s] + [0.0]
+    lo, hi = min(allv), max(allv)
+    y_top, y_bot = pt, H - pb - (18 if lo < 0 else 0)
+
+    def y(v):
+        return y_top + (y_bot - y_top) * (hi - v) / ((hi - lo) or 1)
+
+    n = len(steps)
+    gw = (W - pl - pr) / n
+    bw = gw * 0.56
+    g = [_hatch("evah", C["greenLine"]), _hatch("evahr", "#E3B9B7")]
+    for i, ((kind, label, v, col), (a, b)) in enumerate(zip(steps, spans)):
+        x = pl + gw * i + (gw - bw) / 2
+        ya, yb = y(a), y(b)
+        top, h = min(ya, yb), max(abs(yb - ya), 2.5)
+        if kind == "hatch":
+            fill = "url(#evah)" if v >= 0 else "url(#evahr)"
+        elif kind == "delta":
+            fill = C["lime"] if v >= 0 else C["red"]
+        else:
+            fill = col if v >= 0 else C["red"]
+        rx = 2 if h > 4 else 0
+        g.append(f'<rect x="{x:.1f}" y="{top:.1f}" width="{bw:.1f}" height="{h:.1f}" '
+                 f'rx="{rx}" fill="{fill}"/>')
+        if i + 1 < n and steps[i + 1][0] != "start":
+            nx = pl + gw * (i + 1) + (gw - bw) / 2
+            ly = y(b)
+            if steps[i + 1][0] == "total" and abs(y(steps[i + 1][2]) - ly) > 1:
+                ly = None
+            if ly is not None:
+                g.append(f'<line x1="{x + bw:.1f}" y1="{ly:.1f}" x2="{nx:.1f}" '
+                         f'y2="{ly:.1f}" stroke="{C["gray"]}" stroke-width="0.8" '
+                         f'stroke-dasharray="1.5 2.5"/>')
+        is_delta = kind in ("delta", "hatch")
+        neg_total = not is_delta and v < 0
+        lab_y = max(ya, yb) + 14 if neg_total else top - 6
+        colr = C["red"] if v < 0 else C["ink"]
+        g.append(f'<text x="{x + bw / 2:.1f}" y="{lab_y:.1f}" text-anchor="middle" '
+                 f'font-size="11" font-weight="700" font-family="{HEAD}" '
+                 f'fill="{colr}">{_esc(num(v, sign=is_delta))}</text>')
+        for k, line in enumerate(label.split("|")):
+            g.append(f'<text x="{pl + gw * i + gw / 2:.1f}" y="{H - pb + 15 + k * 11}" '
+                     f'text-anchor="middle" font-size="9" fill="{C["gray"]}">'
+                     f'{_esc(line)}</text>')
+    g.append(f'<line x1="{pl}" y1="{y(0):.1f}" x2="{W - pr}" y2="{y(0):.1f}" '
+             f'stroke="{C["lineStrong"]}" stroke-width="1"/>')
+    top_svg = _svg(W, H, "".join(g))
+
+    # --- per-year EVA ------------------------------------------------------
+    hy, hv = f.get("hist_years") or [], f.get("hist_eva") or []
+    labels = [str(v) for v in hy] + [str(v) for v in yrs] + ["TRM"]
+    vals = list(hv) + list(f["discounted_eva"]) + [f["terminal"]]
+    nh, m = len(hv), len(vals)
+    W2, H2, pt2, pb2 = 600, 150, 22, 20
+    lo2, hi2 = min(vals + [0.0]), max(vals + [0.0])
+
+    y2_bot = H2 - pb2 - (13 if lo2 < 0 else 0)
+
+    def y2(v):
+        return pt2 + (y2_bot - pt2) * (hi2 - v) / ((hi2 - lo2) or 1)
+
+    gw2 = (W2 - pl - pr) / m
+    bw2 = gw2 * (0.58 if m <= 12 else 0.62)
+    show = {nh, m - 2, m - 1}
+    if nh:
+        hi_i = max(range(nh), key=lambda i: hv[i])
+        show.add(hi_i)
+        lo_i = min(range(nh), key=lambda i: hv[i])
+        if hv[lo_i] < 0:
+            show.add(lo_i)
+    step = 1 if m <= 22 else 2
+    g2 = [_hatch("evah2", C["greenLine"]), _hatch("evahr2", "#E3B9B7")]
+    for i, (lab, v) in enumerate(zip(labels, vals)):
+        x = pl + gw2 * i + (gw2 - bw2) / 2
+        a, b = y2(0), y2(v)
+        top, h = min(a, b), max(abs(b - a), 1.5)
+        if i == m - 1:
+            fill = "url(#evah2)" if v >= 0 else "url(#evahr2)"
+        elif v < 0:
+            fill = C["red"]
+        else:
+            fill = _HIST_GRAY if i < nh else C["lime"]
+        g2.append(f'<rect x="{x:.1f}" y="{top:.1f}" width="{bw2:.1f}" '
+                  f'height="{h:.1f}" rx="{1.5 if h > 3 else 0}" fill="{fill}"/>')
+        if i in show:
+            ly = top + h + 11 if v < 0 else top - 4
+            g2.append(f'<text x="{x + bw2 / 2:.1f}" y="{ly:.1f}" text-anchor="middle" '
+                      f'font-size="9.5" font-weight="700" font-family="{HEAD}" '
+                      f'fill="{C["red"] if v < 0 else C["ink"]}">{_esc(num(v))}</text>')
+        if i == m - 1 or i >= nh and (i - nh) % step == 0 or i < nh and (nh - i) % step == 0 \
+                or step == 1:
+            g2.append(f'<text x="{x + bw2 / 2:.1f}" y="{H2 - 5}" text-anchor="middle" '
+                      f'font-size="8.5" fill="{C["gray"]}">{_esc(lab)}</text>')
+    g2.append(f'<line x1="{pl}" y1="{y2(0):.1f}" x2="{W2 - pr}" y2="{y2(0):.1f}" '
+              f'stroke="{C["lineStrong"]}" stroke-width="1"/>')
+    if nh:
+        dx = pl + gw2 * nh
+        g2.append(f'<line x1="{dx:.1f}" y1="{pt2 - 12}" x2="{dx:.1f}" y2="{H2 - pb2:.1f}" '
+                  f'stroke="{C["gray"]}" stroke-width="0.8" stroke-dasharray="1.5 2.5"/>')
+        g2.append(f'<text x="{dx - 5:.1f}" y="{pt2 - 13}" text-anchor="end" '
+                  f'font-size="8.5" fill="{C["gray"]}">toteutunut</text>')
+        g2.append(f'<text x="{dx + 5:.1f}" y="{pt2 - 13}" font-size="8.5" '
+                  f'fill="{C["gray"]}">ennuste</text>')
+    bot_svg = _svg(W2, H2, "".join(g2))
+
+    meta = (report or {}).get("meta") or {}
+    tag = [str(meta.get("company_name") or "").upper()]
+    if f.get("wacc_pct") is not None:
+        tag.append(f"WACC {_fmt(f['wacc_pct'], 1)} %")
+    tag.append(unit.upper())
+    tag = " · ".join(t for t in tag if t)
+    total = f["explicit"] + f["terminal"]
+    summa = f"summa {num(total)} {unit}"
+    if total and f["terminal"] * total > 0:
+        summa += (f", josta terminaali {num(f['terminal'])} "
+                  f"({_fmt(f['terminal'] / total * 100)} %)")
+    bridge = _sum_nums_r([f.get("debt"), f.get("cash"), f.get("other")])
+    intro = ("Sijoitettuun pääomaan lisätään ennustejakson ja terminaalin diskontattu "
+             "lisäarvo (EVA). " + ("Nettokassa" if bridge >= 0 else "Nettovelka")
+             + " siltaa yritysarvon oman pääoman arvoon.")
+    note = "EVA = NOPLAT − WACC × sijoitettu pääoma."
+    if nh:
+        note += " Toteutuneet vuodet nimellisinä, ennustevuodet diskontattuina."
+    dcf = f.get("dcf_equity")
+    if dcf is not None:
+        if abs(f["equity"] - dcf) > max(1.0, 0.01 * abs(dcf)):
+            note += (f" Raportin arvo (DCF) {num(dcf)} {unit}; ero "
+                     "EVA-menetelmään selitetään tekstissä.")
+        else:
+            note += " EVA-menetelmän arvo vastaa raportin DCF-arvoa."
+    head = f'font-family:{HEAD};font-weight:700;color:{C["green"]}'
+    small = f'font-size:7.5pt;color:{C["gray"]}'
+    return (
+        '<div class="chart-host" style="break-inside:avoid;margin:4mm 0 5mm">'
+        f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+        f'border-bottom:1.5px solid {C["green"]};padding-bottom:1.5mm">'
+        f'<span style="{head};font-size:11pt">Arvon muodostuminen EVA-menetelmällä</span>'
+        f'<span style="{small};letter-spacing:.04em">{_esc(tag)}</span></div>'
+        f'<p style="{small};font-size:8pt;margin:2.5mm 0 1mm;max-width:62%">{_esc(intro)}</p>'
+        f'{top_svg}'
+        f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+        f'border-top:1px solid {C["line"]};padding-top:3mm;margin-top:2mm">'
+        f'<span style="{head};font-size:9.5pt">Diskontattu EVA vuosittain</span>'
+        f'<span style="{small}">{_esc(summa)}</span></div>'
+        f'{bot_svg}'
+        f'<p style="{small};font-size:7pt;margin-top:3mm">{_esc(note)}</p></div>'
+    )
+
+
+def _sum_nums_r(xs):
+    return sum(x for x in xs if isinstance(x, (int, float)))
 
 
 def _value_flow_html(report, derived):

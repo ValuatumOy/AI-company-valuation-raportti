@@ -471,6 +471,61 @@ def _normalize_section10(sections, input_data, value):
             return
 
 
+def eva_waterfall_figures(input_data, dcf_value=None):
+    """Inputs for the section-10 EVA waterfall, straight from engine fields:
+
+        invested_capital + cum_disc_eva[0] + additional = equity_value_raw
+
+    cum[0] splits into the forecast years (sum of discounted_eva) and the
+    terminal (the rest). `additional` splits into debt and cash from the
+    bridge, plus whatever else the engine carries (dividends, minorities).
+    Returns None unless the identity closes, so the figure never shows a sum
+    that does not add up. Actual years come from key_ratios.eva (nominal).
+    """
+    if not _has_eva(input_data):
+        return None
+    ve = (input_data or {}).get("valuation_engine") or {}
+    eva = ve.get("eva") or {}
+    years = eva.get("years") or []
+    disc = eva.get("discounted_eva") or []
+    if not years or len(years) != len(disc) or not all(_is_num(x) for x in disc):
+        return None
+    ic = eva.get("invested_capital")
+    cum0 = _first_num(eva.get("cumulative_discounted_eva"))
+    raw = eva.get("equity_value_before_floor_raw")
+    bridge = eva.get("bridge") or {}
+    debt, cash = bridge.get("interest_bearing_debt"), bridge.get("cash")
+    add = eva.get("additional")
+    if not _is_num(add):
+        add = _sum_nums([debt, cash])
+    if not all(_is_num(x) for x in (ic, cum0, raw)):
+        return None
+    if abs(ic + cum0 + add - raw) > max(1.0, 0.005 * abs(raw)):
+        return None
+    explicit = sum(disc)
+    other = add - _sum_nums([debt, cash])
+
+    kr = (input_data or {}).get("key_ratios") or {}
+    hist = [(y, v) for y, v in zip(kr.get("years") or [], kr.get("eva") or [])
+            if _is_num(y) and _is_num(v) and y < years[0]]
+    wacc = (ve.get("wacc_parameters") or {}).get("wacc_pct")
+    return {
+        "invested_capital": ic,
+        "explicit": explicit,
+        "terminal": cum0 - explicit,
+        "debt": debt if _is_num(debt) else None,
+        "cash": cash if _is_num(cash) else None,
+        "other": other if abs(other) >= 0.5 else None,
+        "equity": raw,
+        "dcf_equity": dcf_value if _is_num(dcf_value) else None,
+        "years": list(years),
+        "discounted_eva": list(disc),
+        "hist_years": [y for y, _ in hist],
+        "hist_eva": [v for _, v in hist],
+        "wacc_pct": wacc if _is_num(wacc) else None,
+    }
+
+
 def normalize_report(report, input_data):
     # Runs regardless of EVA presence — the cover's basics strip needs
     # liikevaihto/oma pääoma/tase on every report, not just DCF+EVA ones.
@@ -483,6 +538,9 @@ def normalize_report(report, input_data):
     scoring = report.get("_scoring")
     if isinstance(scoring, dict):
         _normalize_scoring(scoring, value)
+    wf = eva_waterfall_figures(input_data, value)
+    if wf is not None:
+        report["_eva_waterfall"] = wf
     sections = report.get("sections") or []
     _normalize_section8(sections, input_data, value)
     _normalize_section10(sections, input_data, value)

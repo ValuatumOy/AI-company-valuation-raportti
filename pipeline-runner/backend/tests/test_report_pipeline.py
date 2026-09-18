@@ -915,6 +915,54 @@ def test_eva_reconciliation_derives_terminal_from_cumulative_row():
     assert ["Komponenttien summa", "2 564"] in table["rows"]
 
 
+def _star_eva_input():
+    return {
+        "valuation_engine": {
+            "dcf": {"equity_value_before_floor": 2880.8},
+            "wacc_parameters": {"wacc_pct": 9.46},
+            "eva": {
+                "years": list(range(2025, 2035)),
+                "invested_capital": 1258.8,
+                "discounted_eva": [130.6, 105.7, 85.5, 75.0, 61.7, 48.3, 36.1, 25.3, 15.6, 6.3],
+                "cumulative_discounted_eva": [866.5],
+                "bridge": {"interest_bearing_debt": -31.0, "cash": 470.0},
+                "equity_value_before_floor_raw": 2564.3,
+            },
+        },
+        "key_ratios": {"years": [2023, 2024, 2025], "eva": [136.3, 198.7, 123.6]},
+    }
+
+
+def test_eva_waterfall_splits_engine_value_and_keeps_actual_years():
+    from app import valuation_equivalence as veq
+    f = veq.eva_waterfall_figures(_star_eva_input(), 2880.8)
+    assert round(f["explicit"], 1) == 590.1
+    assert round(f["terminal"], 1) == 276.4
+    assert f["debt"] == -31.0 and f["cash"] == 470.0 and f["other"] is None
+    assert f["hist_years"] == [2023, 2024] and f["hist_eva"] == [136.3, 198.7]
+
+
+def test_eva_waterfall_not_drawn_when_it_does_not_close():
+    from app import valuation_equivalence as veq
+    data = _star_eva_input()
+    data["valuation_engine"]["eva"]["equity_value_before_floor_raw"] = 3000.0
+    assert veq.eva_waterfall_figures(data) is None
+    del data["valuation_engine"]["eva"]["cumulative_discounted_eva"]
+    assert veq.eva_waterfall_figures(data) is None
+
+
+def test_eva_waterfall_renders_before_reconciliation_table():
+    from app import render, valuation_equivalence as veq
+    report = {"meta": {"company_name": "Star-Asfaltti Oy"}, "sections": [
+        {"id": "10", "title": "EVA", "blocks": []}]}
+    veq.normalize_report(report, _star_eva_input())
+    html = render._section(report, report["sections"][0])
+    fig = html.index("Arvon muodostuminen EVA-menetelmällä")
+    assert fig < html.index("EVA rakentaa oman pääoman arvon")
+    assert "Diskontattu EVA vuosittain" in html and "toteutunut" in html
+    assert "josta terminaali 276 (32 %)" in html
+
+
 def test_eva_reconciliation_hides_sum_when_components_do_not_close():
     """A component this code does not model (or a stale engine row) must not
     produce a reconciliation that silently misses part of the value."""
