@@ -7,7 +7,7 @@ arrays from every stage into one list sorted by the canonical section order
 1,2,3,4,5,6,8,9,10,11,12,13,14,15,16 (there is no section 7), and returns the
 final report object that feeds the renderer.
 """
-from . import (dcf_detail, financials, headcount_efficiency, scenario_compare,
+from . import (dcf_detail, financials, headcount_efficiency, peers, scenario_compare,
                scenario_waterfall, sensitivity, valuation_equivalence)
 from .runner import SECTION_ORDER
 
@@ -366,6 +366,7 @@ def assemble(run):
     if wf is not None:
         _inject_optimistic_waterfall_blocks(sections, wf)
     valuation_equivalence.normalize_report(wrapper, outputs.get(0))
+    peers.strip_model_multiples(sections)
     # AFTER normalize: section 8's cleanup strips method/weight tables, and the
     # surfaced scoring table must survive it.
     _surface_method_scoring(sections)

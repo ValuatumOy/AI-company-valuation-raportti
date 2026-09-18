@@ -2647,6 +2647,11 @@ p{ max-width:none; }
 @media screen{ .page{ padding-bottom:14mm; } }
 .report-section, .page{ page-break-inside:auto; }
 .pbody{ flex:1 1 auto; padding-top:9px; }
+/* A section that fills its page exactly must not push its last margin onto a
+   new page: that empty overflow plus page-break-after printed a blank page
+   (Heeros summary, 2026-09-18). */
+.pbody > :last-child, .pbody > :last-child > :last-child,
+.pbody > :last-child > :last-child > :last-child{ margin-bottom:0 !important; padding-bottom:0 !important; }
 .phead{ display:flex; justify-content:space-between; align-items:center; font-size:8pt; color:var(--gray);
   padding-bottom:8px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums lining-nums; }
 .brandmark{ display:flex; align-items:center; gap:6px; font-weight:700; color:var(--green); letter-spacing:.04em; font-family:var(--head); }

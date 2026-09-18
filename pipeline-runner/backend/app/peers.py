@@ -42,11 +42,8 @@ from valuatum_kit.export_modeldata_json import roundish, y_tunnus
 MAX_PEERS = 8
 
 # Y-1 is the newest actual year; Y-2 is the fallback for a model whose newest
-# year has not been populated yet. Y+0 is the first FORECAST year — asked for
-# only because Valuatum's engine values (the DCF equity value, WACC) sit there,
-# exactly where the stage-0 exporter reads them from. `_actual_years` keeps it
-# out of the actual figures.
-REL_POSES = ("Y-1", "Y-2", "Y+0")
+# year has not been populated yet.
+REL_POSES = ("Y-1", "Y-2")
 
 # (peer field, varnames in priority order, kind). Money comes back in millions
 # and percentages as fractions — the same convention the stage-0 exporter
@@ -89,27 +86,10 @@ FIELDS: list[tuple[str, tuple[str, ...], str]] = [
 MARKET_GATED = ("ev_teur", "ev_per_sales", "ev_per_ebitda", "ev_per_ebit",
                 "pe", "p_per_bv", "p_per_sales")
 
-# Valuatum's engine output lives on the first forecast year, not on an actual
-# one — read separately from the actual-year figures above.
-VALUATION_FIELDS: list[tuple[str, tuple[str, ...], str]] = [
-    ("model_equity_value_teur", ("value_of_equity_fcff",), "money"),
-    ("wacc_pct", ("wacc",), "pct"),
-    ("cost_of_equity_pct", ("cost_of_equity",), "pct"),
-]
-
-# Multiples derived from that model value. This is Asiakastieto's move in its
-# Arvoraportti: its "P/E 6,2 (toimialan mediaani 7,1)" and "P/B 22,3 (mediaani
-# 2,1)" are its own model value over net income and over book equity, never a
-# share price — which is how it publishes multiples for unlisted Finnish
-# companies at all. We can do the same because a peer's Valuatum model carries
-# `value_of_equity_fcff`, and the target's own engine value is already in
-# input_data, so both sides of the comparison come off the same engine.
-IMPLIED_FIELDS = ("implied_pe", "implied_pbv", "implied_ev_sales",
-                  "implied_ev_ebitda", "implied_ev_ebit")
-
-MULTIPLES_BASIS = ("Valuatumin mallin oman pääoman arvo (DCF/FCFF) jaettuna "
-                   "verrokin toteutuneella luvulla — mallipohjainen kerroin, "
-                   "EI pörssikurssi eikä toteutunut kauppahinta")
+# No model-value multiples (value_of_equity_fcff / actuals): peer models are
+# not maintained, so their engine values were garbage (Heeros 2026-09-18:
+# Lemonsoft EV/EBITDA 0,56x, Aallon Group 308x). Peers carry operational
+# figures only until real market prices are available.
 
 # A peer whose newest actual year is older than this is history, not a
 # comparison: Nixu's model stops at 2022 (delisted after the 2023 acquisition)
@@ -277,47 +257,6 @@ def _best_year(model: dict) -> str | None:
     return None
 
 
-def _valuation_figures(model: dict) -> dict:
-    """Engine output, taken from the newest year that has it (the first
-    forecast year) rather than from the peer's chosen actual year."""
-    data_map = model.get("dataMap") or {}
-    out = {}
-    for field, varnames, kind in VALUATION_FIELDS:
-        for year in sorted(data_map, key=lambda y: int(y), reverse=True):
-            value = _figure(data_map.get(year) or {}, varnames, kind)
-            if value is not None:
-                out[field] = value
-                break
-    return out
-
-
-def _implied_multiples(figures: dict) -> dict:
-    """Model-value multiples — see IMPLIED_FIELDS for why these are legitimate
-    without a share price. Each guard mirrors the writer's own reject rules: no
-    P/E on negative earnings, no P/BV on negative equity, no EV multiple on a
-    negative denominator."""
-    value = figures.get("model_equity_value_teur")
-    if not isinstance(value, (int, float)) or value <= 0:
-        return {}
-    out = {}
-    net_earnings = figures.get("net_earnings_teur")
-    if isinstance(net_earnings, (int, float)) and net_earnings > 0:
-        out["implied_pe"] = round(value / net_earnings, 2)
-    equity = figures.get("equity_teur")
-    if isinstance(equity, (int, float)) and equity > 0:
-        out["implied_pbv"] = round(value / equity, 2)
-    net_debt = figures.get("net_debt_teur")
-    if isinstance(net_debt, (int, float)):
-        ev = value + net_debt
-        for field, denominator in (("implied_ev_sales", "revenue_teur"),
-                                   ("implied_ev_ebitda", "ebitda_teur"),
-                                   ("implied_ev_ebit", "ebit_teur")):
-            base = figures.get(denominator)
-            if isinstance(base, (int, float)) and base > 0:
-                out[field] = round(ev / base, 2)
-    return out
-
-
 def _entry(model: dict, resolved: dict, segment: str, fetched: str,
            min_year: int) -> dict | None:
     data_map = model.get("dataMap") or {}
@@ -334,11 +273,6 @@ def _entry(model: dict, resolved: dict, segment: str, fetched: str,
     if not priced:
         for field in MARKET_GATED:
             figures.pop(field, None)
-    figures.update(_valuation_figures(model))
-    implied = _implied_multiples(figures)
-    figures.update(implied)
-    if implied:
-        figures["multiples_basis"] = MULTIPLES_BASIS
     if not figures:
         return None
     fid = resolved["fid"]
@@ -392,7 +326,6 @@ def target_figures(input_data: dict) -> dict:
     if isinstance(ev, (int, float)) and isinstance(equity_value, (int, float)):
         figures["net_debt_teur"] = roundish(ev - equity_value)
     figures = {k: v for k, v in figures.items() if v is not None}
-    figures.update(_implied_multiples(figures))
     years = (actuals.get("years") or [])
     if years:
         figures["fiscal_year"] = years[-1]
@@ -410,9 +343,7 @@ def summarize(peer_list: list[dict], input_data: dict | None = None) -> dict:
     if not peer_list:
         return {}
     medians = {}
-    fields = [(f, v, k) for f, v, k in FIELDS + VALUATION_FIELDS]
-    fields += [(f, (), "ratio") for f in IMPLIED_FIELDS]
-    for field, _varnames, _kind in fields:
+    for field, _varnames, _kind in FIELDS:
         values = sorted(p[field] for p in peer_list
                         if isinstance(p.get(field), (int, float))
                         and not isinstance(p.get(field), bool))
@@ -427,7 +358,6 @@ def summarize(peer_list: list[dict], input_data: dict | None = None) -> dict:
         "revenue_teur_min": min(revenues) if revenues else None,
         "revenue_teur_max": max(revenues) if revenues else None,
         "medians": medians,
-        "multiples_basis": MULTIPLES_BASIS,
         "source": "Valuatum /modeldata, mediaani lasketaan koodissa verrokkien "
                   "toteutuneista luvuista",
     }
@@ -459,7 +389,7 @@ async def resolve(enrichment: dict, own_name: str | None = None) -> list[dict]:
             return []
         var_poses = [
             {"varName": var, "relPos": rel}
-            for _field, varnames, _kind in FIELDS + VALUATION_FIELDS
+            for _field, varnames, _kind in FIELDS
             for var in varnames
             for rel in REL_POSES
         ]
@@ -488,3 +418,40 @@ async def resolve(enrichment: dict, own_name: str | None = None) -> list[dict]:
     except Exception as e:
         print(f"peers: resolution failed, continuing without peers: {e}", flush=True)
         return []
+
+
+_MULTIPLE_COL = re.compile(r"^\s*(mallin\s+)?(ev\s*/|p\s*/\s*(bv|e|s)\b)", re.I)
+_MULTIPLE_TEXT = re.compile(r"(EV\s*/|P\s*/\s*(BV|E|S)\b)[^.]*?\d+(,\d+)?\s?x\b")
+
+
+def strip_model_multiples(sections: list) -> None:
+    """Remove model-value peer multiples from reports written before they were
+    dropped from the peer data (see the note above REL_POSES): the multiple
+    columns of any table, and paragraphs that quote such a multiple or explain
+    them. Reports are re-assembled on every GET, so this cleans old reports."""
+    for sec in sections or []:
+        if not isinstance(sec, dict):
+            continue
+        kept = []
+        for b in sec.get("blocks") or []:
+            if not isinstance(b, dict):
+                kept.append(b)
+                continue
+            if b.get("type") == "paragraph":
+                t = str(b.get("text") or "")
+                low = t.lower()
+                if _MULTIPLE_TEXT.search(t) or ("kertoim" in low and "malliarvo" in low):
+                    continue
+            if b.get("type") == "table" and isinstance(b.get("columns"), list):
+                drop = {i for i, c in enumerate(b["columns"])
+                        if _MULTIPLE_COL.match(str(c or ""))}
+                rows = b.get("rows") or []
+                if drop and all(isinstance(r, list) for r in rows):
+                    b = {**b,
+                         "columns": [c for i, c in enumerate(b["columns"]) if i not in drop],
+                         "rows": [[c for i, c in enumerate(r) if i not in drop]
+                                  for r in rows]}
+                    if "mallipohjainen verrokki" in str(b.get("title") or "").lower():
+                        b["title"] = "Verrokkivertailu"
+            kept.append(b)
+        sec["blocks"] = kept
