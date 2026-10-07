@@ -41,7 +41,7 @@ def _correction_model(stage):
     CORRECTION_WRITER_MODEL env overrides; empty/'0' = retry on same model."""
     if (stage.get("max_tokens") or 0) < 40000:
         return stage
-    m = os.getenv("CORRECTION_WRITER_MODEL", "anthropic/claude-sonnet-5")
+    m = os.getenv("CORRECTION_WRITER_MODEL", "anthropic/claude-sonnet-5.5")
     if not m or m == "0":
         return stage
     return {**stage, "model": m}

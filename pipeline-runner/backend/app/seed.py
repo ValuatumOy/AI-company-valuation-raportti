@@ -180,13 +180,7 @@ def _single_writer_stages():
         {
             "order": 2,
             "name": "Vaihe 2 - Koko raportti (yksi kirjoittaja)",
-            # 2026-07-10: switched from anthropic/claude-fable-5 to GPT-5.6 Sol
-            # (OpenAI's new flagship, released 2026-07-09) — Esa asked to trial
-            # it as writer. It receives the researched enrichment brief instead
-            # of running a costly native web-search agent itself. Swap back to
-            # anthropic/claude-fable-5 here (or via the admin model dropdown)
-            # if Sol's prose quality doesn't hold up.
-            "model": "openai/gpt-5.6-sol",
+            "model": "openai/gpt-6.1-sol",
             # Fable ran with no reasoning_effort set (Claude has no such param).
             # Sol defaults to "medium" if omitted — set it explicitly so it's
             # visible/swappable in the admin "thinking" dropdown. "low" is
@@ -254,6 +248,11 @@ def _ensure_single_writer_pipeline(force=False):
                 store.add_stage(pipeline["id"], desired)
             elif pforce or _placeholder_stage(cur):
                 store.update_stage(cur["id"], desired)
+            elif desired["order"] == 2 and cur.get("model") == "openai/gpt-5.6-sol":
+                patch = {**cur, "model": desired["model"]}
+                if cur.get("reasoning_effort") in ("none", "minimal"):
+                    patch["reasoning_effort"] = "low"
+                store.update_stage(cur["id"], patch)
     return store.get_pipeline(canonical["id"])
 
 

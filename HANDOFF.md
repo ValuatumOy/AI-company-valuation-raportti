@@ -1,3 +1,27 @@
+# Handoff — 2026-10-07 — Report model upgrade
+
+- Active single-writer stage and round-2 default: `openai/gpt-5.6-sol` →
+  `openai/gpt-6.1-sol`. Keep `medium` reasoning and the 96k token limit.
+- Validator correction retry default: `anthropic/claude-sonnet-5` →
+  `anthropic/claude-sonnet-5.5`. Explicit environment overrides still win.
+- `_ensure_single_writer_pipeline` upgrades persisted stage-2 GPT-5.6 Sol
+  selections in single-writer pipelines without resetting prompts, validators,
+  toggles, or input mappings. Other model selections are preserved. Legacy
+  `none`/`minimal` efforts become `low`, which the new Sol supports. No broad
+  reseed is needed; normal startup applies the model migration.
+- OpenRouter requests omit `temperature` for both new writer models. JSON mode,
+  reasoning, token limits, and the existing Chat Completions route are retained;
+  the report writer does not use tools or web search.
+- Gemini research remains `google/gemini-3.1-pro-preview`. Production forecast
+  interpretation has a `FORECAST_INTERPRET_MODEL=google/gemini-3.1-flash-lite`
+  override; leave it intact. The retired 6-stage preset stays untouched.
+- Admin model presets include the two new writer models. Build marker:
+  `2026-10-07-valuation-model-update`.
+- Validation: `python -X utf8 -m pytest -q` (319 passed); frontend
+  `npm.cmd run build` passes. UTF-8 mode is needed on this Windows host because
+  existing fixture readers do not specify an encoding. No paid report generation
+  or refinement was run; output quality still needs a separately approved run.
+
 # Handoff — 2026-09-15 (read this first)
 
 ## 2026-09-15 — Ennusteen alkuperä selitetään nyt raportissa, ja Apogeen "alle WACCin" on selvitetty datasta

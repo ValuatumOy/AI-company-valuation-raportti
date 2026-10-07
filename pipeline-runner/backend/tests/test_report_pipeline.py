@@ -2264,7 +2264,7 @@ def test_single_writer_seed_is_research_writer_split():
     assert stages[1]["model"] == "google/gemini-3.1-pro-preview"
     assert stages[1]["web_search"] is True
     assert stages[1]["prompt_template"] == seed._load_prompt("1_enrichment.txt")
-    assert stages[2]["model"] == "openai/gpt-5.6-sol"
+    assert stages[2]["model"] == "openai/gpt-6.1-sol"
     assert stages[2]["web_search"] is False
     assert stages[2]["input_mapping"]["enrichment"] == "Vaihe 1 enrichment"
     assert "{{enrichment}}" in stages[2]["prompt_template"]
@@ -2272,6 +2272,97 @@ def test_single_writer_seed_is_research_writer_split():
     writer_prompt = stages[2]["prompt_template"]
     assert "Kilpailijat ja kilpailuasema" in writer_prompt
     assert "enrichment.competitors" in writer_prompt
+
+
+@pytest.mark.parametrize("old_model,effort,expected_model,expected_effort", [
+    ("openai/gpt-5.6-sol", "medium", "openai/gpt-6.1-sol", "medium"),
+    ("openai/gpt-5.6-sol", "none", "openai/gpt-6.1-sol", "low"),
+    ("openai/gpt-5.6-sol", "minimal", "openai/gpt-6.1-sol", "low"),
+    ("anthropic/claude-fable-5", "high", "anthropic/claude-fable-5", "high"),
+])
+def test_writer_model_upgrade_preserves_operator_settings(
+    old_model, effort, expected_model, expected_effort,
+):
+    from app import seed, store
+
+    seed.ensure_seeded()
+    pipeline = store.create_pipeline(seed.SINGLE_WRITER_PIPELINE_PREFIX + " upgrade test")
+    original = store.add_stage(pipeline["id"], {
+        **seed._single_writer_stages()[2],
+        "model": old_model,
+        "prompt_template": "Operator-edited writer prompt",
+        "temperature": 0.7,
+        "reasoning_effort": effort,
+        "enabled": False,
+    })
+    seed._ensure_single_writer_pipeline()
+    upgraded = next(s for s in store.get_pipeline(pipeline["id"])["stages"]
+                    if s["order"] == 2)
+    assert upgraded == {**original, "model": expected_model,
+                        "reasoning_effort": expected_effort}
+    seed._ensure_single_writer_pipeline()
+    assert next(s for s in store.get_pipeline(pipeline["id"])["stages"]
+                if s["order"] == 2) == upgraded
+
+
+@pytest.mark.parametrize("model,has_temperature", [
+    ("openai/gpt-6.1-sol", False),
+    ("anthropic/claude-sonnet-5.5", False),
+    ("deepseek/deepseek-v4-pro", True),
+])
+def test_upgraded_writer_request_preserves_json_and_reasoning_contract(
+    monkeypatch, model, has_temperature,
+):
+    import asyncio
+    from app import openrouter
+
+    calls = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, endpoint, headers, json):
+            calls["payload"] = json
+            return openrouter.httpx.Response(200, json={
+                "choices": [{"message": {"content": '{"ok": true}'},
+                             "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 7},
+            })
+
+    monkeypatch.setattr(openrouter.httpx, "AsyncClient", FakeAsyncClient)
+    result = asyncio.run(openrouter._openrouter_chat(
+        model=model, prompt="Return a JSON report", max_tokens=96000,
+        reasoning_effort="medium", expects_json=True, web_search=False,
+    ))
+    payload = calls["payload"]
+    assert payload["model"] == model
+    assert ("temperature" in payload) is has_temperature
+    assert payload["max_tokens"] == 96000
+    assert payload["reasoning"] == {"effort": "medium"}
+    assert payload["response_format"] == {"type": "json_object"}
+    assert "tools" not in payload and "plugins" not in payload
+    assert result["text"] == '{"ok": true}'
+    assert result["tokens_prompt"] == 11 and result["tokens_completion"] == 7
+
+
+def test_correction_writer_upgrade_keeps_explicit_overrides(monkeypatch):
+    stage = {"model": "openai/gpt-6.1-sol", "max_tokens": 96000,
+             "reasoning_effort": "medium"}
+    monkeypatch.delenv("CORRECTION_WRITER_MODEL", raising=False)
+    assert runner._correction_model(stage) == {
+        **stage, "model": "anthropic/claude-sonnet-5.5",
+    }
+    monkeypatch.setenv("CORRECTION_WRITER_MODEL", "openai/gpt-5.6-sol")
+    assert runner._correction_model(stage)["model"] == "openai/gpt-5.6-sol"
+    monkeypatch.setenv("CORRECTION_WRITER_MODEL", "0")
+    assert runner._correction_model(stage) == stage
 
 
 def test_legacy_single_writer_web_stage_migrates_to_research_writer_split():
@@ -2309,7 +2400,7 @@ def test_legacy_single_writer_web_stage_migrates_to_research_writer_split():
     assert migrated_by_order[1]["model"] == "google/gemini-3.1-pro-preview"
     assert migrated_by_order[1]["web_search"] is True
     assert "business_thesis" in migrated_by_order[1]["prompt_template"]
-    assert migrated_by_order[2]["model"] == "openai/gpt-5.6-sol"
+    assert migrated_by_order[2]["model"] == "openai/gpt-6.1-sol"
     assert migrated_by_order[2]["web_search"] is False
     assert "{{enrichment}}" in migrated_by_order[2]["prompt_template"]
 

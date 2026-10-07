@@ -63,17 +63,17 @@ MONITOR_PATH = "/api/monitor/summary"
 _MONITOR_TOKEN = (os.getenv("MONITOR_TOKEN") or "").strip()
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-08-05-checkout-product-check"
+BUILD = "2026-10-07-valuation-model-update"
 
 # Round-2 refinement writer. Same model as round 1 (the stage's own
-# `openai/gpt-5.6-sol`) — a refinement has to preserve the previous report
+# `openai/gpt-6.1-sol`) — a refinement has to preserve the previous report
 # verbatim where the user did not correct it, and swapping authors mid-family
 # is what makes that hard. The NoCFO round (2026-08-26) refined under
 # claude-sonnet-5 and dropped the user's correction while keeping everything
 # else. The stage's own reasoning_effort ("medium") is untouched: the override
 # below swaps the model only. Env-overridable for A/B.
 ROUND2_WRITER_MODEL = (
-    os.getenv("ROUND2_WRITER_MODEL") or "openai/gpt-5.6-sol"
+    os.getenv("ROUND2_WRITER_MODEL") or "openai/gpt-6.1-sol"
 )
 
 # Paid extra refinement rounds (round 3+, once ROUND2_MAX_PER_RUN's free
@@ -969,8 +969,7 @@ def _start_refinement_round(rid, parent, clarifications, clarifications_free_tex
             if hasattr(scenario_probabilities, "model_dump")
             else scenario_probabilities
         ),
-        # Careful preserve-and-patch is an editing task, not creative writing —
-        # use Opus for the round-2 writer whatever round 1's writer happens to be.
+        # Use the configured refinement writer while preserving stage settings.
         "round2_writer_model": ROUND2_WRITER_MODEL,
     }
     if new_fid is not None:
