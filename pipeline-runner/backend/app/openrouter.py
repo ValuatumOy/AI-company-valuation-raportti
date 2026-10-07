@@ -185,9 +185,10 @@ async def _openrouter_chat(
     payload: dict = {
         "model": model,
         "messages": messages,
-        "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if model not in ("openai/gpt-6.1-sol", "anthropic/claude-sonnet-5.5"):
+        payload["temperature"] = temperature
     if expects_json:
         # Soft nudge; not all models honor it, the tolerant extractor backs it up.
         payload["response_format"] = {"type": "json_object"}
