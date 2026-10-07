@@ -11,6 +11,7 @@ export const MODEL_GROUPS: { group: string; items: ModelPreset[] }[] = [
   {
     group: "Claude",
     items: [
+      { id: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5" },
       { id: "anthropic/claude-fable-5", label: "Claude Fable 5" },
       { id: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5" },
       { id: "anthropic/claude-opus-4.8", label: "Claude Opus 4.8" },
@@ -21,6 +22,7 @@ export const MODEL_GROUPS: { group: string; items: ModelPreset[] }[] = [
   {
     group: "OpenAI",
     items: [
+      { id: "openai/gpt-6.1-sol", label: "GPT-6.1 Sol" },
       { id: "openai/gpt-5.6-sol", label: "GPT-5.6 Sol" },
       { id: "openai/gpt-5.6-sol-pro", label: "GPT-5.6 Sol Pro" },
       { id: "openai/gpt-5.6-terra", label: "GPT-5.6 Terra" },
