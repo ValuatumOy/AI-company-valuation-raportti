@@ -745,7 +745,7 @@ def _heat_color(t):
     return f"rgb({r},{g},{b})"
 
 
-def _svg_heatmap(x_axis, series):
+def _svg_heatmap(x_axis, series, base_row=None, base_col=None):
     rows = [s for s in series if s.get("values")]
     if not rows or not x_axis:
         return ""
@@ -754,9 +754,22 @@ def _svg_heatmap(x_axis, series):
         return ""
     vmin, vmax = min(allv), max(allv)
     span = (vmax - vmin) or 1
+    base = None
+    if isinstance(base_row, int) and isinstance(base_col, int) and base_row < len(rows):
+        bvals = _nums(rows[base_row].get("values"))
+        base = bvals[base_col] if base_col < len(bvals) else None
+
+    def tone(v):
+        # With a known base cell, colour relative to it: below base = red,
+        # above = green, base itself neutral. Min-max scaling instead paints
+        # the base case red whenever the grid leans upward.
+        if base is None:
+            return (v - vmin) / span
+        reach = max(vmax - base, base - vmin) or 1
+        return 0.5 + 0.5 * (v - base) / reach
     cw = (600 - 130) / len(x_axis)
     ch = 34
-    H = 30 + ch * len(rows) + 10
+    H = 30 + ch * len(rows) + 10 + (16 if base is not None else 0)
     g = []
     for ci, lab in enumerate(x_axis):
         g.append(f'<text x="{130 + cw * ci + cw / 2:.1f}" y="20" text-anchor="middle" '
@@ -769,16 +782,74 @@ def _svg_heatmap(x_axis, series):
         for ci in range(len(x_axis)):
             v = vals[ci] if ci < len(vals) else None
             x = 130 + cw * ci
-            fill = "#F2F3F1" if v is None else _heat_color((v - vmin) / span)
+            fill = "#F2F3F1" if v is None else _heat_color(tone(v))
             g.append(f'<rect x="{x:.1f}" y="{yy:.1f}" width="{cw - 2:.1f}" height="{ch - 2}" '
                      f'rx="2" fill="{fill}"/>')
             if v is not None:
-                t = (v - vmin) / span
+                t = tone(v)
                 tc = "#fff" if (t < 0.28 or t > 0.82) else C["ink"]
                 dec = 0 if v == round(v) else 1
+                is_base = base is not None and ri == base_row and ci == base_col
+                weight = ' font-weight="700"' if is_base else ""
                 g.append(f'<text x="{x + cw / 2:.1f}" y="{yy + ch / 2 + 3:.1f}" text-anchor="middle" '
-                         f'font-size="8.5" fill="{tc}">{_fmt(v, dec)}</text>')
+                         f'font-size="8.5" fill="{tc}"{weight}>{_fmt(v, dec)}</text>')
+                if is_base:
+                    g.append(f'<rect x="{x + 0.75:.1f}" y="{yy + 0.75:.1f}" width="{cw - 3.5:.1f}" '
+                             f'height="{ch - 3.5}" rx="2" fill="none" stroke="{C["green"]}" '
+                             f'stroke-width="1.5"/>')
+    if base is not None:
+        ly = 30 + ch * len(rows) + 14
+        g.append(f'<rect x="130" y="{ly - 8}" width="10" height="10" rx="1" fill="none" '
+                 f'stroke="{C["green"]}" stroke-width="1.5"/>')
+        g.append(f'<text x="145" y="{ly}" font-size="8.5" fill="{C["gray"]}">'
+                 f'Laskelman perusoletukset · punainen = arvo niillä laskettua pienempi, '
+                 f'vihreä = suurempi</text>')
     return _svg(600, H, "".join(g))
+
+
+def _svg_tornado(items, base):
+    """'Mitä jos?' tornado: one row per assumption, a bar from the value with
+    the assumption moved down to the value with it moved up, around a vertical
+    line at the base-case value. Rows arrive pre-sorted by impact."""
+    rows = [it for it in (items or []) if isinstance(it, dict)
+            and _to_num(it.get("low")) is not None and _to_num(it.get("high")) is not None]
+    base = _to_num(base)
+    if not rows or base is None:
+        return ""
+    W, padL, padR, padT, rowH = 600, 150, 16, 24, 40
+    H = padT + rowH * len(rows) + 8
+    vals = [_to_num(it["low"]) for it in rows] + [_to_num(it["high"]) for it in rows] + [base]
+    reach = max(abs(v - base) for v in vals) or 1
+    lo, hi = base - reach * 1.32, base + reach * 1.32  # room for the end labels
+    plotW = W - padL - padR
+
+    def x(v):
+        return padL + plotW * (v - lo) / (hi - lo)
+    xb = x(base)
+    g = [f'<text x="{xb:.1f}" y="11" text-anchor="middle" font-size="8.5" '
+         f'fill="{C["gray"]}">DCF-arvo {_fmt(base)}</text>']
+    for i, it in enumerate(rows):
+        cy = padT + rowH * i + rowH / 2
+        low, high = _to_num(it["low"]), _to_num(it["high"])
+        g.append(f'<text x="{padL - 10}" y="{cy - 1:.1f}" text-anchor="end" font-size="9.5" '
+                 f'font-weight="600" fill="{C["ink"]}">{_esc(it.get("label"))}</text>')
+        g.append(f'<text x="{padL - 10}" y="{cy + 10:.1f}" text-anchor="end" font-size="8" '
+                 f'fill="{C["gray"]}">oletus {_esc(it.get("base"))}</text>')
+        for v, lab, col in ((low, it.get("low_label"), C["red"]),
+                            (high, it.get("high_label"), C["lime"])):
+            x0, x1 = sorted((xb, x(v)))
+            g.append(f'<rect x="{x0:.1f}" y="{cy - 9:.1f}" width="{max(x1 - x0, 1):.1f}" '
+                     f'height="18" fill="{col}"/>')
+            left = v < base
+            tx = x(v) - 5 if left else x(v) + 5
+            anchor = "end" if left else "start"
+            g.append(f'<text x="{tx:.1f}" y="{cy - 1:.1f}" text-anchor="{anchor}" font-size="9" '
+                     f'font-weight="700" fill="{C["ink"]}">{_fmt(v)}</text>')
+            g.append(f'<text x="{tx:.1f}" y="{cy + 9:.1f}" text-anchor="{anchor}" font-size="8" '
+                     f'fill="{C["gray"]}">{_esc(lab)}</text>')
+    g.append(f'<line x1="{xb:.1f}" y1="{padT - 6}" x2="{xb:.1f}" y2="{H - 4}" '
+             f'stroke="{C["green"]}" stroke-width="1.4"/>')
+    return _svg(W, H, "".join(g))
 
 
 def _svg_waterfall(steps):
@@ -1486,7 +1557,9 @@ def _chart_svg(b):
             break
     try:
         if ctype == "heatmap_or_matrix":
-            return _svg_heatmap(x, series)
+            return _svg_heatmap(x, series, b.get("base_row"), b.get("base_col"))
+        if ctype == "tornado":
+            return _svg_tornado(b.get("items"), b.get("base_value"))
         if ctype == "waterfall":
             return _svg_waterfall(b.get("steps"))
         if ctype == "bar_line":

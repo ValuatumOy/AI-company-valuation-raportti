@@ -22,11 +22,9 @@ def _is_num(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
-def _fmt_pct(v):
-    s = f"{v:.1f}"
-    if s.endswith(".0"):
-        s = s[:-2]
-    return s.replace(".", ",") + " %"
+def _fmt_pct(v, decimals=1):
+    s = f"{v:.{decimals}f}".rstrip("0").rstrip(".") if decimals else f"{v:.0f}"
+    return s.replace(".", ",").replace("-", "−") + " %"
 
 
 def _fmt_teur(v):
@@ -74,8 +72,11 @@ def _wacc_growth_matrix(fcff, disc, cum, equity_gt, wacc_base, bridge_adj):
     if g_base is None or g_base >= wacc_base:
         return None
 
-    wacc_values = sorted({round(wacc_base + d, 2) for d in _WACC_STEPS_PP if wacc_base + d > 0})
-    growth_values = sorted({round(g_base + d, 2) for d in _GROWTH_STEPS_PP})
+    # Compute on the unrounded axis values and round only the labels: rounding
+    # the implied growth first put the centre cell a few tEUR off the reported
+    # value it is supposed to reproduce.
+    wacc_values = [wacc_base + d for d in _WACC_STEPS_PP if wacc_base + d > 0]
+    growth_values = [g_base + d for d in _GROWTH_STEPS_PP]
 
     series = []
     for w in wacc_values:
@@ -89,7 +90,7 @@ def _wacc_growth_matrix(fcff, disc, cum, equity_gt, wacc_base, bridge_adj):
             pv_tv_w_g = tv_w_g / (1 + w / 100.0) ** t_terminal
             equity = max(0.0, pv_fc_w + pv_tv_w_g + bridge_adj)
             row.append(round(equity))
-        series.append({"name": f"WACC {_fmt_pct(w)}", "values": row})
+        series.append({"name": f"WACC {_fmt_pct(w, 2)}", "values": row})
 
     # A deeply negative base case floors nearly every cell to 0 (SaaShop: 24 of
     # 25 cells) — an all-zero grid carries no sensitivity information and reads
@@ -101,10 +102,15 @@ def _wacc_growth_matrix(fcff, disc, cum, equity_gt, wacc_base, bridge_adj):
     return {
         "type": "chart", "chart_id": "wacc_growth_sensitivity",
         "title": "Herkkyys: WACC x pitkän aikavälin kasvu (oman pääoman arvo, tEUR) "
-                 "— likimääräinen malli, kalibroitu konservatiivisen perusskenaarion lukuihin",
+                 "— likimääräinen malli, kalibroitu DCF-laskelman lukuihin",
         "chart_type": "heatmap_or_matrix", "unit": "tEUR",
         "x_axis": [_fmt_pct(g) for g in growth_values],
         "series": series, "status": "available",
+        # The renderer frames this cell and colours every other cell relative
+        # to it, so the reader can find "today's assumptions" in the grid.
+        "base_row": wacc_values.index(wacc_base),
+        "base_col": growth_values.index(g_base),
+        "_wacc_values": wacc_values, "_growth_values": growth_values,
     }
 
 
@@ -120,8 +126,10 @@ def _revenue_margin_matrix(pv_forecast_base, pv_terminal_base, bridge_adj,
     # No proxy output beats a nonsense one — skip the matrix entirely.
     if base_margin <= 0 or (pv_forecast_base + pv_terminal_base) <= 0:
         return None
-    rev_values = [round(base_rev * s) for s in _REV_SCALES]
-    margin_values = [round(base_margin + d, 1) for d in _MARGIN_STEPS_PP]
+    # Unrounded, like the WACC grid: a margin rounded to 0,1 pp before scaling
+    # left the centre cell 15 tEUR off the base value (Virnex 6,12 % -> 6,1 %).
+    rev_values = [base_rev * s for s in _REV_SCALES]
+    margin_values = [base_margin + d for d in _MARGIN_STEPS_PP]
     series = []
     for rev in rev_values:
         row = []
@@ -137,7 +145,111 @@ def _revenue_margin_matrix(pv_forecast_base, pv_terminal_base, bridge_adj,
         "chart_type": "heatmap_or_matrix", "unit": "tEUR",
         "x_axis": [_fmt_pct(m) for m in margin_values],
         "series": series, "status": "available",
+        "base_row": _REV_SCALES.index(1.0),
+        "base_col": _MARGIN_STEPS_PP.index(0.0),
+        "_rev_values": rev_values, "_margin_values": margin_values,
     }
+
+
+def _cell(matrix, row, col):
+    try:
+        v = matrix["series"][row]["values"][col]
+    except (IndexError, KeyError, TypeError):
+        return None
+    return v if _is_num(v) else None
+
+
+def _signed_pct(v, base):
+    pct = round(100.0 * (v - base) / base)
+    if pct == 0:
+        return "±0 %"
+    return f"{'+' if pct > 0 else '−'}{abs(pct)} %"
+
+
+def _what_if_drivers(wg, rm, last_year):
+    """One row per assumption: the value with that assumption moved one step
+    down/up and everything else held at the base case. Every number is read
+    from a cell of the two matrices (never recomputed), so the summary can
+    never disagree with the grids printed right below it."""
+    drivers = []
+    if wg:
+        r, c = wg["base_row"], wg["base_col"]
+        w, g = wg["_wacc_values"], wg["_growth_values"]
+        if 0 < r < len(w) - 1:
+            # Higher WACC lowers the value: the "low value" side is the row below.
+            drivers.append({
+                "label": "Tuottovaatimus (WACC)", "base": _fmt_pct(w[r], 2),
+                "low_label": _fmt_pct(w[r + 1], 2), "low": _cell(wg, r + 1, c),
+                "high_label": _fmt_pct(w[r - 1], 2), "high": _cell(wg, r - 1, c),
+            })
+        if 0 < c < len(g) - 1:
+            drivers.append({
+                "label": "Kasvu ennustejakson jälkeen", "base": _fmt_pct(g[c]),
+                "low_label": _fmt_pct(g[c - 1]), "low": _cell(wg, r, c - 1),
+                "high_label": _fmt_pct(g[c + 1]), "high": _cell(wg, r, c + 1),
+            })
+    if rm:
+        r, c = rm["base_row"], rm["base_col"]
+        rev, m = rm["_rev_values"], rm["_margin_values"]
+        yr = f" {last_year}" if last_year else ""
+        drivers.append({
+            "label": f"Kannattavuus (EBIT-%){yr}", "base": _fmt_pct(m[c]),
+            "low_label": _fmt_pct(m[c - 1]), "low": _cell(rm, r, c - 1),
+            "high_label": _fmt_pct(m[c + 1]), "high": _cell(rm, r, c + 1),
+        })
+        drivers.append({
+            "label": f"Liikevaihto{yr}", "base": _fmt_teur(rev[r]),
+            "low_label": "−10 %", "low": _cell(rm, r - 1, c),
+            "high_label": "+10 %", "high": _cell(rm, r + 1, c),
+        })
+    drivers = [d for d in drivers if _is_num(d["low"]) and _is_num(d["high"])]
+    drivers.sort(key=lambda d: abs(d["high"] - d["low"]), reverse=True)
+    return drivers
+
+
+def _what_if_blocks(wg, rm, last_year, equity):
+    """'Mitä jos?' summary: a tornado chart plus one plain-language sentence
+    per assumption, ordered by how much the value moves. The base is the
+    reported equity value, not a matrix centre cell: the centre can sit a few
+    tEUR off because the implied growth axis is rounded."""
+    if not (wg or rm) or not _is_num(equity) or equity <= 0:
+        return []
+    base = round(equity)
+    drivers = _what_if_drivers(wg, rm, last_year)
+    if len(drivers) < 2:
+        return []
+
+    def effect(v):
+        # A floored cell is not a "-100 %" loss estimate; say what happened.
+        if v == 0:
+            return f"{_fmt_teur(v)} (arvo rajattu nollaan)"
+        return f"{_fmt_teur(v)} ({_signed_pct(v, base)})"
+
+    lines = [f"**{d['label']}** (oletus {d['base']}): "
+             f"{d['low_label']} → {effect(d['low'])}, {d['high_label']} → {effect(d['high'])}."
+             for d in drivers]
+    top = drivers[0]
+    # "DCF-arvo", not "perusskenaario": when the base case blends several
+    # methods (AWAKE.AI: DCF 1 144 vs base case 762 tEUR) these matrices only
+    # describe the DCF leg.
+    intro = (
+        f"Kuvaaja näyttää, miten DCF-laskelman oman pääoman arvo "
+        f"{_fmt_teur(base)} muuttuu, kun yhtä oletusta muutetaan kerrallaan ja "
+        f"muut pidetään ennallaan. Arvo on herkin oletukselle "
+        f"**{top['label']}**: kohtuullinen muutos siinä liikuttaa arvoa "
+        f"{_fmt_teur(top['low'])}–{_fmt_teur(top['high'])}. Luvut ovat samat kuin "
+        f"alla olevien herkkyystaulukoiden soluissa, ja ne ovat likimääräisiä."
+    )
+    return [
+        {
+            "type": "chart", "chart_id": "what_if_sensitivity",
+            "chart_type": "tornado", "unit": "tEUR",
+            "title": "Mitä jos? Yhden oletuksen muutoksen vaikutus DCF-arvoon "
+                     "(oman pääoman arvo, tEUR)",
+            "base_value": base, "items": drivers, "status": "available",
+        },
+        {"type": "paragraph", "block_id": "what_if_intro", "text": intro},
+    ] + [{"type": "paragraph", "block_id": "what_if_line", "text": t} for t in lines]
 
 
 def _historical_best_margin(input_data):
@@ -210,9 +322,9 @@ def build_terminal_margin_range_blocks(input_data):
     ]
 
 
-def build_sensitivity_blocks(input_data):
-    """Returns a list of ready-to-render `chart` blocks (possibly empty if the
-    given data doesn't support the calculation)."""
+def _matrices(input_data):
+    """(wacc x growth matrix, revenue x margin matrix, last forecast year,
+    base equity) — matrices still carry their private axis keys."""
     ve = (input_data or {}).get("valuation_engine") or {}
     dcf = ve.get("dcf") or {}
     wacc_base = (ve.get("wacc_parameters") or {}).get("wacc_pct")
@@ -228,18 +340,16 @@ def build_sensitivity_blocks(input_data):
         and _is_num(equity_gt) and _is_num(wacc_base)
     )
     if not have_basics:
-        return []
+        return None, None, None, None
 
     bridge_adj = equity_gt - cum[0]
-    blocks = []
 
     wg = _wacc_growth_matrix(fcff, disc, cum, equity_gt, wacc_base, bridge_adj)
-    if wg:
-        blocks.append(wg)
 
     forecast = (input_data or {}).get("forecast") or {}
     net_sales = forecast.get("net_sales")
     ebit_pct = forecast.get("ebit_pct")
+    rm = None
     if isinstance(net_sales, list) and net_sales and isinstance(ebit_pct, list) and ebit_pct:
         pv_forecast_base = sum(x for x in disc if _is_num(x))
         pv_terminal_base = cum[0] - pv_forecast_base
@@ -248,7 +358,23 @@ def build_sensitivity_blocks(input_data):
             net_sales[-1] if _is_num(net_sales[-1]) else None,
             ebit_pct[-1] if _is_num(ebit_pct[-1]) else None,
         )
-        if rm:
-            blocks.append(rm)
 
-    return blocks
+    years = forecast.get("years")
+    last_year = years[-1] if isinstance(years, list) and years else None
+    return wg, rm, last_year, equity_gt
+
+
+def build_sensitivity_blocks(input_data):
+    """Returns a list of ready-to-render `chart` blocks (possibly empty if the
+    given data doesn't support the calculation)."""
+    wg, rm, _, _ = _matrices(input_data)
+    # Axis values are only needed to label the what-if rows.
+    return [{k: v for k, v in m.items() if not k.startswith("_")}
+            for m in (wg, rm) if m]
+
+
+def build_what_if_blocks(input_data):
+    """'Mitä jos?' tornado + sentences, read off the same matrices that
+    build_sensitivity_blocks returns (empty when they can't be built)."""
+    wg, rm, last_year, equity = _matrices(input_data)
+    return _what_if_blocks(wg, rm, last_year, equity)

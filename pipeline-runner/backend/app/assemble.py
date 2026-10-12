@@ -52,13 +52,17 @@ def merge_sections(outputs_by_order):
     return [by_id[k] for k in sorted(by_id, key=_order_index)]
 
 
-_SENSITIVITY_CHART_IDS = ("wacc_growth_sensitivity", "revenue_ebit_sensitivity")
+_SENSITIVITY_CHART_IDS = ("wacc_growth_sensitivity", "revenue_ebit_sensitivity",
+                          "what_if_sensitivity")
+_SENSITIVITY_BLOCK_IDS = ("what_if_intro", "what_if_line")
 
 
 def _is_sensitivity_block(b):
     if not isinstance(b, dict):
         return False
     if b.get("chart_id") in _SENSITIVITY_CHART_IDS:
+        return True
+    if b.get("block_id") in _SENSITIVITY_BLOCK_IDS:
         return True
     # An LLM-emitted sensitivity matrix in the herkkyys section: same shape,
     # different id. The hard prompt rule forbids these, but strip defensively so
@@ -68,16 +72,31 @@ def _is_sensitivity_block(b):
 
 def _inject_sensitivity_blocks(sections, input_data):
     """Replace any sensitivity matrices in section 11 with the deterministic
-    WACC×growth and revenue×EBIT-margin matrices — computed in code (see
+    'Mitä jos?' summary and the WACC×growth and revenue×EBIT-margin
+    matrices — computed in code (see
     app/sensitivity.py), never by the LLM. Stripping first makes the injection
     idempotent and prevents the duplicated-matrix bug (unlike a blind append)."""
-    blocks = sensitivity.build_sensitivity_blocks(input_data)
-    if not blocks:
+    matrices = sensitivity.build_sensitivity_blocks(input_data)
+    if not matrices:
         return sections
+    what_if = sensitivity.build_what_if_blocks(input_data)
     for sec in sections:
         if isinstance(sec, dict) and str(sec.get("id")) == _SENSITIVITY_SECTION_ID:
             kept = [b for b in (sec.get("blocks") or []) if not _is_sensitivity_block(b)]
-            sec["blocks"] = kept + blocks
+            # Under the writer's "Herkkyysanalyysi" heading: the what-if summary
+            # first, the writer's own reading, then the matrices — not after
+            # the scenarios at the very end of the section.
+            h = next((i for i, b in enumerate(kept) if isinstance(b, dict)
+                      and b.get("type") == "heading"
+                      and str(b.get("text") or "").lower().startswith("herkkyys")), None)
+            if h is None:
+                sec["blocks"] = kept + what_if + matrices
+            else:
+                e = next((i for i in range(h + 1, len(kept))
+                          if isinstance(kept[i], dict)
+                          and kept[i].get("type") == "heading"), len(kept))
+                sec["blocks"] = (kept[:h + 1] + what_if + kept[h + 1:e]
+                                 + matrices + kept[e:])
             break
     return sections
 

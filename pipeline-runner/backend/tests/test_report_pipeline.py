@@ -338,8 +338,9 @@ def test_assemble_injects_sensitivity_blocks_into_section_11():
     ]}
     rep = assemble.assemble(run)
     sec11 = next(s for s in rep["sections"] if s["id"] == "11")
-    types = [b["type"] for b in sec11["blocks"]]
-    assert types == ["heading", "chart", "chart"]
+    ids = [b.get("chart_id") for b in sec11["blocks"] if b["type"] == "chart"]
+    assert ids == ["what_if_sensitivity", "wacc_growth_sensitivity", "revenue_ebit_sensitivity"]
+    assert sec11["blocks"][0] == {"type": "heading", "text": "x"}
 
 
 def test_assemble_replaces_existing_sensitivity_matrix_without_duplicating():
@@ -359,7 +360,151 @@ def test_assemble_replaces_existing_sensitivity_matrix_without_duplicating():
     ids = [b.get("chart_id") for b in sec11["blocks"] if b.get("type") == "chart"]
     assert ids.count("wacc_growth_sensitivity") == 1  # pre-existing copy stripped
     assert ids.count("revenue_ebit_sensitivity") == 1
-    assert [b["type"] for b in sec11["blocks"]] == ["heading", "chart", "chart"]
+    assert ids.count("what_if_sensitivity") == 1
+
+
+def _heeros_engine_input_data():
+    """Heeros Oyj 2026-08-04 example report, DCF table (p. 14) and forecast
+    (p. 26) as printed. Rounded inputs, so cells land within a few tEUR of the
+    printed matrices."""
+    fcff = [320, 423, 473, 559, 634, 707, 775, 841, 906, 969]
+    disc = [338, 408, 417, 449, 466, 475, 475, 471, 463, 453]
+    ev = 11638
+    return {
+        "valuation_engine": {
+            "wacc_parameters": {"wacc_pct": 9.46},
+            "dcf": {"fcff": fcff, "discounted_fcff": disc,
+                    "cumulative_discounted_fcff": [ev - sum(disc[:i]) for i in range(10)],
+                    "equity_value_before_floor": 11700.0}},
+        "forecast": {
+            "years": list(range(2025, 2035)),
+            "net_sales": [11506, 11613, 11739, 11974, 12286, 12644, 13021, 13412, 13814, 14229],
+            "ebit_pct": [3.7, 4.4, 4.9, 5.5, 6.1, 6.5, 7.0, 7.3, 7.7, 8.0]},
+    }
+
+
+def test_what_if_values_are_read_from_the_matrix_cells():
+    d = _heeros_engine_input_data()
+    wg, rm = sensitivity.build_sensitivity_blocks(d)
+    tornado = sensitivity.build_what_if_blocks(d)[0]
+    items = {it["label"]: it for it in tornado["items"]}
+    assert tornado["base_value"] == 11700  # the reported value, not a centre cell
+    wacc = items["Tuottovaatimus (WACC)"]
+    assert (wacc["low"], wacc["high"]) == (wg["series"][3]["values"][2], wg["series"][1]["values"][2])
+    assert wacc["base"] == "9,46 %"  # same precision as the rest of the report
+    growth = items["Kasvu ennustejakson jälkeen"]
+    assert (growth["low"], growth["high"]) == (wg["series"][2]["values"][1], wg["series"][2]["values"][3])
+    margin = items["Kannattavuus (EBIT-%) 2034"]
+    assert (margin["low"], margin["high"]) == (rm["series"][2]["values"][1], rm["series"][2]["values"][3])
+    revenue = items["Liikevaihto 2034"]
+    assert (revenue["low"], revenue["high"]) == (rm["series"][1]["values"][2], rm["series"][3]["values"][2])
+    # Heeros p. 19 printed 8 796 / 14 618 for EBIT-% 6 / 10 % at 14 229 tEUR.
+    assert abs(margin["low"] - 8796) <= 10 and abs(margin["high"] - 14618) <= 10
+
+
+def test_what_if_rows_are_ordered_by_impact_and_spelled_out():
+    blocks = sensitivity.build_what_if_blocks(_heeros_engine_input_data())
+    items = blocks[0]["items"]
+    spans = [abs(it["high"] - it["low"]) for it in items]
+    assert spans == sorted(spans, reverse=True)
+    assert items[0]["label"] == "Kannattavuus (EBIT-%) 2034"  # Heeros: margin path matters most
+    texts = [b["text"] for b in blocks[1:]]
+    assert "11 700 tEUR" in texts[0] and "Kannattavuus (EBIT-%) 2034" in texts[0]
+    assert len(texts) == 1 + len(items)
+    assert any("6 % → 8 790 tEUR (−25 %)" in t for t in texts)
+
+
+def test_what_if_names_a_floored_cell_instead_of_minus_100_percent():
+    """AWAKE.AI: base EBIT-% 1,9 % minus 2 pp is negative and the cell floors
+    to 0 — that is not a -100 % estimate, and the label needs a real minus."""
+    import json
+    d = json.load(open(os.path.join(FIXTURES, "runs", "awakeai.json"), encoding="utf-8"))["input_data"]
+    blocks = sensitivity.build_what_if_blocks(d)
+    margin = next(it for it in blocks[0]["items"] if it["label"].startswith("Kannattavuus"))
+    assert margin["low"] == 0 and margin["low_label"].startswith("−")
+    line = next(b["text"] for b in blocks[1:] if b["text"].startswith("**Kannattavuus"))
+    assert "0 tEUR (arvo rajattu nollaan)" in line and "−100 %" not in line
+    assert "DCF-laskelman oman pääoman arvo 1 144 tEUR" in blocks[1]["text"]
+
+
+def test_what_if_suppressed_without_positive_base_or_data():
+    d = _heeros_engine_input_data()
+    d["valuation_engine"]["dcf"]["equity_value_before_floor"] = -1508.0
+    assert sensitivity.build_what_if_blocks(d) == []
+    assert sensitivity.build_what_if_blocks({}) == []
+
+
+def test_matrices_mark_their_base_cell():
+    for b in sensitivity.build_sensitivity_blocks(_heeros_engine_input_data()):
+        assert (b["base_row"], b["base_col"]) == (2, 2)
+        assert not any(k.startswith("_") for k in b)  # private axis keys stay internal
+
+
+def test_what_if_sits_under_the_herkkyys_heading_and_matrices_before_scenarios():
+    writer_par = {"type": "paragraph", "text": "Kirjoittajan tulkinta."}
+    run = {"results": [
+        {"order": 0, "status": "ok", "parsed_json": _heeros_engine_input_data()},
+        {"order": 4, "status": "ok", "parsed_json": {"sections": [
+            {"id": "11", "title": "HERKKYYS", "blocks": [
+                {"type": "table", "title": "Skenaariovertailu"},
+                {"type": "heading", "text": "Herkkyysanalyysi"},
+                writer_par,
+                {"type": "heading", "text": "Skenaariot, todennäköisyydet ja odotusarvo"}]}]}},
+        {"order": 6, "status": "ok", "parsed_json": {
+            "report_type": "ai_valuation_report", "cover": {"headline_value": "1"},
+            "sections": [{"id": "1"}]}},
+    ]}
+    blocks = next(s for s in assemble.assemble(run)["sections"] if s["id"] == "11")["blocks"]
+    order = [b.get("chart_id") or b.get("block_id") or b.get("text") or b.get("title")
+             for b in blocks]
+    h = order.index("Herkkyysanalyysi")
+    assert order[h + 1] == "what_if_sensitivity"
+    w = order.index("Kirjoittajan tulkinta.")
+    assert all(x in ("what_if_intro", "what_if_line") for x in order[h + 2:w])
+    assert order[w + 1:w + 3] == ["wacc_growth_sensitivity", "revenue_ebit_sensitivity"]
+    assert order[w + 3] == "Skenaariot, todennäköisyydet ja odotusarvo"
+    # Re-assembling an already assembled section must not duplicate anything.
+    again = assemble._inject_sensitivity_blocks(
+        [{"id": "11", "blocks": list(blocks)}], _heeros_engine_input_data())[0]["blocks"]
+    assert again == blocks
+
+
+def test_matrix_centre_cells_reproduce_the_reported_value_on_real_runs():
+    """Virnex: EBIT-% 6,122 was rounded to 6,1 before scaling and the centre
+    cell read 2 325 next to the reported 2 340. Every positive-base fixture's
+    centre cells must now land on the reported value."""
+    import glob, json
+    checked = 0
+    for p in sorted(glob.glob(os.path.join(FIXTURES, "runs", "*.json"))):
+        d = json.load(open(p, encoding="utf-8"))["input_data"]
+        equity = d["valuation_engine"]["dcf"]["equity_value_before_floor"]
+        for b in sensitivity.build_sensitivity_blocks(d):
+            centre = b["series"][b["base_row"]]["values"][b["base_col"]]
+            assert abs(centre - equity) <= 1.0, (p, b["chart_id"], centre, equity)
+            checked += 1
+    assert checked >= 6
+
+
+def test_heatmap_colours_relative_to_base_and_frames_it():
+    wg = sensitivity.build_sensitivity_blocks(_heeros_engine_input_data())[0]
+    svg = render._chart_svg(wg)
+    assert "Laskelman perusoletukset" in svg
+    # Base cell is the neutral midpoint; min-max scaling used to paint it red.
+    assert render._heat_color(0.5) in svg
+    base = wg["series"][2]["values"][2]
+    assert f'font-weight="700">{render._fmt(base)}</text>' in svg
+    # Without a base cell the legacy min-max colouring is unchanged.
+    assert "Laskelman perusoletukset" not in render._svg_heatmap(wg["x_axis"], wg["series"])
+
+
+def test_tornado_renders_every_assumption_around_the_base():
+    tornado = sensitivity.build_what_if_blocks(_heeros_engine_input_data())[0]
+    svg = render._chart_svg(tornado)
+    assert svg.startswith("<svg") and "DCF-arvo 11 700" in svg
+    for it in tornado["items"]:
+        assert render._esc(it["label"]) in svg
+        assert render._fmt(it["low"]) in svg and render._fmt(it["high"]) in svg
+    assert render._svg_tornado([], 100) == ""
 
 
 def test_report_qa_flags_duplicate_block_and_sensitivity_drift_advisory():
