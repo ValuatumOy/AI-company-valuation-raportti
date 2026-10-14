@@ -47,8 +47,24 @@ def _current_rows(forecast: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _prompt(text: str, forecast: dict[str, Any]) -> str:
+def _prompt(text: str, forecast: dict[str, Any], *, currency="EUR", language="fi") -> str:
     current = _current_rows(forecast)
+    if language == "en":
+        current = [{"varname": row["varname"], "year": row["year"],
+                    "current_value_millions": row["current_value_meur"]} for row in current]
+        return f"""Interpret the user's forecast edit request as JSON.
+Allowed variables: ns = revenue; ebit = EBIT. Use only the variable/year pairs supplied below.
+Current values and edits[].value are MILLIONS OF {currency}. Source report figures in
+t{currency} are thousands: 5300 t{currency} becomes 5.3. Do not convert currencies.
+Return only {{"edits":[{{"varname":"ns|ebit","year":2027,"value":5.3}}],
+"summary":"brief English explanation", "notes":["uncertainties or assumptions in English"]}}.
+Values are absolute replacements, not percentages or deltas. Calculate percentage,
+growth and margin changes into annual values. Omit unchanged cells. If ambiguous,
+use a conservative interpretation and explain the assumption. Do not invent extra edits.
+Current forecast (millions of {currency}):
+{json.dumps(current, ensure_ascii=False)}
+User request:
+<user_request>{text}</user_request>"""
     return f"""Tulkitse käyttäjän ennusteiden muokkauspyyntö rakenteiseksi JSONiksi.
 
 Sallitut muuttujat:
@@ -123,13 +139,13 @@ def _normalise_response(data: Any) -> dict[str, Any]:
     return {"edits": normalised_edits, "summary": summary, "notes": notes}
 
 
-async def interpret(text: str, forecast: dict[str, Any]) -> dict[str, Any]:
+async def interpret(text: str, forecast: dict[str, Any], *, currency="EUR", language="fi") -> dict[str, Any]:
     """Call the configured LLM and return its normalised structured proposal."""
     model = (os.getenv("FORECAST_INTERPRET_MODEL") or DEFAULT_MODEL).strip()
     try:
         response = await openrouter.chat(
             model=model,
-            prompt=_prompt(text, forecast),
+            prompt=_prompt(text, forecast, currency=currency, language=language),
             temperature=0.0,
             max_tokens=4000,
             expects_json=True,
@@ -141,7 +157,7 @@ async def interpret(text: str, forecast: dict[str, Any]) -> dict[str, Any]:
     return _normalise_response(data)
 
 
-def magnitude_notes(forecast: dict[str, Any], edits: list[Any]) -> list[str]:
+def magnitude_notes(forecast: dict[str, Any], edits: list[Any], *, currency="EUR", language="fi") -> list[str]:
     """Warn when a proposed value differs by more than one order of magnitude."""
     current = {
         (row["varname"], row["year"]): row["current_value_meur"]
@@ -157,6 +173,9 @@ def magnitude_notes(forecast: dict[str, Any], edits: list[Any]) -> list[str]:
             continue
         if math.isclose(old, 0.0, abs_tol=1e-12):
             if not math.isclose(value, 0.0, abs_tol=1e-12):
+                if language == "en":
+                    notes.append(f"{varname} {year}: the current value is zero; check the proposed magnitude.")
+                    continue
                 notes.append(
                     f"{_LABELS.get(varname, varname)} {year}: nykyarvo on 0, joten "
                     "muutoksen kertaluokka kannattaa tarkistaa."
@@ -164,6 +183,9 @@ def magnitude_notes(forecast: dict[str, Any], edits: list[Any]) -> list[str]:
             continue
         ratio = abs(value) / abs(old)
         if ratio > 10 or ratio < 0.1:
+            if language == "en":
+                notes.append(f"{varname} {year}: the proposal differs by more than a factor of ten. Check millions versus t{currency}.")
+                continue
             notes.append(
                 f"{_LABELS.get(varname, varname)} {year}: ehdotus poikkeaa nykyarvosta "
                 "yli kymmenkertaisesti. Tarkista erityisesti miljoonat/tEUR-yksikkö."

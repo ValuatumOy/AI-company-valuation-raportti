@@ -994,7 +994,8 @@ def _derive(report):
 _EV_PHRASE_RE = re.compile(
     r"(odotusarvo[^.;]{0,70}?)(-?\d[\d,\s  ]*\d|\d)(?:,(\d+))?\s*(tEUR|M€)", re.I)
 _RANGE_PHRASE_RE = re.compile(
-    r"((?:haarukka|vaihteluväli)[^.;]{0,50}?)"
+    r"((?:skenaariohaarukka|arvostus(?:haarukka|väli)|arvohaarukka|"
+    r"(?:omistaja[- ]?arvon|oman pääoman arvon|osakekannan arvon)\s+(?:haarukka|vaihteluväli))[^.;]{0,50}?)"
     r"(-?\d[\d,\s  ]*\d|\d)(?:,\d+)?\s*[–-]\s*(-?\d[\d,\s  ]*\d|\d)(?:,\d+)?"
     r"\s*(tEUR|M€)", re.I)
 
@@ -1039,12 +1040,22 @@ def _restatement_patterns():
     unit = rf"(?:t{currency}|M\s*{currency}|bn\s*{currency})\b"
     expected = re.compile(rf"(\bexpected\s+value\b[^.;]{{0,70}}?)({number})\s*({unit})", re.I)
     value_range = re.compile(
-        rf"(?P<prefix>\b(?:valuation\s+range|scenario\s+range|range)\b[^.;]{{0,50}}?)"
+        rf"(?P<prefix>\b(?:valuation\s+range|equity(?:\s+value)?\s+range|"
+        rf"scenario\s+(?:equity(?:\s+value)?|valuation)\s+range)\b[^.;]{{0,50}}?)"
         rf"(?P<low>{number})\s*(?:(?P<low_unit>{unit})\s*)?[–-]\s*"
         rf"(?P<high>{number})\s*(?P<unit>{unit})", re.I)
     term = rf"\d{{1,3}}\s*%\s*[×x*]\s*{number}\s*{unit}"
     formula = re.compile(rf"(?:{term}\s*[+]\s*){{2}}{term}\s*=\s*{number}\s*({unit})", re.I)
     return expected, value_range, formula
+
+
+_OTHER_FINANCIAL_MEASURE_RE = re.compile(
+    r"\b(?:peers?|comparables?|competitors?|business[- ]lines?|segments?|revenue|sales|"
+    r"turnover|ebit(?:da)?|cash\s+flow|capex|enterprise\s+value|liikevaih\w*|"
+    r"verrok\w*|kilpailij\w*|liiketoiminta[- ]?(?:alue|linj)\w*|yritysarvo\w*)\b", re.I)
+_EQUITY_VALUE_LABEL_RE = re.compile(
+    r"\b(?:equity(?:\s+value)?|owner[- ]?value|valuation|omistaja[- ]?arvo|"
+    r"oman\s+pääoman\s+arvo|osakekannan\s+arvo|arvostus)\b", re.I)
 
 
 def _fix_restated_figures(report, canonical):
@@ -1057,9 +1068,11 @@ def _fix_restated_figures(report, canonical):
     expected value from the wrong figure (65 109 instead of 63 186), so the
     cover and the summary disagreed on the report's leading number.
 
-    Only two narrowly-matched shapes are touched — a figure attached to the
-    word "odotusarvo", and a range attached to "haarukka"/"vaihteluväli" — and
-    only when it differs from the canonical value by more than rounding but
+    Only the report's summary and scenario sections are eligible. Explicit
+    expected-value/valuation-range statements and equity-value scenario cells
+    may change; source, peer and operating measures stay untouched. A bare
+    arithmetic expression is not treated as an expected-value restatement.
+    Corrections apply only when they differ by more than rounding but
     less than 30 % (a different figure entirely is someone else's number, not
     a restatement of this one). Every rewrite is reported back to the caller.
     """
@@ -1068,6 +1081,12 @@ def _fix_restated_figures(report, canonical):
     notes = []
     english = current().language == "en"
     expected_pattern, range_pattern, sum_pattern = _restatement_patterns()
+    block_text = ""
+
+    def _own_value_context(match):
+        # Scope the current sentence; nearby numbers alone cannot identify a measure.
+        prefix = re.split(r"[.!?;]\s+", block_text[:match.start()])[-1]
+        return not _OTHER_FINANCIAL_MEASURE_RE.search(prefix + match.group(0))
 
     def _close(v, target):
         return abs(v - target) <= max(1.0, 0.005 * abs(target))
@@ -1076,6 +1095,8 @@ def _fix_restated_figures(report, canonical):
         return not _close(v, target) and abs(v - target) <= 0.30 * abs(target)
 
     def _ev_sub(m):
+        if not _own_value_context(m):
+            return m.group(0)
         unit = m.group(3) if english else m.group(4)
         raw = m.group(2) if english else m.group(2) + ("," + m.group(3) if m.group(3) else "")
         v = _unit_num(raw, unit)
@@ -1085,6 +1106,8 @@ def _fix_restated_figures(report, canonical):
         return f"{m.group(1)}{_unit_fmt(ev, unit)}"
 
     def _rng_sub(m):
+        if not _own_value_context(m):
+            return m.group(0)
         unit = m.group("unit") if english else m.group(4)
         a = _unit_num(m.group("low"), m.group("low_unit") or unit) if english else _unit_num(m.group(2), unit)
         b = _unit_num(m.group("high"), unit) if english else _unit_num(m.group(3), unit)
@@ -1105,6 +1128,9 @@ def _fix_restated_figures(report, canonical):
     names = {s["name"].strip().lower(): s["value"] for s in scen}
 
     def _sum_sub(m):
+        prefix = re.split(r"[.!?;]\s+", block_text[:m.start()])[-1]
+        if not _own_value_context(m) or not re.search(r"\b(?:expected\s+value|odotusarvo)\b", prefix, re.I):
+            return m.group(0)
         unit = m.group(1)
         if ev is None or len(scen) != 3 or any(s.get("prob") is None for s in scen):
             return m.group(0)
@@ -1119,33 +1145,57 @@ def _fix_restated_figures(report, canonical):
     for sec in (report or {}).get("sections") or []:
         if not isinstance(sec, dict):
             continue
+        if str(sec.get("id")) not in {"1", "11"}:
+            continue
+        heading_context = str(sec.get("title") or "")
         for b in sec.get("blocks") or []:
             if not isinstance(b, dict):
                 continue
+            if b.get("type") == "heading":
+                heading_context = str(b.get("text") or b.get("title") or "")
+            scope_context = heading_context + " " + " ".join(str(b.get(k) or "") for k in ("title", "caption"))
+            if _OTHER_FINANCIAL_MEASURE_RE.search(scope_context):
+                continue
             if isinstance(b.get("text"), str):
-                t = sum_pattern.sub(_sum_sub, b["text"])
-                b["text"] = range_pattern.sub(_rng_sub, expected_pattern.sub(_ev_sub, t))
+                block_text = b["text"]
+                t = sum_pattern.sub(_sum_sub, block_text)
+                block_text = t
+                t = expected_pattern.sub(_ev_sub, block_text)
+                block_text = t
+                b["text"] = range_pattern.sub(_rng_sub, block_text)
             # A row keyed by a scenario name must carry that scenario's
-            # canonical value. The key may be the bare name ("Optimistinen") or
-            # name-plus-label ("Optimistinen omistaja-arvo"); the plausibility
-            # window below keeps unrelated same-prefix rows ("Optimistinen
-            # liikevaihto vuonna 2029") out of it.
+            # canonical equity value only when the row or column names that
+            # measure. Scenario-prefixed revenue rows can have similar numbers.
             if b.get("type") == "table" and names:
+                table_context = " ".join(str(b.get(k) or "") for k in ("title", "caption"))
+                if _OTHER_FINANCIAL_MEASURE_RE.search(table_context):
+                    continue
+                columns = b.get("columns") or []
+                own_scenario_table = (str(sec.get("id")) == "11" and len(columns) == 2
+                                      and str(columns[0]).strip().lower() in {"scenario", "skenaario"}
+                                      and re.fullmatch(r"(?:value|arvo)(?:\s*\([^)]*\))?", str(columns[1]).strip(), re.I))
                 for row in b.get("rows") or []:
                     if not isinstance(row, list) or len(row) < 2:
                         continue
                     key = _clean(row[0]).strip().lower()
+                    if _OTHER_FINANCIAL_MEASURE_RE.search(key):
+                        continue
                     target = names.get(key)
                     if target is None:
                         target = next((v for n, v in names.items()
-                                       if key.startswith(n)), None)
+                                       if key.startswith(n + " ") and _EQUITY_VALUE_LABEL_RE.search(key)), None)
                     if target is None:
                         continue
                     for i in range(1, len(row)):
+                        columns = b.get("columns") or []
+                        column = str(columns[i] if i < len(columns) else "")
+                        if _OTHER_FINANCIAL_MEASURE_RE.search(column):
+                            continue
+                        if not _EQUITY_VALUE_LABEL_RE.search(key + " " + column) and not (own_scenario_table and key in names):
+                            continue
                         cell = _short(row[i])
                         unit_pattern = rf"t{current().currency}|M\s*{current().currency}|bn\s*{current().currency}"
                         money = re.search(rf"(?P<unit>{unit_pattern})\s*$", cell, re.I) if english else None
-                        columns = b.get("columns") or []
                         declared = re.search(unit_pattern, str(columns[i] if i < len(columns) else "") + " " + str(b.get("unit") or ""), re.I) if english else None
                         unit = money.group("unit") if money else declared.group(0) if declared else None
                         v = _unit_num(cell[:money.start()] if money else cell, unit) if unit else _to_num(cell)
@@ -1276,6 +1326,8 @@ def _canonical_card_value(label, current):
     labelled something else, or already right, is left alone."""
     can = _canonical_ctx.get() or {}
     lab = _clean(label).lower()
+    if _OTHER_FINANCIAL_MEASURE_RE.search(lab):
+        return None
     cur = _to_num(_short(current))
     if any(word in lab for word in ("odotusarvo", "expected value")) and can.get("expected_value") is not None:
         ev = can["expected_value"]
@@ -1700,7 +1752,7 @@ def _cover(report, derived):
     if current().language == "en" and meta.get("publication_status") == "internal_review":
         band += '<div style="background:#fff2e8;padding:3mm 15mm;font-size:9pt;font-weight:700">INTERNAL REVIEW DRAFT — publication withheld.<br>Stored forecast requires economic validation; this model value is not approved for valuation use.</div>'
     meta_row = (
-        _tf('<div style="margin:0 0 7mm"><div class="lab">Yhtiö</div><div class="co" style="font-size:24pt;line-height:1.15;margin:1mm 0">{0}</div><div class="sub">{1}</div></div><div class="meta" style="grid-template-columns:repeat(2,1fr)"><div><div class="lab">Y-tunnus</div><div class="val">{2}</div></div><div><div class="lab">Raportin päivä</div><div class="val">{3}</div></div></div>', f"{_esc(meta.get('company_name'))}", f'{_esc(industry)}', f"{_esc(meta.get('y_tunnus'))}", f"{_esc(meta.get('report_date'))}")
+        _tf('<div style="margin:0 0 7mm"><div class="lab">Yhtiö</div><div class="co" style="font-size:24pt;line-height:1.15;margin:1mm 0">{0}</div><div class="sub">{1}</div></div><div class="meta" style="grid-template-columns:repeat(2,1fr)"><div><div class="lab">Y-tunnus</div><div class="val">{2}</div></div><div><div class="lab">Raportin päivä</div><div class="val">{3}</div></div></div>', f"{_esc(meta.get('company_name'))}", f'{_esc(industry)}', f"{_esc(meta.get('business_id') or meta.get('y_tunnus'))}", f"{_esc(meta.get('report_date'))}")
     )
 
     # --- hero ---------------------------------------------------------
@@ -1891,7 +1943,7 @@ def _mandate(report):
         level = _t(level) if level else None
         pairs = [
             (_t('Yhtiö'), meta.get("company_name")),
-            (_t('Y-tunnus'), meta.get("y_tunnus")),
+            (_t('Y-tunnus'), meta.get("business_id") or meta.get("y_tunnus")),
             (_t('Toimiala'), _display_industry(meta)),
             (_t('Kotipaikka'), meta.get("domicile")),
             (_t('Raportin päivä'), meta.get("report_date")),
@@ -2440,7 +2492,7 @@ def _css_str(v):
 def _page_css(report):
     meta = report.get("meta") or {}
     name, legal = _brand(report)
-    bits = [meta.get("company_name"), meta.get("y_tunnus"), meta.get("report_date")]
+    bits = [meta.get("company_name"), meta.get("business_id") or meta.get("y_tunnus"), meta.get("report_date")]
     head_right = _css_str(" · ".join(str(x) for x in bits if x))
     head_left = _css_str(_tf('{0} · AI-Arvonmääritysraportti', f'{name}'))
     foot_left = _css_str(legal)

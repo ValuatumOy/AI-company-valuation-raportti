@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from valuatum_kit.config import api_base_url
+from valuatum_kit.config import api_base_url, api_token, require_danish_orders
 
 
 POLL_INTERVAL_SECONDS = 10.0
@@ -51,7 +51,7 @@ def _job_id(payload: Any) -> int:
     return job_id
 
 
-async def trigger_and_wait(fid: int) -> None:
+async def trigger_and_wait(fid: int, country="FI") -> None:
     """Start estimate generation for *fid* and return only after status OK.
 
     Every failure is normalized to EstimateGenerationError so stage 0 can
@@ -60,13 +60,18 @@ async def trigger_and_wait(fid: int) -> None:
     if fid <= 0:
         raise EstimateGenerationError("Ennustegeneroinnin FID:n pitää olla positiivinen.")
 
-    token = os.environ.get("VALUATUM_TOKEN", "").strip()
+    if country == "DK":
+        try:
+            require_danish_orders()
+        except ValueError as exc:
+            raise EstimateGenerationError(str(exc)) from exc
+    token = api_token(country) if country == "DK" else os.environ.get("VALUATUM_TOKEN", "").strip()
     if not token:
         raise EstimateGenerationError(
             "VALUATUM_TOKEN puuttuu, joten ennustegenerointia ei voida käynnistää."
         )
 
-    base_url = api_base_url()
+    base_url = api_base_url(country) if country == "DK" else api_base_url()
     headers = {"accept": "application/json", "authorization": f"Bearer {token}"}
     deadline = time.monotonic() + TIMEOUT_SECONDS
 

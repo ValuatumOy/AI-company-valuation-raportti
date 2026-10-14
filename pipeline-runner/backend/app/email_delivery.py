@@ -60,6 +60,8 @@ def _safe_filename(value: str) -> str:
 
 
 def _report_version(run: dict) -> str:
+    if (run.get("params") or {}).get("report_language") == "en":
+        return "revised report" if run.get("parent_run_id") else "first report"
     return "tarkennettu versio" if run.get("parent_run_id") else "ensimmäinen versio"
 
 
@@ -92,10 +94,11 @@ def _report_link(rid: str, run: dict) -> str | None:
     key = run.get("access_key")
     if not key:
         return None
-    site = (os.getenv("CLIENT_SITE_URL") or "").strip().rstrip("/")
+    foreign = (run.get("params") or {}).get("country_code") == "DK"
+    site = (os.getenv("INTERNATIONAL_CLIENT_SITE_URL" if foreign else "CLIENT_SITE_URL") or "").strip().rstrip("/")
     if not site:
         return None
-    return f"{site}{REPORT_PATH}?key={key}&rid={rid}"
+    return f"{site}{'/report' if foreign else REPORT_PATH}?key={key}&rid={rid}"
 
 
 def _send_with_ses(
@@ -220,6 +223,12 @@ async def send_report_ready(rid: str) -> dict:
         f"Hei,\n\n{company} -arvonmääritysraportin {version} on valmis. "
         f"Raportti on tämän viestin liitteenä.{link_text}\n\nYstävällisin terveisin,\nValuatum"
     )
+    if (run.get("params") or {}).get("report_language") == "en":
+        subject = f"Valuation report ready: {company}"
+        link_text = f"\n\nOpen your report and review the assumptions: {link}" if link else ""
+        text_body = f"Hello,\n\nYour {version} for {company} is ready and attached.{link_text}\n\nValuatum"
+        link_html = f'<p><a href="{html.escape(link)}">Open your report</a></p>' if link else ""
+        html_body = f"<p>Hello,</p><p>Your {html.escape(version)} for {escaped_company} is ready and attached.</p>{link_html}<p>Valuatum</p>"
 
     message = EmailMessage(policy=policy.SMTP)
     message["From"] = sender
@@ -283,6 +292,15 @@ async def send_forecast_ready(rid: str) -> dict:
         "Voit myös jatkaa suoraan meidän ennusteillamme.\n\n"
         "Ystävällisin terveisin,\nValuatum"
     )
+    if (run.get("params") or {}).get("report_language") == "en":
+        subject = f"Review your valuation forecasts: {company}"
+        text_body = (f"Hello,\n\nBefore we create your valuation report for {company}, review "
+                     f"or edit the revenue and EBIT forecasts: {link}\n\n"
+                     "The report starts after you confirm the forecasts. You can also continue "
+                     "with the supplied assumptions.\n\nValuatum")
+        html_body = (f"<p>Hello,</p><p>Before we create your valuation report for {escaped_company}, "
+                     f'review or edit the revenue and EBIT forecasts.</p><p><a href="{esc_link}">Review forecasts</a></p>'
+                     "<p>The report starts after you confirm. You can also continue with the supplied assumptions.</p><p>Valuatum</p>")
 
     message = EmailMessage(policy=policy.SMTP)
     message["From"] = sender
@@ -391,6 +409,18 @@ async def send_forecast_import_failed(rid: str, cells: list[dict],
         f'<a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a></p>'
         "<p>Ystävällisin terveisin,<br>Valuatum</p>"
     )
+
+    if (run.get("params") or {}).get("report_language") == "en":
+        subject = f"Forecast changes could not be applied: {company}"
+        years = "; ".join(line.replace("Liikevaihto", "Revenue") for line in year_lines)
+        detail = f"The model did not retain the proposed values for: {years}." if years else "The forecast import could not be completed."
+        text_body = (f"Hello,\n\nYour forecast changes for {company} could not be applied. "
+                     f"Your report was not changed.\n\n{detail}\n\n"
+                     f"Return to your report: {link or ''}\n\nContact {SUPPORT_EMAIL} if you need help.\n\nValuatum")
+        html_body = (f"<p>Hello,</p><p>Your forecast changes for {html.escape(company)} could not be applied. "
+                     f"Your report was not changed.</p><p>{html.escape(detail)}</p>"
+                     + (f'<p><a href="{html.escape(link)}">Return to your report</a></p>' if link else "")
+                     + f"<p>Contact {SUPPORT_EMAIL} if you need help.</p><p>Valuatum</p>")
 
     message = EmailMessage(policy=policy.SMTP)
     message["From"] = sender

@@ -29,6 +29,7 @@ from .models import (  # noqa: E402
     RedeemRoundIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
+from valuatum_kit.config import require_danish_orders  # noqa: E402
 
 
 @asynccontextmanager
@@ -105,7 +106,7 @@ VALUATION_PRICE_IDS = {
 }
 
 
-async def _stripe_create_checkout_session(*, success_url, cancel_url, metadata, amount_cents, name):
+async def _stripe_create_checkout_session(*, success_url, cancel_url, metadata, amount_cents, name, locale="fi"):
     data = {
         "mode": "payment",
         "success_url": success_url,
@@ -122,7 +123,7 @@ async def _stripe_create_checkout_session(*, success_url, cancel_url, metadata, 
         "automatic_tax[enabled]": "true",
         "billing_address_collection": "required",
         "tax_id_collection[enabled]": "true",
-        "locale": "fi",
+        "locale": locale,
         "customer_creation": "always",
         "invoice_creation[enabled]": "true",
         **{f"metadata[{k}]": v for k, v in metadata.items()},
@@ -198,7 +199,7 @@ async def auth_gate(request, call_next):
         if path == "/api/public/checkout-generate" and request.method == "POST":
             return await call_next(request)
         # GET /api/public/company-search: public homepage search, no invite key.
-        if path == "/api/public/company-search" and request.method == "GET":
+        if path in {"/api/public/company-search", "/api/public/company-readiness", "/api/public/capabilities"} and request.method == "GET":
             return await call_next(request)
         if path.startswith("/api/") and path != "/api/health":
             from fastapi.responses import JSONResponse
@@ -487,13 +488,17 @@ def _client_ip(request: Request) -> str:
 
 
 @app.get("/api/public/company-search")
-async def company_search_public(q: str, request: Request):
+async def company_search_public(q: str, request: Request, country: str = "FI"):
     """Public, unauthenticated version of /api/company-search for the client
     site's homepage search (that page has no invite key to send). One row per
     company, not per followed model — same disambiguation heuristic as the
     checkout-generate endpoint, since the marketing site just needs "does this
     company exist in Valuatum", not the model picker /raportti has."""
     q = (q or "").strip()
+    if country not in {"FI", "DK"}:
+        raise HTTPException(422, "Country must be FI or DK")
+    if country == "DK":
+        _require_danish_checkout()
     if len(q) < valuatum.MIN_QUERY_LENGTH:
         return []
     # Own bucket, not the 5/hour order limit — that's sized for order submission,
@@ -503,7 +508,7 @@ async def company_search_public(q: str, request: Request):
     if not _rate_ok("search", _client_ip(request)):
         raise HTTPException(429, "liian monta hakua — yritä hetken kuluttua uudelleen")
     try:
-        candidates = await valuatum.search_company(q)
+        candidates = await valuatum.search_company(q, country="DK") if country == "DK" else await valuatum.search_company(q)
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, e.response.text[:500])
     except RuntimeError as e:
@@ -521,6 +526,43 @@ async def company_search_public(q: str, request: Request):
         if best:
             out.append(best)
     return out
+
+
+def _require_danish_checkout():
+    try:
+        require_danish_orders()
+        if not STRIPE_SECRET_KEY:
+            raise ValueError("Danish automatic orders require verified Stripe payment")
+        if not os.environ.get("INTERNATIONAL_CLIENT_SITE_URL"):
+            raise ValueError("Danish report delivery site is not configured")
+    except ValueError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/api/public/capabilities")
+def public_capabilities():
+    try:
+        _require_danish_checkout()
+        enabled = True
+    except HTTPException:
+        enabled = False
+    return {"countries": {"DK": {"enabled": enabled, "currency": "DKK", "currencies": ["DKK", "EUR"], "language": "en"}},
+            "extra_review_price_cents": EXTRA_ROUND_PRICE_CENTS}
+
+
+@app.get("/api/public/company-readiness")
+async def public_company_readiness(request: Request, country: str, fid: int, code: str):
+    if country != "DK":
+        raise HTTPException(422, "This readiness check supports country DK")
+    _require_danish_checkout()
+    if not _rate_ok("search", _client_ip(request)):
+        raise HTTPException(429, "Too many source checks; try again shortly")
+    try:
+        return await valuatum.danish_company_readiness(fid, code)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except httpx.HTTPError:
+        raise HTTPException(503, "Danish source could not be verified")
 
 
 # ---- internal alerts ---------------------------------------------------------
@@ -1026,6 +1068,7 @@ def _forecast_change_summary(parent, edits) -> str:
     from the parent run's stage-0 forecast block (tEUR); the edits are in millions
     (modeldata unit), so ×1000 to compare in the report's tEUR."""
     forecast = _extract_stage0_forecast(parent) or {}
+    unit = "t" + (parent.get("params") or {}).get("source_currency", "EUR")
     years = forecast.get("years") or []
     old_by_var = {"ns": forecast.get("net_sales") or [], "ebit": forecast.get("ebit") or []}
 
@@ -1045,7 +1088,7 @@ def _forecast_change_summary(parent, edits) -> str:
             idx = years.index(e.year)
             if idx < len(arr):
                 old_teur = arr[idx]
-        lines.append(f"- {label} {e.year}: {fmt(old_teur)} → {fmt(new_teur)} tEUR")
+        lines.append(f"- {label} {e.year}: {fmt(old_teur)} → {fmt(new_teur)} {unit}")
     return "\n".join(lines) if lines else "(Ennusteita ei muutettu.)"
 
 
@@ -1113,7 +1156,7 @@ async def forecast_preview(rid: str, body: ForecastPreviewIn, request: Request):
         raise HTTPException(429, "Liian monta ennusteiden esikatselupyyntöä. Yritä hetken kuluttua.")
 
     try:
-        proposal = await forecast_interpret.interpret(text, forecast)
+        proposal = await forecast_interpret.interpret(text, forecast, currency=run["params"]["source_currency"], language="en") if (run.get("params") or {}).get("country_code") == "DK" else await forecast_interpret.interpret(text, forecast)
     except forecast_interpret.ForecastInterpretError as exc:
         raise HTTPException(502, str(exc))
     try:
@@ -1125,7 +1168,10 @@ async def forecast_preview(rid: str, body: ForecastPreviewIn, request: Request):
     rows = _forecast_preview_rows(forecast, edits)
 
     notes = list(proposal.get("notes") or [])
-    notes.extend(forecast_interpret.magnitude_notes(forecast, edits))
+    if (run.get("params") or {}).get("country_code") == "DK":
+        notes.extend(forecast_interpret.magnitude_notes(forecast, edits, currency=run["params"]["source_currency"], language="en"))
+    else:
+        notes.extend(forecast_interpret.magnitude_notes(forecast, edits))
     notes = list(dict.fromkeys(notes))
     # Record the ask before returning it. The user may never accept the proposal
     # (nothing forces them to), and without this the description they wrote is
@@ -1213,7 +1259,7 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
     # paid, uncancellable ValuBuild import.
     store.set_run_status(rid, "importing_forecast")
     try:
-        new_fid = await forecast_import.import_and_wait(base_fid, payload)
+        new_fid = await forecast_import.import_and_wait(base_fid, payload, country="DK") if (run.get("params") or {}).get("country_code") == "DK" else await forecast_import.import_and_wait(base_fid, payload)
     except forecast_import.ForecastImportError as exc:
         store.set_run_status(rid, "awaiting_forecast")
         raise await _forecast_import_failed(rid, payload, exc)
@@ -1323,7 +1369,7 @@ async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
         for e in edits
     ]
     try:
-        new_fid = await forecast_import.import_and_wait(parent_fid, payload)
+        new_fid = await forecast_import.import_and_wait(parent_fid, payload, country="DK") if (parent.get("params") or {}).get("country_code") == "DK" else await forecast_import.import_and_wait(parent_fid, payload)
     except forecast_import.ForecastImportError as exc:
         # Import failed → no round starts, no quota/lineage consumed.
         raise await _forecast_import_failed(rid, payload, exc)
@@ -1360,19 +1406,23 @@ async def round2_checkout(rid: str, body: Round2In, request: Request):
             [e.model_dump() for e in body.forecast_edits] if body.forecast_edits else None
         ),
     )
-    site = (os.getenv("CLIENT_SITE_URL") or "").rstrip("/")
+    run = store.get_run(rid) or {}
+    foreign = (run.get("params") or {}).get("country_code") == "DK"
+    site = (os.getenv("INTERNATIONAL_CLIENT_SITE_URL" if foreign else "CLIENT_SITE_URL") or "").rstrip("/")
+    path = "/report" if foreign else email_delivery.REPORT_PATH
     key_q = f"&key={key}" if key else ""
     success_url = (
-        f"{site}{email_delivery.REPORT_PATH}?rid={rid}{key_q}&paid_round_token={token}"
+        f"{site}{path}?rid={rid}{key_q}&paid_round_token={token}"
         f"&show_old_numbers={1 if body.show_old_numbers else 0}"
         "&session_id={CHECKOUT_SESSION_ID}"
     )
-    cancel_url = f"{site}{email_delivery.REPORT_PATH}?rid={rid}{key_q}"
+    cancel_url = f"{site}{path}?rid={rid}{key_q}"
     session = await _stripe_create_checkout_session(
         success_url=success_url, cancel_url=cancel_url,
         metadata={"token": token, "rid": rid},
         amount_cents=EXTRA_ROUND_PRICE_CENTS,
-        name="Arvonmäärityksen lisätarkennuskierros",
+        name="Additional valuation refinement" if foreign else "Arvonmäärityksen lisätarkennuskierros",
+        **({"locale": "en"} if foreign else {}),
     )
     return {"checkout_url": session.get("url")}
 
@@ -1737,6 +1787,7 @@ def _create_generation_run(
     industry_code=None, industry_id=None, industry_tree=None,
     delivery_email=None, user_input="", pipeline_id=None, access_key=None,
     forecast_mode=False,
+    country_code="FI", report_language="fi", source_currency="EUR",
 ) -> str:
     """Shared by the invite-key expert flow and the public paid checkout flow:
     build the stage-0 params and kick off a background run. Forecast mode stops
@@ -1746,6 +1797,9 @@ def _create_generation_run(
         raise HTTPException(404, "pipeline not found")
     _check_not_paused()
     params = {"company_name": company_name}
+    if country_code == "DK":
+        _require_danish_checkout()
+        params.update(country_code="DK", report_language="en", source_currency=source_currency)
     if company_code:
         params["company_code"] = company_code
     if industry_text:
@@ -1849,6 +1903,41 @@ def _checkout_candidate(candidates: list[dict], requested_fid: int | None) -> di
 _CHECKOUT_LOCKS: dict[str, asyncio.Lock] = {}
 
 
+def _paid_checkout_identity(body, session):
+    metadata = session.get("metadata") or {}
+    country = metadata.get("country", "FI")
+    if country not in {"FI", "DK"} or country != body.country:
+        raise HTTPException(409, "Paid checkout country does not match the requested country")
+    code = metadata.get("businessId") or metadata.get("business_id")
+    if not code:
+        raise HTTPException(403, "Paid checkout company identity is missing")
+    normalized = valuatum._normalize_query(str(code), country)
+    if normalized[0] != "code" or valuatum._normalize_query(body.business_id, country) != normalized:
+        raise HTTPException(409, "Paid checkout company identity mismatch")
+    try:
+        fid = int(metadata["fid"]) if metadata.get("fid") else None
+    except (TypeError, ValueError):
+        raise HTTPException(403, "Paid checkout FID is invalid")
+    if fid is not None and (fid <= 0 or body.fid is not None and body.fid != fid):
+        raise HTTPException(409, "Paid checkout followed model mismatch")
+    language = metadata.get("reportLanguage", "fi" if country == "FI" else None)
+    if body.report_language is not None and body.report_language != language:
+        raise HTTPException(409, "Paid checkout language mismatch")
+    email = (session.get("customer_details") or {}).get("email") or metadata.get("customerEmail")
+    if not email:
+        raise HTTPException(403, "Paid checkout delivery email is missing")
+    if country == "DK":
+        _require_danish_checkout()
+        if metadata.get("product") != VALUATION_PRODUCT_TAG or not fid \
+                or language != "en" or metadata.get("reportCurrency") not in {"DKK", "EUR"}:
+            raise HTTPException(403, "Danish checkout requires exact CVR/FID, English and verified source currency")
+    return {"country": country, "code": normalized[1], "fid": fid,
+            "language": language, "email": email,
+            "company_name": metadata.get("companyName"),
+            "currency": metadata.get("reportCurrency", "EUR"), "company_code": metadata.get("companyCode"),
+            "forecast": metadata.get("forecast") == "true"}
+
+
 @app.post("/api/public/checkout-generate")
 async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
     """Public, unauthenticated: called by the client site's Stripe success page
@@ -1871,6 +1960,12 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
     # could start a paid pipeline with a made-up session id. Demo mode (no
     # Stripe key) deliberately skips this: the whole flow is a free demo then.
     session = None
+    identity = {"country": body.country, "code": body.business_id, "fid": body.fid,
+                "language": body.report_language or "fi", "email": body.email,
+                "company_name": body.company_name,
+                "forecast": body.mode == "forecast"}
+    if body.country == "DK":
+        _require_danish_checkout()
     if STRIPE_SECRET_KEY:
         try:
             session = await _stripe_get_checkout_session(
@@ -1891,6 +1986,7 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
                 flush=True,
             )
             raise HTTPException(403, "Tämä maksu ei koske arvonmääritysraporttia.")
+        identity = _paid_checkout_identity(body, session)
     # Serialize per session id: two identical requests racing past the
     # check-then-insert used to be able to start two paid runs.
     # ponytail: in-process lock — single-instance deploy; a DB claim if we scale out.
@@ -1899,22 +1995,39 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
         existing = store.get_order_by_session(body.stripe_session_id)
         if existing:
             existing_run = store.get_run(existing.get("run_id") or "")
-            if not existing_run or existing_run.get("status") != "error":
+            if existing_run and (existing_run.get("params") or {}).get("country_code", "FI") != identity["country"]:
+                raise HTTPException(409, "Paid session was already bound to another country")
+            if identity["country"] == "DK" or not existing_run or existing_run.get("status") != "error":
                 return {"run_id": existing.get("run_id"), "key": existing.get("access_key")}
         _check_not_paused()
         try:
-            candidates = await valuatum.search_company(body.business_id)
+            candidates = await valuatum.search_company(identity["code"], country="DK") if identity["country"] == "DK" else await valuatum.search_company(identity["code"])
         except httpx.HTTPStatusError as e:
             raise HTTPException(e.response.status_code, e.response.text[:500])
         except RuntimeError as e:
             raise HTTPException(500, str(e))
-        candidate = _checkout_candidate(candidates, body.fid)
+        candidate = _checkout_candidate(candidates, identity["fid"])
+        if session is not None and identity["fid"] is not None and (not candidate or candidate["fid"] != identity["fid"]):
+            raise HTTPException(409, "Paid followed model is not present in the selected source")
+        if identity["country"] == "DK" and (not candidate or candidate.get("country_code") != "DK"
+                                                or str(candidate.get("company_code", "")).removesuffix("K") != identity["code"]):
+            raise HTTPException(409, "Danish source company binding failed")
+        if identity["country"] == "DK":
+            try:
+                eligibility = await valuatum.danish_company_readiness(candidate["fid"], identity["code"])
+            except (httpx.HTTPError, ValueError):
+                raise HTTPException(503, "Danish source readiness could not be verified")
+            if not eligibility["eligible"]:
+                raise HTTPException(409, eligibility["reason"] or "Danish source forecast is incomplete")
+            if eligibility["currency"] != identity["currency"] \
+                    or identity["company_code"] != candidate["company_code"]:
+                raise HTTPException(409, "Paid checkout source currency or model scope changed")
         if not candidate:
             raise HTTPException(
                 404, f"Yritystä ({body.business_id}) ei löytynyt Valuatumista."
             )
         key_row = store.create_access_key(
-            f"Tilaus: {body.company_name} ({body.stripe_session_id[:12]})",
+            f"Tilaus: {candidate.get('company_name') or identity['company_name']} ({body.stripe_session_id[:12]})",
             generations_limit=1,
         )
         key = key_row["key"]
@@ -1922,15 +2035,16 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
         # it doesn't go through /api/expert/generate's own consume_generation.
         store.consume_generation(key)
         rid = _create_generation_run(
-            fid=candidate["fid"], company_name=candidate.get("company_name") or body.company_name,
+            fid=candidate["fid"], company_name=candidate.get("company_name") or identity["company_name"],
             company_code=candidate.get("company_code"), industry_text=candidate.get("industry_text"),
             industry_code=candidate.get("industry_code"), industry_id=candidate.get("industry_id"),
-            industry_tree=candidate.get("industry_tree"), delivery_email=body.email,
+            industry_tree=candidate.get("industry_tree"), delivery_email=identity["email"],
             user_input=body.user_input, access_key=key,
-            forecast_mode=body.mode == "forecast",
+            forecast_mode=identity["forecast"],
+            **({"country_code": "DK", "report_language": "en", "source_currency": identity["currency"]} if identity["country"] == "DK" else {}),
         )
         store.create_paid_order(
-            body.company_name, body.email, body.user_input, body.stripe_session_id,
+            candidate.get("company_name") or identity["company_name"], identity["email"], body.user_input, body.stripe_session_id,
             candidate["fid"], key, rid,
             amount_total_cents=(session or {}).get("amount_total"),
             currency=(session or {}).get("currency"),

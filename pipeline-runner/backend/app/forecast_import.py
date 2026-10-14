@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from valuatum_kit.config import api_base_url
+from valuatum_kit.config import api_base_url, api_token, require_danish_orders
 
 
 # ValuBuild rejects the whole import when a submitted value does not survive the
@@ -103,7 +103,7 @@ def _result_fid(payload: Any) -> int:
     return result_fid
 
 
-async def import_and_wait(base_fid: int, values: list[dict]) -> int:
+async def import_and_wait(base_fid: int, values: list[dict], country="FI") -> int:
     """Import *values* onto *base_fid* and return the new fid once status is OK.
 
     Every failure is normalized to ForecastImportError so the caller can abort
@@ -114,13 +114,18 @@ async def import_and_wait(base_fid: int, values: list[dict]) -> int:
     if not values:
         raise ForecastImportError("Ennusteiden tuontiin ei annettu yhtään arvoa.")
 
-    token = os.environ.get("VALUATUM_TOKEN", "").strip()
+    if country == "DK":
+        try:
+            require_danish_orders()
+        except ValueError as exc:
+            raise ForecastImportError(str(exc)) from exc
+    token = api_token(country) if country == "DK" else os.environ.get("VALUATUM_TOKEN", "").strip()
     if not token:
         raise ForecastImportError(
             "VALUATUM_TOKEN puuttuu, joten ennusteiden tuontia ei voida käynnistää."
         )
 
-    base_url = api_base_url()
+    base_url = api_base_url(country) if country == "DK" else api_base_url()
     headers = {
         "accept": "application/json",
         "content-type": "application/json",

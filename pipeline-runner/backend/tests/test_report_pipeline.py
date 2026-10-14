@@ -3678,7 +3678,8 @@ def test_checkout_generate_requires_paid_stripe_session_when_configured(monkeypa
 
     async def paid(session_id, **kw):
         return {"payment_status": "paid",
-                "metadata": {"product": main.VALUATION_PRODUCT_TAG}}
+                "metadata": {"product": main.VALUATION_PRODUCT_TAG,
+                             "businessId": "1612398-8", "customerEmail": "a@b.fi"}}
 
     monkeypatch.setattr(main, "_stripe_get_checkout_session", paid)
     r2 = c.post("/api/public/checkout-generate", json=body)
@@ -3717,7 +3718,7 @@ def test_checkout_generate_rejects_paid_session_for_another_product(monkeypatch)
     async def ours_by_price(session_id, **kw):
         return {
             "payment_status": "paid",
-            "metadata": {"kind": "existing", "businessId": "1612398-8"},
+            "metadata": {"kind": "existing", "businessId": "1612398-8", "customerEmail": "a@b.fi"},
             "line_items": {"data": [{"price": {"id": sorted(main.VALUATION_PRICE_IDS)[0]}}]},
         }
 

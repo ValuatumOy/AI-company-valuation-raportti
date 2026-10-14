@@ -171,6 +171,8 @@ class CheckoutGenerateIn(BaseModel):
     # limit, plus idempotency on stripe_session_id (the success page can be
     # loaded more than once for the same payment).
     business_id: str = Field(min_length=5, max_length=30)
+    country: Literal["FI", "DK"] = "FI"
+    report_language: Literal["fi", "en"] | None = None
     # The exact followed model the buyer picked in the client site's search.
     # A company can have several models (emo vs konserni, plus sibling analyst
     # models), and business_id alone cannot tell them apart — the K suffix is

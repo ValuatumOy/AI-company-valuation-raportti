@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 import uuid
 import urllib.error
@@ -444,7 +445,7 @@ def balance_sheet(data_map: dict[str, dict[str, Any]], years: list[int]) -> dict
 
 def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] | None = None,
                   *, report_language: str = "fi", country_code: str | None = None,
-                  source_currency: str | None = None) -> dict[str, Any]:
+                  source_currency: str | None = None, verify_cashflows: bool = False) -> dict[str, Any]:
     currency = model.get("currency")
     if source_currency is not None and currency is not None and currency != source_currency:
         raise ValueError("source_currency conflicts with raw model.currency")
@@ -461,6 +462,11 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         raise ValueError("Unsupported report_language or country_code")
     unit = "t" + currency
     data_map = model.get("dataMap", {})
+    if country_code == "DK":
+        data_map = {str(year): row for year, row in data_map.items()
+                    if str(year).isdigit() and len(str(year)) == 4 and 1900 <= int(year) <= 2100}
+        if not data_map:
+            raise ValueError("Danish source contains no annual financial years")
     years = sorted((int(year) for year in data_map), key=int)
     current_year = int(model.get("currentYear") or min(years))
     actual_years = [year for year in years if year < current_year]
@@ -486,11 +492,11 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         "balance_sheet": balance_sheet(data_map, forecast_years),
     }
 
-    return {
+    payload = {
         "unit": unit,
         "meta": {
             "company_name": model.get("companyName"),
-            "y_tunnus": y_tunnus(code) if country_code == "FI" else code.removesuffix("K"),
+            **({"y_tunnus": y_tunnus(code)} if country_code == "FI" else {"business_id": code.removesuffix("K") if country_code == "DK" else code, "source_company_code": code}),
             "industry": None,
             "industry_code": None,
             "domicile": None,
@@ -500,7 +506,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
             "unit": unit,
             "report_language": report_language,
             "country_code": country_code,
-            "level": "consolidated" if code.endswith("K") else "parent",
+            "level": ("consolidated" if code.endswith("K") else "parent") if country_code == "FI" else model.get("level", "unknown"),
             "data_source": "profinder",
             "run_id": str(uuid.uuid4()),
             "run_timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -576,8 +582,8 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                 ),
                 "gross_capex": arr(
                     data_map, forecast_years,
-                    ["cr_cf_gross_capex_nega", "gross_cap_expenditure_nega"]
-                    if country_code != "FI" else "gross_cap_expenditure_nega",
+                    ["gross_cap_expenditure_nega", "cr_cf_gross_capex_nega"] if country_code == "DK" and verify_cashflows else
+                    ["cr_cf_gross_capex_nega", "gross_cap_expenditure_nega"] if country_code != "FI" else "gross_cap_expenditure_nega",
                     money=True),
                 "free_operating_cash_flow": arr(data_map, forecast_years, "free_operating_cash_flow", money=True),
                 "other_items_fcf": arr(data_map, forecast_years, "other_items_fcf", money=True),
@@ -655,6 +661,57 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         "client_reported_signals": [],
         "flags": build_flags(data_map, years),
     }
+    if country_code == "DK" and verify_cashflows:
+        _verify_danish_cashflows(payload, data_map)
+    return payload
+
+
+def _verify_danish_cashflows(payload, data_map):
+    """Resolve capex signs only when source cashflows prove the convention."""
+    dcf = payload["valuation_engine"]["dcf"]
+    years = dcf["years"]
+    def finite(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    for index, year in enumerate(years):
+        def value(key):
+            values = dcf.get(key) or []
+            return values[index] if index < len(values) else None
+        operating, capex, free = (value(key) for key in ("operating_cash_flow", "gross_capex", "free_operating_cash_flow"))
+        liability = value("change_in_non_interest_bearing_financial_liabilities")
+        liability = 0 if liability is None else liability
+        other = value("other_items_fcf")
+        other = 0 if other is None else other
+        fcff = value("fcff")
+        if not all(finite(v) for v in (operating, capex, free, liability, other, fcff)):
+            raise ValueError(f"Complete source cashflow reconciliation is missing for {year}")
+        tolerance = max(1, abs(free) * 0.00001)
+        matched = False
+        source_row = data_map.get(str(year)) or {}
+        candidates = [capex]
+        alternate = as_num(source_row.get("cr_cf_gross_capex_nega"))
+        if finite(alternate):
+            candidates.append(alternate * 1000)
+        for candidate in candidates:
+            if math.isclose(operating + liability + candidate, free, abs_tol=tolerance):
+                dcf["gross_capex"][index] = candidate
+                matched = True
+                break
+            if math.isclose(operating + liability - candidate, free, abs_tol=tolerance):
+                dcf["gross_capex"][index] = -candidate
+                matched = True
+                break
+        if not matched:
+            raise ValueError(f"Source capex and free operating cashflow do not reconcile for {year}")
+        if not math.isclose(free + other, fcff, abs_tol=max(1, abs(fcff) * 0.00001)):
+            raise ValueError(f"Source free cashflow to firm does not reconcile for {year}")
+    cumulative = (dcf.get("cumulative_discounted_fcff") or [None])[0]
+    equity = dcf.get("equity_value_before_floor")
+    bridge = dcf.get("bridge") or {}
+    if not finite(cumulative) or not finite(equity) or any(v is not None and not finite(v) for v in bridge.values()):
+        raise ValueError("Source DCF equity bridge is incomplete")
+    reconstructed = cumulative + sum(v for v in bridge.values() if v is not None)
+    if not math.isclose(reconstructed, equity, abs_tol=max(1, abs(equity) * 0.00001)):
+        raise ValueError("Source DCF equity bridge does not reconcile")
 
 
 def main() -> None:
@@ -667,22 +724,32 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--company-code-override", default=None)
     parser.add_argument("--company-name-override", default=None)
+    parser.add_argument("--country-code", choices=["FI", "DK", "US"], default="FI")
+    parser.add_argument("--report-language", choices=["fi", "en"], default="fi")
+    parser.add_argument("--source-currency", choices=["EUR", "DKK", "USD"], default=None)
     args = parser.parse_args()
 
     module = load_fetch_module(args.fetch_script)
     extend_fetch_vars(module)
     token = args.token or os.environ.get("VALUATUM_TOKEN") or module.TOKEN
     model = module.fetch_modeldata(args.fid, args.actuals, args.estimates, token)
+    if args.country_code == "DK":
+        if model.get("currency") != args.source_currency or args.source_currency not in {"DKK", "EUR"} or str(model.get("companyCode")) != args.company_code_override:
+            raise ValueError("Danish source model must match the paid CVR and source currency")
+        if model.get("countryCode") not in (None, "DK"):
+            raise ValueError("Danish source model country mismatch")
     if args.company_code_override or args.company_name_override:
         model = dict(model)
         if args.company_code_override:
-            model["companyCode"] = apply_level_suffix(
+            model["companyCode"] = args.company_code_override if args.country_code != "FI" else apply_level_suffix(
                 args.company_code_override, str(model.get("companyCode") or "")
             )
         if args.company_name_override:
             model["companyName"] = args.company_name_override
-    payment_defaults = rest_payment_defaults(str(model.get("companyCode") or ""), token)
-    payload = build_payload(model, payment_defaults)
+    payment_defaults = rest_payment_defaults(str(model.get("companyCode") or ""), token) if args.country_code == "FI" else []
+    payload = build_payload(model, payment_defaults, country_code=args.country_code,
+                            report_language=args.report_language, source_currency=args.source_currency,
+                            verify_cashflows=args.country_code == "DK")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

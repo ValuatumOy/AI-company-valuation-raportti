@@ -160,7 +160,7 @@ def test_manual_stage_zero_never_fetches_or_mutates(monkeypatch):
         _stage(0, DATA_FETCHER_MODEL), {}, None, "133268",
         {"country_code": "DK", "source_currency": "DKK"}))
     assert result["status"] == "error"
-    assert "automatic Finland export is disabled" in result["error_message"]
+    assert "Danish production source is not configured" in result["error_message"]
 
 
 def test_english_system_directive_survives_truncation_and_correction(monkeypatch):
@@ -306,7 +306,8 @@ def test_offline_raw_envelope_preparation_filters_quarters_keeps_cvr_and_gates_f
                           "endpoint_host": "upcloudtest.valuatum.com"}})
     assert envelope == before
     data = request["input_data"]
-    assert data["meta"]["y_tunnus"] == "13590400"
+    assert data["meta"]["business_id"] == "13590400"
+    assert "y_tunnus" not in data["meta"]
     assert data["actuals"]["years"] == [2025]
     assert data["forecast"]["years"] == [2026]
     readiness = generation_readiness(data)

@@ -265,7 +265,12 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
                 data = report_context.normalize_input(run_input_data, params)
             elif identifier:
                 locale = report_context.resolve_context(None, params)
-                if locale["country_code"] != "FI" or locale["currency"] != "EUR":
+                if locale["country_code"] == "DK":
+                    from valuatum_kit.config import require_danish_orders
+                    require_danish_orders()
+                    if locale["currency"] not in {"DKK", "EUR"} or locale["report_language"] != "en":
+                        raise ValueError("Automatic Danish reports require English and verified source currency")
+                if locale["country_code"] not in {"FI", "DK"} or (locale["country_code"] == "FI" and locale["currency"] != "EUR"):
                     raise ValueError("Foreign demos require supplied normalized input_data; "
                                      "automatic Finland export is disabled")
                 data = await fetch_company_data(identifier, params or {})
@@ -515,6 +520,8 @@ async def _run_stages(run, stages, only=None, from_order=None):
         else "ÄLÄ mainitse edellisen kierroksen lukuja, niiden muutoksia tai "
              "vertailua aiempaan — esitä vain päivitetyt, ajantasaiset arvot."
     )
+    if (params or {}).get("country_code") == "DK":
+        context["old_numbers_directive"] = context["old_numbers_directive"].replace("tEUR", "t" + params["source_currency"])
     # Round-2 only: user-set scenario probabilities override the profile-based
     # defaults the writer would otherwise pick (singlewriter.txt "Todennäköisyydet").
     # Always set so {{probability_override}} never errors.

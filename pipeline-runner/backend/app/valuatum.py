@@ -23,7 +23,7 @@ from pathlib import Path
 import httpx
 
 from . import estimate_trigger
-from valuatum_kit.config import api_base_url
+from valuatum_kit.config import api_base_url, api_token, require_danish_orders
 
 KIT = Path(__file__).resolve().parent.parent / "valuatum_kit"
 FETCH = KIT / "fetch_modeldata.py"
@@ -36,8 +36,8 @@ REQUIRED_KEYS = [
 ]
 
 
-def company_url() -> str:
-    return api_base_url() + "/company"
+def company_url(country="FI") -> str:
+    return (api_base_url() if country == "FI" else api_base_url(country)) + "/company"
 
 
 def modeldata_url() -> str:
@@ -55,10 +55,15 @@ def _slug(value: str) -> str:
 MIN_QUERY_LENGTH = 3
 
 
-def _normalize_query(query: str) -> tuple[str, str]:
+def _normalize_query(query: str, country="FI") -> tuple[str, str]:
     """A Finnish y-tunnus is 7 digits + a check digit (hyphen optional, e.g.
     "1612398-8" or "16123988"); anything else is treated as a name search."""
     clean = re.sub(r"[\s-]", "", query.strip()).upper()
+    if country == "DK":
+        clean = re.sub(r"^DK\s*", "", query.strip().upper())
+        return ("code", clean) if re.fullmatch(r"\d{8}", clean) else ("name", query.strip())
+    if country != "FI":
+        raise ValueError("Unsupported company country")
     code = clean[:-1] if clean.endswith("K") else clean
     if code.isdigit() and len(code) == 8:
         return "code", f"{code[:7]}-{code[7]}"
@@ -148,7 +153,7 @@ _CLIENT: httpx.AsyncClient | None = None
 # more than one instance.
 _ROWS_TTL = float(os.environ.get("VALUATUM_COMPANY_CACHE_TTL", "60"))
 _ROWS_CACHE_MAX = 512
-_ROWS_CACHE: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+_ROWS_CACHE: dict[tuple[str, ...], tuple[float, list[dict]]] = {}
 
 
 def _client() -> httpx.AsyncClient:
@@ -169,11 +174,11 @@ async def aclose_client() -> None:
         await client.aclose()
 
 
-async def _company_rows(param: str, value: str) -> list[dict]:
-    token = os.environ.get("VALUATUM_TOKEN")
+async def _company_rows(param: str, value: str, country="FI") -> list[dict]:
+    token = api_token(country) if country == "DK" else os.environ.get("VALUATUM_TOKEN")
     if not token:
         raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
-    key = (param, value)
+    key = (api_base_url(country), country, param, value)
     now = time.monotonic()
     cached = _ROWS_CACHE.get(key)
     if cached and now - cached[0] < _ROWS_TTL:
@@ -182,7 +187,7 @@ async def _company_rows(param: str, value: str) -> list[dict]:
         # otherwise poison every later hit on this key.
         return copy.deepcopy(cached[1])
     resp = await _client().get(
-        company_url(),
+        company_url(country),
         params={param: value},
         headers={"accept": "application/json", "authorization": f"Bearer {token}"},
     )
@@ -195,19 +200,24 @@ async def _company_rows(param: str, value: str) -> list[dict]:
     return rows
 
 
-async def search_company(query: str) -> list[dict]:
+async def search_company(query: str, country="FI") -> list[dict]:
     """Resolve a company name or y-tunnus to Valuatum FIDs via the profinder
     REST /company endpoint — this is what unblocks self-serve for ANY company,
     not just the operator's pre-fetched ones. Returns one entry per
     (company, model) pair, since a company can have more than one followed
     model (fid); the caller picks when there's more than one candidate."""
-    param, value = _normalize_query(query)
+    param, value = _normalize_query(query, country)
     if len(value) < MIN_QUERY_LENGTH:
         return []
-    rows = await _company_rows(param, value)
+    rows = await _company_rows(param, value) if country == "FI" else await _company_rows(param, value, country)
     out = []
     for c in rows:
+        if country == "DK" and (not re.fullmatch(r"\d{8}K?", str(c.get("companyCode") or ""))
+                               or (param == "code" and str(c.get("companyCode")).removesuffix("K") != value)):
+            continue
         industry = _industry_metadata(c)
+        if country == "DK":
+            industry["industry_text"] = c.get("industryText")
         for m in c.get("models") or []:
             fid = m.get("followedModelId")
             if fid is None:
@@ -223,22 +233,24 @@ async def search_company(query: str) -> list[dict]:
                 "city": _company_city(c),
                 **industry,
                 "analyst_name": m.get("analystName"),
+                **({"country": "DK", "country_code": "DK",
+                    "report_language": "en"} if country == "DK" else {}),
             })
     return out
 
 
-async def modeldata(fids: list[int], var_poses: list[dict]) -> dict:
+async def modeldata(fids: list[int], var_poses: list[dict], country="FI") -> dict:
     """POST /modeldata for one or more followed models at once.
 
     The kit's fetch script does the same call for the stage-0 export, but it is
     a synchronous CLI keyed to a single fid. Peer resolution asks for several
     models with a short varlist, so it reads them here through the shared async
     client instead of shelling out once per peer. Response: {"<fid>": model}."""
-    token = os.environ.get("VALUATUM_TOKEN")
+    token = api_token(country) if country == "DK" else os.environ.get("VALUATUM_TOKEN")
     if not token:
         raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
     resp = await _client().post(
-        modeldata_url(),
+        api_base_url("DK") + "/modeldata" if country == "DK" else modeldata_url(),
         json={
             "fids": list(fids),
             "varPoses": var_poses,
@@ -285,9 +297,12 @@ async def lookup_company_metadata(
     return {}
 
 
-def _run(cmd: list[str]) -> tuple[int, str, str]:
+def _run(cmd: list[str], country="FI") -> tuple[int, str, str]:
+    env = os.environ.copy()
+    if country == "DK":
+        env.update(VALUATUM_API_BASE_URL=api_base_url("DK"), VALUATUM_TOKEN=api_token("DK"))
     proc = subprocess.run(
-        cmd, capture_output=True, text=True, cwd=str(KIT), env=os.environ.copy(),
+        cmd, capture_output=True, text=True, cwd=str(KIT), env=env,
         timeout=180,
     )
     return proc.returncode, proc.stdout, proc.stderr
@@ -347,6 +362,9 @@ async def export_stream(
     industry_id=None,
     industry_tree=None,
     skip_estimate_generation: bool = False,
+    country_code: str = "FI",
+    report_language: str = "fi",
+    source_currency: str | None = None,
 ):
     """Async generator yielding {step,...} events, ending with a 'ready' (or
     'error') event that carries the final JSON.
@@ -355,7 +373,18 @@ async def export_stream(
     forecast-edit round (ACE #3048) — the edited fid is a fresh model whose
     values ARE the user's forecasts, and running the gate (updateEstimates, which
     does not apply consensus) would overwrite them."""
-    if not os.environ.get("VALUATUM_TOKEN"):
+    if country_code == "DK":
+        try:
+            require_danish_orders()
+            if report_language != "en" or not re.fullmatch(r"\d{8}K?", company_code_override or ""):
+                raise ValueError("Danish exports require English and an exact eight-digit CVR")
+        except ValueError as exc:
+            yield {"step": "error", "message": str(exc)}
+            return
+    elif country_code != "FI":
+        yield {"step": "error", "message": "Unsupported automatic source country"}
+        return
+    if country_code == "FI" and not os.environ.get("VALUATUM_TOKEN"):
         yield {"step": "error", "message": "VALUATUM_TOKEN puuttuu backendin .env:stä."}
         return
     if not EXPORT.exists():
@@ -371,7 +400,10 @@ async def export_stream(
                    "label": "Skipping estimate generation (edited forecast model)"}
         else:
             yield {"step": "estimates", "label": "Generating estimates"}
-            await estimate_trigger.trigger_and_wait(fid)
+            if country_code == "DK":
+                await estimate_trigger.trigger_and_wait(fid, country="DK")
+            else:
+                await estimate_trigger.trigger_and_wait(fid)
 
         # 1. modeldata → base JSON
         yield {"step": "fetch", "label": "Fetching modeldata"}
@@ -384,13 +416,17 @@ async def export_stream(
         ]
         if company_code_override:
             cmd += ["--company-code-override", company_code_override.strip()]
-        rc, out, err = await asyncio.to_thread(_run, cmd)
+        if country_code == "DK":
+            if source_currency not in {"DKK", "EUR"}:
+                raise ValueError("Danish export requires a verified source currency DKK or EUR")
+            cmd += ["--country-code", "DK", "--report-language", "en", "--source-currency", source_currency]
+        rc, out, err = await asyncio.to_thread(_run, cmd, "DK") if country_code == "DK" else await asyncio.to_thread(_run, cmd)
         if rc != 0 or not base.exists():
             yield {"step": "error",
                    "message": "modeldata-haku epäonnistui:\n" + (err or out)[:1500]}
             return
         base_data = json.loads(base.read_text(encoding="utf-8"))
-        company_code = _derive_company_code(base_data, company_code_override)
+        company_code = company_code_override if country_code == "DK" else _derive_company_code(base_data, company_code_override)
 
         # There used to be a step 2 here: a Profinder MCP backfill that refilled
         # ~14 income-statement and balance-sheet rows the export left null. Those
@@ -409,7 +445,7 @@ async def export_stream(
             "industry_id": industry_id,
             "industry_tree": industry_tree,
         }
-        if not any(v is not None and v != "" for v in supplied_metadata.values()):
+        if country_code == "FI" and not any(v is not None and v != "" for v in supplied_metadata.values()):
             meta = data.get("meta") or {}
             supplied_metadata = await lookup_company_metadata(
                 fid=fid,
@@ -417,6 +453,11 @@ async def export_stream(
                 company_code=company_code or meta.get("y_tunnus"),
             )
         data = _apply_company_metadata(data, supplied_metadata)
+        if country_code == "DK":
+            from scripts.prepare_report_demo import generation_readiness
+            readiness = generation_readiness(data)
+            if not readiness["numerical_input_ready"]:
+                raise ValueError("Danish forecast is incomplete: " + "; ".join(readiness["blockers"]))
         warnings += _analyze(data)
         filename = f"{_slug(company_name)}_{fid}_modeldata_complete.json"
         yield {"step": "ready", "filename": filename, "warnings": warnings,
@@ -425,3 +466,62 @@ async def export_stream(
         yield {"step": "error", "message": f"{type(e).__name__}: {e}"}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+async def danish_company_readiness(fid: int, code: str) -> dict:
+    """Read existing source data only: never generate estimates or import edits."""
+    from valuatum_kit import export_modeldata_json as exporter, fetch_modeldata as fetcher
+    from scripts.prepare_report_demo import generation_readiness
+    if not re.fullmatch(r"\d{8}", code) or fid <= 0:
+        raise ValueError("An exact eight-digit CVR and positive followed model are required")
+    candidates = await search_company(code, country="DK")
+    candidate = next((row for row in candidates if row["fid"] == fid), None)
+    result = {"eligible": False, "company_name": (candidate or {}).get("company_name"),
+              "company_code": (candidate or {}).get("company_code"), "fid": fid,
+              "actual_year": None, "forecast_years": [], "currency": "DKK", "unit": "tDKK"}
+    if not candidate:
+        return {**result, "reason": "Followed model does not belong to the selected Danish company"}
+    if not isinstance(candidate.get("company_name"), str) or not candidate["company_name"].strip():
+        return {**result, "reason": "Danish source company name is missing"}
+    var_poses = fetcher.build_var_poses(9, 10)
+    positions = [f"Y-{i}" for i in range(1, 10)] + [f"Y+{i}" for i in range(10)]
+    var_poses += [{"varName": var, "relPos": pos} for var in exporter.EXTRA_VARS for pos in positions]
+    models = await modeldata([fid], var_poses, country="DK")
+    model = models.get(str(fid)) or {}
+    if model.get("currency") not in {"DKK", "EUR"} or model.get("companyCode") != candidate["company_code"] \
+            or model.get("countryCode") not in (None, "DK"):
+        return {**result, "reason": "Source company identity or currency mismatch"}
+    currency = model["currency"]
+    result.update(currency=currency, unit="t" + currency)
+    try:
+        data = exporter.build_payload(model, [], report_language="en", country_code="DK", source_currency=currency, verify_cashflows=True)
+    except ValueError as exc:
+        return {**result, "reason": str(exc)}
+    readiness = generation_readiness(data)
+    blockers = readiness["blockers"]
+    forecast_years = (data.get("forecast") or {}).get("years") or []
+    dcf = (data.get("valuation_engine") or {}).get("dcf") or {}
+    import math
+    for key in ("fcff", "discounted_fcff"):
+        values = dcf.get(key) or []
+        if not forecast_years or len(values) != len(forecast_years) or any(
+                isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
+            blockers.append(f"Complete source DCF {key} is missing")
+    eva = (data.get("valuation_engine") or {}).get("eva") or {}
+    for key in ("noplat", "cost_of_capital", "eva", "discounted_eva"):
+        values = eva.get(key) or []
+        if not forecast_years or len(values) != len(forecast_years) or any(
+                isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
+            blockers.append(f"Complete source EVA {key} is missing")
+    for key in ("invested_capital", "equity_value_before_floor_raw"):
+        value = eva.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            blockers.append(f"Source EVA {key} is missing")
+    cumulative_eva = (eva.get("cumulative_discounted_eva") or [None])[0]
+    terminal_eva = eva.get("pv_of_trm_eva")
+    if not any(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+               for v in (cumulative_eva, terminal_eva)):
+        blockers.append("Source EVA terminal reconciliation is missing")
+    actual_years = (data.get("actuals") or {}).get("years") or []
+    return {**result, "eligible": not blockers, "actual_year": max(actual_years) if actual_years else None,
+            "forecast_years": forecast_years, "reason": "; ".join(blockers) if blockers else None}

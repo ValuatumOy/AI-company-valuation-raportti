@@ -325,6 +325,83 @@ def test_english_restater_does_not_match_company_name_substrings():
     assert paragraph["text"] == text
 
 
+def test_english_restater_preserves_peer_ranges_and_scenario_revenue_at_similar_values():
+    report = {"meta": {"country_code": "DK", "report_language": "en", "currency": "DKK", "unit": "tDKK"},
+        "machine_readable": {"scenarios": [
+            {"name": "Pessimistic", "value_teur": 80, "probability_pct": 20},
+            {"name": "Conservative", "value_teur": 160, "probability_pct": 60},
+            {"name": "Optimistic", "value_teur": 240, "probability_pct": 20}]}}
+    peers = {"type": "paragraph", "text": "The peer revenue range is 100–200 tDKK. Peer valuation range is 100–200 tDKK."}
+    own = {"type": "paragraph", "text": "The valuation range is 100–200 tDKK. Expected value is 170 tDKK."}
+    revenue = {"type": "table", "title": "Forecast revenue by scenario", "unit": "tDKK",
+               "columns": ["Scenario", "FY2027 revenue"], "rows": [["Optimistic revenue", 200], ["Optimistic", 200]]}
+    mixed = {"type": "table", "columns": ["Scenario", "Equity value (tDKK)", "Revenue (tDKK)"],
+             "rows": [["Optimistic", 200, 200], ["Optimistic revenue", 200, 200]]}
+    peer_values = {"type": "table", "title": "Peer equity valuations", "columns": ["Scenario", "Equity value (tDKK)"],
+                   "rows": [["Optimistic", 200]]}
+    report["sections"] = [{"id": "4", "blocks": [peers]}, {"id": "11", "blocks": [own, revenue, mixed, peer_values]}]
+    with report_context(report):
+        render._fix_restated_figures(report, {"expected_value": 160, "range_low": 80, "range_high": 240})
+    assert peers["text"] == "The peer revenue range is 100–200 tDKK. Peer valuation range is 100–200 tDKK."
+    assert own["text"] == "The valuation range is 80–240 tDKK. Expected value is 160 tDKK."
+    assert revenue["rows"] == [["Optimistic revenue", 200], ["Optimistic", 200]]
+    assert mixed["rows"] == [["Optimistic", "240", 200], ["Optimistic revenue", 200, 200]]
+    assert peer_values["rows"] == [["Optimistic", 200]]
+
+
+def test_finnish_restater_only_changes_company_equity_measures():
+    report = {"meta": {"country_code": "FI", "report_language": "fi", "currency": "EUR", "unit": "tEUR"},
+        "machine_readable": {"scenarios": [{"name": "Optimistinen", "value_teur": 240, "probability_pct": 100}]}}
+    peer = {"type": "paragraph", "text": "Verrokkien liikevaihdon vaihteluväli on 100–200 tEUR."}
+    own = {"type": "paragraph", "text": "Skenaariohaarukka on 100–200 tEUR. Odotusarvo on 170 tEUR."}
+    table = {"type": "table", "columns": ["Erä", "Arvo"],
+             "rows": [["Optimistinen liikevaihto", "200 tEUR"], ["Optimistinen omistaja-arvo", "200 tEUR"]]}
+    report["sections"] = [{"id": "11", "blocks": [peer, own, table]}]
+    with report_context(report):
+        render._fix_restated_figures(report, {"expected_value": 160, "range_low": 80, "range_high": 240})
+    assert peer["text"] == "Verrokkien liikevaihdon vaihteluväli on 100–200 tEUR."
+    assert own["text"] == "Skenaariohaarukka on 80–240 tEUR. Odotusarvo on 160 tEUR."
+    assert table["rows"] == [["Optimistinen liikevaihto", "200 tEUR"], ["Optimistinen omistaja-arvo", "240"]]
+
+
+def test_restatement_is_scoped_to_own_summary_and_scenarios_not_other_company_narrative():
+    report = {"meta": {"company_name": "Target A/S", "country_code": "DK", "report_language": "en", "currency": "DKK", "unit": "tDKK"}}
+    peer_paragraph = {"type": "paragraph", "text": "The valuation range is 100–200 tDKK."}
+    named_other = {"type": "paragraph", "text": "Another A/S has a valuation range of 100–200 tDKK."}
+    own_paragraph = {"type": "paragraph", "text": "The valuation range is 100–200 tDKK."}
+    headed_peer = {"type": "paragraph", "text": "The valuation range is 100–200 tDKK."}
+    report["sections"] = [
+        {"id": "4", "title": "Market signals", "blocks": [named_other]},
+        {"id": "8", "title": "Peer comparison", "blocks": [peer_paragraph]},
+        {"id": "1", "title": "Summary", "blocks": [
+            {"type": "heading", "text": "Peer valuation"}, headed_peer,
+            {"type": "heading", "text": "Company equity valuation"}, own_paragraph]}]
+    with report_context(report):
+        render._fix_restated_figures(report, {"range_low": 80, "range_high": 240})
+        token = render._canonical_ctx.set({"expected_value": 160, "range_low": 80, "range_high": 240})
+        try:
+            assert render._canonical_card_value("Peer valuation range", "100–200 tDKK") is None
+            assert render._canonical_card_value("Expected revenue value", "170 tDKK") is None
+        finally:
+            render._canonical_ctx.reset(token)
+    assert peer_paragraph["text"] == headed_peer["text"] == "The valuation range is 100–200 tDKK."
+    assert named_other["text"] == "Another A/S has a valuation range of 100–200 tDKK."
+    assert own_paragraph["text"] == "The valuation range is 80–240 tDKK."
+
+
+def test_finnish_own_scenario_value_table_keeps_legacy_canonical_correction():
+    report = {"meta": {"country_code": "FI", "report_language": "fi", "currency": "EUR", "unit": "tEUR"},
+        "machine_readable": {"scenarios": [{"name": "Optimistinen", "value_teur": 240, "probability_pct": 100}]}}
+    own = {"type": "table", "columns": ["Skenaario", "Arvo"], "rows": [["Optimistinen", 200]]}
+    peer = {"type": "table", "columns": ["Skenaario", "Arvo"], "rows": [["Optimistinen", 200]]}
+    report["sections"] = [{"id": "11", "title": "Skenaariot", "blocks": [own,
+        {"type": "heading", "text": "Verrokkien arvot"}, peer]}]
+    with report_context(report):
+        render._fix_restated_figures(report, {"expected_value": 240})
+    assert own["rows"] == [["Optimistinen", "240"]]
+    assert peer["rows"] == [["Optimistinen", 200]]
+
+
 def _unpriced_scenarios_report():
     report = assemble.assemble(_run("DKK", "DK"))
     report["cover"] = {"headline_value": "Not reliably determinable from the available data",
