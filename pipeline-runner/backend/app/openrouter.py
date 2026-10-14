@@ -146,6 +146,7 @@ async def chat(
     reasoning_effort: str | None = None,
     expects_json: bool = True,
     web_search: bool = False,
+    system_prompt: str | None = None,
 ) -> dict:
     """One-shot completion. Returns dict with text, usage, finish_reason, payload."""
     if runs_paused():
@@ -160,6 +161,7 @@ async def chat(
             max_tokens=max_tokens,
             expects_json=expects_json,
             web_search=web_search,
+            system_prompt=system_prompt,
         )
     return await _openrouter_chat(
         model=model,
@@ -169,6 +171,7 @@ async def chat(
         reasoning_effort=reasoning_effort,
         expects_json=expects_json,
         web_search=web_search,
+        system_prompt=system_prompt,
     )
 
 
@@ -180,8 +183,11 @@ async def _openrouter_chat(
     reasoning_effort: str | None = None,
     expects_json: bool = True,
     web_search: bool = False,
+    system_prompt: str | None = None,
 ) -> dict:
     messages = [{"role": "user", "content": prompt}]
+    if system_prompt:
+        messages.insert(0, {"role": "system", "content": system_prompt})
     payload: dict = {
         "model": model,
         "messages": messages,
@@ -264,6 +270,7 @@ async def _google_chat(
     max_tokens: int = 16000,
     expects_json: bool = True,
     web_search: bool = False,
+    system_prompt: str | None = None,
 ) -> dict:
     """Gemini Developer API generateContent call, bypassing OpenRouter."""
     model_id = _google_model_id(model)
@@ -276,6 +283,8 @@ async def _google_chat(
             "maxOutputTokens": max_tokens,
         },
     }
+    if system_prompt:
+        payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
     if expects_json:
         payload["generationConfig"]["responseMimeType"] = "application/json"
     if web_search:

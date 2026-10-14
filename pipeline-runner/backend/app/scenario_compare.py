@@ -7,6 +7,7 @@ render.py's _scenario_values). Section 11's own prose/tables describe each
 scenario one at a time; this reads the same structured numbers and lays them
 side by side so a reader can compare without flipping between paragraphs.
 """
+from .report_i18n import t as _t, localized_input, number
 
 _ORDER = ["pessimistinen", "konservatiivinen", "optimistinen"]
 _LABELS = {"pessimistinen": "Pessimistinen", "konservatiivinen": "Konservatiivinen", "optimistinen": "Optimistinen"}
@@ -17,14 +18,17 @@ def _is_num(x):
 
 
 def _fmt_num(v):
-    if not _is_num(v):
-        return "–"
-    sign = "-" if v < 0 else ""
-    return f"{sign}{round(abs(v)):,.0f}".replace(",", " ")
+    return number(v) if _is_num(v) else "–"
 
 
 def _classify(name):
     n = str(name or "").strip().lower()
+    aliases = {"pessimistic": "pessimistinen", "conservative": "konservatiivinen",
+               "base case": "konservatiivinen", "realistic": "konservatiivinen",
+               "realistinen": "konservatiivinen", "optimistic": "optimistinen"}
+    for alias, key in aliases.items():
+        if alias in n:
+            return key
     for key in _ORDER:
         if key in n:
             return key
@@ -38,6 +42,7 @@ def _scenarios_from_report(report):
     return scen if isinstance(scen, list) else []
 
 
+@localized_input()
 def build_scenario_comparison_block(report):
     """report: the assembled wrapper dict. Returns a single `table` block, or []
     if fewer than 2 named scenarios are present."""
@@ -53,7 +58,7 @@ def build_scenario_comparison_block(report):
     if len(present) < 2:
         return []
 
-    columns = ["Tunnusluku"] + [_LABELS[k] for k in present]
+    columns = [_t('Tunnusluku')] + [_t(_LABELS[k]) for k in present]
 
     def _val(s):
         # Model key-name drift: value_teur / owner_value_teur / owner_value /
@@ -74,14 +79,14 @@ def build_scenario_comparison_block(report):
         return None
 
     rows = [
-        ["Arvo (tEUR)"] + [_fmt_num(_val(by_name[k])) for k in present],
-        ["Todennäköisyys (%)"] + [_fmt_num(by_name[k].get("probability_pct")) for k in present],
+        [_t('Arvo (tEUR)')] + [_fmt_num(_val(by_name[k])) for k in present],
+        [_t('Todennäköisyys (%)')] + [_fmt_num(by_name[k].get("probability_pct")) for k in present],
     ]
 
     return [{
         "type": "table",
         "table_id": "deterministic_scenario_comparison",
-        "title": "Skenaariovertailu",
+        "title": _t('Skenaariovertailu'),
         "columns": columns,
         "rows": rows,
     }]

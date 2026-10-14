@@ -6,6 +6,7 @@ field name yet, so it's derived locally from ebit and headcount instead of
 guessing a varname. Never invented — a row is dropped entirely if none of its
 years have data.
 """
+from .report_i18n import t as _t, tf as _tf, localized_input, current, number
 
 
 def _is_num(x):
@@ -13,11 +14,7 @@ def _is_num(x):
 
 
 def _fmt_num(v):
-    if not _is_num(v):
-        return ""
-    sign = "-" if v < 0 else ""
-    a = abs(v)
-    return f"{sign}{round(a):,.0f}".replace(",", " ")
+    return number(v) if _is_num(v) else ""
 
 
 def _get_list(obj, key):
@@ -75,6 +72,7 @@ def _implied_headcounts(hc, personnel_costs):
     return corrected
 
 
+@localized_input(0)
 def build_headcount_efficiency_blocks(input_data):
     headcount = (input_data or {}).get("headcount") or {}
     years = headcount.get("years")
@@ -89,7 +87,8 @@ def build_headcount_efficiency_blocks(input_data):
     inc = actuals.get("income_statement") or {}
     per_emp = actuals.get("per_employee") or {}
 
-    corrected = _implied_headcounts(hc, _align(_get_list(inc, "personnel_costs"), n))
+    corrected = (_implied_headcounts(hc, _align(_get_list(inc, "personnel_costs"), n))
+                 if current().country == "FI" and current().currency == "EUR" else {})
     # Engine per_employee ratios were computed with the reported headcount, so
     # a corrected year rescales them by reported/implied instead of needing
     # the underlying source values. The reported source figure itself stays
@@ -106,6 +105,8 @@ def build_headcount_efficiency_blocks(input_data):
     bad = {i for i in range(n)
            if _is_num(net_sales[i]) and _is_num(hc_eff[i]) and hc_eff[i] > 0
            and net_sales[i] / hc_eff[i] < 1.0}
+    if current().country != "FI" or current().currency != "EUR":
+        bad = set()
 
     def _masked(values):
         return [None if i in bad else v for i, v in enumerate(values)]
@@ -115,30 +116,30 @@ def build_headcount_efficiency_blocks(input_data):
                 for i, v in enumerate(values)]
 
     rows = []
-    hc_row = _row("Henkilöstö", hc)
+    hc_row = _row(_t('Henkilöstö'), hc)
     if hc_row:
         rows.append(hc_row)
     if corrected:
-        est_row = _row("Henkilöstö (arvio henkilöstökuluista)",
+        est_row = _row(_t('Henkilöstö (arvio henkilöstökuluista)'),
                        [corrected.get(i) for i in range(n)])
         if est_row:
             rows.append(est_row)
     for label, key in (
-        ("Liikevaihto / henkilö", "net_sales"),
-        ("Jalostusarvo / henkilö", "value_added"),
-        ("Henkilökulut / henkilö", "personnel_costs"),
-        ("Käyttökate / henkilö", "ebitda"),
+        (_t('Liikevaihto / henkilö'), "net_sales"),
+        (_t('Jalostusarvo / henkilö'), "value_added"),
+        (_t('Henkilökulut / henkilö'), "personnel_costs"),
+        (_t('Käyttökate / henkilö'), "ebitda"),
     ):
         r = _row(label, _masked(_to_eur(_rescaled(_align(_get_list(per_emp, key), n)))))
         if r:
             rows.append(r)
 
-    ebit_row = _row("Liiketulos / henkilö",
+    ebit_row = _row(_t('Liiketulos / henkilö'),
                     _masked(_ebit_per_employee(_align(_get_list(inc, "ebit"), n), hc_eff)))
     if ebit_row:
         rows.append(ebit_row)
 
-    net_row = _row("Nettotulos / henkilö",
+    net_row = _row(_t('Nettotulos / henkilö'),
                    _masked(_to_eur(_rescaled(_align(_get_list(per_emp, "net_earnings"), n)))))
     if net_row:
         rows.append(net_row)
@@ -149,9 +150,9 @@ def build_headcount_efficiency_blocks(input_data):
     blocks = [{
         "type": "table",
         "table_id": "deterministic_headcount_efficiency",
-        "title": "Henkilöstötehokkuus",
-        "unit": "Henkilöstö: lkm, muut rivit €/henkilö",
-        "columns": ["Erä"] + [str(y) for y in years],
+        "title": _t('Henkilöstötehokkuus'),
+        "unit": _t('Henkilöstö: lkm, muut rivit €/henkilö'),
+        "columns": [_t('Erä')] + [str(y) for y in years],
         "rows": rows,
     }]
     if corrected:
@@ -159,13 +160,9 @@ def build_headcount_efficiency_blocks(input_data):
         blocks.append({
             "type": "callout",
             "variant": "info",
-            "title": "Henkilöstömäärä korjattu",
+            "title": _t('Henkilöstömäärä korjattu'),
             "text": (
-                f"Lähdedatan ilmoittama henkilöstömäärä vuosilta {yrs} on "
-                "epäuskottava suhteessa henkilöstökuluihin. Ilmoitettu määrä "
-                "näytetään sellaisenaan; henkilöä kohden lasketut tunnusluvut "
-                "näiltä vuosilta perustuvat henkilöstökuluista johdettuun "
-                f"arvioon (noin {_fmt_num(COST_PER_HEAD_TEUR)} tEUR/henkilö)."
+                _tf('Lähdedatan ilmoittama henkilöstömäärä vuosilta {0} on epäuskottava suhteessa henkilöstökuluihin. Ilmoitettu määrä näytetään sellaisenaan; henkilöä kohden lasketut tunnusluvut näiltä vuosilta perustuvat henkilöstökuluista johdettuun arvioon (noin {1} tEUR/henkilö).', f'{yrs}', f'{_fmt_num(COST_PER_HEAD_TEUR)}')
             ),
         })
     return blocks

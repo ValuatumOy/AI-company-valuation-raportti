@@ -17,6 +17,7 @@ each one a visible, user-editable input); the value itself is never taken from
 the model. Interim deficits are NOT subtracted separately — the realization-year
 net debt already embodies how they were financed (single representation).
 """
+from .report_i18n import t as _t, tf as _tf, localized_input, number
 
 
 def _num(x):
@@ -28,15 +29,7 @@ def _num(x):
 
 
 def _fmt(v, decimals=0):
-    if v is None:
-        return ""
-    sign = "-" if v < 0 else ""
-    a = abs(v)
-    if decimals:
-        s = f"{a:,.{decimals}f}"
-        i, f = s.split(".")
-        return f"{sign}{i.replace(',', ' ')},{f}"
-    return f"{sign}{round(a):,.0f}".replace(",", " ")
+    return number(v, decimals) if v is not None else ""
 
 
 def _wacc_pct(input_data):
@@ -54,6 +47,7 @@ def _base_year(input_data):
     return nums[0] - 1 if nums else None
 
 
+@localized_input(1)
 def compute(assumptions, input_data):
     """Return {value_teur, steps:[...]} or None when the inputs don't support a
     deterministic calculation (missing/implausible fields -> caller keeps the
@@ -78,17 +72,17 @@ def compute(assumptions, input_data):
     value = pv * (1 - dilution / 100.0)
     floored = max(value, 0.0)
     steps = [
-        ["Jatkuvan arvon arvo toteutumisvuonna " + str(int(year)), _fmt(cv)],
-        ["− Ennustettu nettovelka vuonna " + str(int(year)), _fmt(nd)],
-        ["= Oman pääoman arvo vuonna " + str(int(year)), _fmt(equity_n)],
-        [f"Diskonttaus nykyhetkeen (WACC {_fmt(wacc, 1)} %, {n} v, kerroin {_fmt(factor, 3)})",
+        [_t('Jatkuvan arvon arvo toteutumisvuonna ') + str(int(year)), _fmt(cv)],
+        [_t('− Ennustettu nettovelka vuonna ') + str(int(year)), _fmt(nd)],
+        [_t('= Oman pääoman arvo vuonna ') + str(int(year)), _fmt(equity_n)],
+        [_tf('Diskonttaus nykyhetkeen (WACC {0} %, {1} v, kerroin {2})', f'{_fmt(wacc, 1)}', f'{n}', f'{_fmt(factor, 3)}'),
          _fmt(pv)],
     ]
     if dilution:
-        steps.append([f"− Laimennusvaikutus {_fmt(dilution, 1)} %", _fmt(value)])
+        steps.append([_tf('− Laimennusvaikutus {0} %', f'{_fmt(dilution, 1)}'), _fmt(value)])
     if floored != value:
-        steps.append(["Omistaja-arvon lattia", "0"])
-    steps.append(["Optimistinen omistaja-arvo", _fmt(floored)])
+        steps.append([_t('Omistaja-arvon lattia'), "0"])
+    steps.append([_t('Optimistinen omistaja-arvo'), _fmt(floored)])
     return {"value_teur": floored, "steps": steps, "realization_year": int(year),
             "wacc_pct": wacc, "n": n}
 
@@ -104,6 +98,7 @@ def _find_scenario(scenarios, needle):
     return None
 
 
+@localized_input(1)
 def apply(wrapper, input_data):
     """Override the optimistic scenario value + expected value + cover headline
     with the deterministic waterfall when the writer supplied usable
@@ -137,18 +132,18 @@ def apply(wrapper, input_data):
             s["contribution"] = round(p * v / 100.0, 1)
     if abs(sum(probs) - 100.0) <= 1.0:
         ev = sum(p * v for p, v in zip(probs, vals)) / 100.0
-        calc = " + ".join(f"{_fmt(p)} % × {_fmt(v)} tEUR"
-                          for p, v in zip(probs, vals)) + f" = {_fmt(ev)} tEUR"
+        calc = " + ".join(_tf('{0} % × {1} tEUR', f'{_fmt(p)}', f'{_fmt(v)}')
+                          for p, v in zip(probs, vals)) + _tf(' = {0} tEUR', f'{_fmt(ev)}')
         evf = wrapper.get("expected_value")
         if isinstance(evf, dict):
             evf["value"] = round(ev, 1)
             evf["calculation"] = calc
         else:
-            wrapper["expected_value"] = {"value": round(ev, 1), "unit": "tEUR",
+            wrapper["expected_value"] = {"value": round(ev, 1), "unit": _t('tEUR'),
                                          "calculation": calc}
         cover = wrapper.get("cover")
         if isinstance(cover, dict) and cover.get("headline_value") not in (None, ""):
-            cover["headline_value"] = f"{_fmt(ev)} tEUR"
+            cover["headline_value"] = _tf('{0} tEUR', f'{_fmt(ev)}')
     return result
 
 
@@ -156,20 +151,14 @@ def derivation_blocks(result):
     return [{
         "type": "table",
         "table_id": "deterministic_optimistic_waterfall",
-        "title": "Optimistisen skenaarion arvon johto (deterministinen)",
-        "unit": "tEUR",
-        "columns": ["Erä", "Arvo"],
+        "title": _t('Optimistisen skenaarion arvon johto (deterministinen)'),
+        "unit": _t('tEUR'),
+        "columns": [_t('Erä'), _t('Arvo')],
         "rows": result["steps"],
     }, {
         "type": "paragraph",
         "text": (
-            "Optimistisen skenaarion arvo on laskettu deterministisesti yllä "
-            "olevista oletuksista: oman pääoman arvo muodostetaan "
-            "toteutumisvuonna (jatkuva arvo miinus saman vuoden ennustettu "
-            "nettovelka) ja diskontataan kokonaisuutena nykyhetkeen. "
-            "Välivuosien rahoitustarvetta ei vähennetä erikseen, koska "
-            "toteutumisvuoden nettovelka sisältää jo sen rahoituksen. "
-            "Oletukset ovat AI:n muodostamia ja käyttäjän muokattavissa."
+            _t('Optimistisen skenaarion arvo on laskettu deterministisesti yllä olevista oletuksista: oman pääoman arvo muodostetaan toteutumisvuonna (jatkuva arvo miinus saman vuoden ennustettu nettovelka) ja diskontataan kokonaisuutena nykyhetkeen. Välivuosien rahoitustarvetta ei vähennetä erikseen, koska toteutumisvuoden nettovelka sisältää jo sen rahoituksen. Oletukset ovat AI:n muodostamia ja käyttäjän muokattavissa.')
         ),
     }]
 

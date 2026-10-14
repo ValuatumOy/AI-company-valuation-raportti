@@ -440,7 +440,24 @@ def balance_sheet(data_map: dict[str, dict[str, Any]], years: list[int]) -> dict
     }
 
 
-def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] | None = None,
+                  *, report_language: str = "fi", country_code: str | None = None,
+                  source_currency: str | None = None) -> dict[str, Any]:
+    currency = model.get("currency")
+    if source_currency is not None and currency is not None and currency != source_currency:
+        raise ValueError("source_currency conflicts with raw model.currency")
+    currency = currency or source_currency
+    if currency is None and country_code in (None, "FI"):
+        currency = "EUR"  # Existing Finland export contract.
+    if currency not in {"EUR", "DKK", "USD"}:
+        raise ValueError("Raw model requires verified EUR, DKK or USD currency")
+    if country_code is None:
+        if currency != "EUR":
+            raise ValueError("Foreign currency requires explicit country_code")
+        country_code = "FI"
+    if report_language not in {"fi", "en"} or country_code not in {"FI", "DK", "US"}:
+        raise ValueError("Unsupported report_language or country_code")
+    unit = "t" + currency
     data_map = model.get("dataMap", {})
     years = sorted((int(year) for year in data_map), key=int)
     current_year = int(model.get("currentYear") or min(years))
@@ -453,8 +470,8 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
     forecast = {
         "years": forecast_years,
         "terminal": "TRM",
-        "unit": "tEUR",
-        "is_system_deterministic": True,
+        "unit": unit,
+        "is_system_deterministic": country_code == "FI" or model.get("is_system_deterministic") is True,
         "net_sales": arr(data_map, forecast_years, "ns", money=True),
         "net_sales_growth_pct": arr(data_map, forecast_years, "ns_growth", pct=True),
         "ebitda": arr(data_map, forecast_years, ["cr_ebitda_xml", "ebitda"], money=True),
@@ -468,16 +485,19 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
     }
 
     return {
+        "unit": unit,
         "meta": {
             "company_name": model.get("companyName"),
-            "y_tunnus": y_tunnus(code),
+            "y_tunnus": y_tunnus(code) if country_code == "FI" else code.removesuffix("K"),
             "industry": None,
             "industry_code": None,
             "domicile": None,
             "founded": None,
             "report_date": date.today().isoformat(),
-            "currency": model.get("currency", "EUR"),
-            "unit": "tEUR",
+            "currency": currency,
+            "unit": unit,
+            "report_language": report_language,
+            "country_code": country_code,
             "level": "consolidated" if code.endswith("K") else "parent",
             "data_source": "profinder",
             "run_id": str(uuid.uuid4()),
@@ -493,7 +513,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         },
         "actuals": {
             "years": actual_years,
-            "unit": "tEUR",
+            "unit": unit,
             "income_statement": income_statement(data_map, actual_years),
             "balance_sheet": balance_sheet(data_map, actual_years),
             # Per-employee ratios the engine already computes, in tEUR/employee —
@@ -524,7 +544,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
             "dividend_payout_pct": arr(data_map, forecast_years, "cr_payout_ratio", pct=True),
         },
         "valuation_engine": {
-            "unit": "tEUR",
+            "unit": unit,
             "wacc_parameters": {
                 "risk_free_rate_pct": scalar(data_map, first_forecast, "riskfree_interest_rate", pct=True),
                 "market_risk_premium_pct": scalar(data_map, first_forecast, "market_risk_premium", pct=True),

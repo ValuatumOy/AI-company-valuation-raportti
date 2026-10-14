@@ -6,6 +6,7 @@ to understand the DCF. This module builds a horizontal, year-by-year table from
 the Valuatum input data so the report can show the drivers without inventing
 missing components.
 """
+from .report_i18n import t as _t, tf as _tf, localized_input, current, number
 
 
 def _is_num(x):
@@ -13,22 +14,14 @@ def _is_num(x):
 
 
 def _fmt_num(v, decimals=0):
-    if not _is_num(v):
-        return ""
-    sign = "-" if v < 0 else ""
-    a = abs(v)
-    if decimals:
-        s = f"{a:,.{decimals}f}"
-        i, f = s.split(".")
-        return f"{sign}{i.replace(',', ' ')},{f}"
-    return f"{sign}{round(a):,.0f}".replace(",", " ")
+    return number(v, decimals) if _is_num(v) else ""
 
 
 def _fmt_pct(v, decimals=1):
     if not _is_num(v):
         return ""
     s = _fmt_num(v, decimals)
-    if s.endswith(",0"):
+    if s.endswith((",0", ".0")):
         s = s[:-2]
     return f"{s} %"
 
@@ -82,22 +75,22 @@ def _bridge_rows(dcf, pv_forecast, fmt=_fmt_num):
     cumulative = _first_num(_get_list(dcf, "cumulative_discounted_fcff"))
     bridge = dcf.get("bridge") or {}
     equity = dcf.get("equity_value_before_floor")
-    rows = [["PV, ennustejakso yhteensä", fmt(pv_forecast)]]
+    rows = [[_t('PV, ennustejakso yhteensä'), fmt(pv_forecast)]]
     if _is_num(cumulative):
-        rows.append(["Terminaaliarvon nykyarvo", fmt(cumulative - pv_forecast)])
-        rows.append(["Yritysarvo (EV)", fmt(cumulative)])
+        rows.append([_t('Terminaaliarvon nykyarvo'), fmt(cumulative - pv_forecast)])
+        rows.append([_t('Yritysarvo (EV)'), fmt(cumulative)])
     if _is_num(bridge.get("interest_bearing_debt")):
-        rows.append(["Korolliset velat", fmt(bridge.get("interest_bearing_debt"))])
+        rows.append([_t('Korolliset velat'), fmt(bridge.get("interest_bearing_debt"))])
     if _is_num(bridge.get("cash")):
-        rows.append(["Kassa", fmt(bridge.get("cash"))])
+        rows.append([_t('Kassa'), fmt(bridge.get("cash"))])
     if _is_num(bridge.get("associated_market_value")):
-        rows.append(["Osakkuusyhtiöt / muut erät", fmt(bridge.get("associated_market_value"))])
+        rows.append([_t('Osakkuusyhtiöt / muut erät'), fmt(bridge.get("associated_market_value"))])
     if _is_num(bridge.get("minority_market_value")):
-        rows.append(["Vähemmistöosuudet", fmt(bridge.get("minority_market_value"))])
+        rows.append([_t('Vähemmistöosuudet'), fmt(bridge.get("minority_market_value"))])
     if _is_num(bridge.get("prev_year_dividends")):
-        rows.append(["Edellisen vuoden osingot", fmt(bridge.get("prev_year_dividends"))])
+        rows.append([_t('Edellisen vuoden osingot'), fmt(bridge.get("prev_year_dividends"))])
     if _is_num(equity):
-        rows.append(["Oman pääoman arvo ennen lattiaa", fmt(equity)])
+        rows.append([_t('Oman pääoman arvo ennen lattiaa'), fmt(equity)])
     return rows
 
 
@@ -108,18 +101,18 @@ def _waterfall_steps(dcf, ev):
     equity = dcf.get("equity_value_before_floor")
     if not (_is_num(ev) and _is_num(equity)):
         return []
-    steps = [{"label": "Yritysarvo (EV)", "value": ev, "kind": "start"}]
+    steps = [{"label": _t('Yritysarvo (EV)'), "value": ev, "kind": "start"}]
     for key, label in (
-        ("interest_bearing_debt", "Korolliset velat"),
-        ("cash", "Kassa"),
-        ("associated_market_value", "Osakkuusyhtiöt / muut erät"),
-        ("minority_market_value", "Vähemmistöosuudet"),
-        ("prev_year_dividends", "Edellisen vuoden osingot"),
+        ("interest_bearing_debt", _t('Korolliset velat')),
+        ("cash", _t('Kassa')),
+        ("associated_market_value", _t('Osakkuusyhtiöt / muut erät')),
+        ("minority_market_value", _t('Vähemmistöosuudet')),
+        ("prev_year_dividends", _t('Edellisen vuoden osingot')),
     ):
         v = bridge.get(key)
         if _is_num(v) and v != 0:
             steps.append({"label": label, "value": v, "kind": "delta"})
-    steps.append({"label": "Oman pääoman arvo", "value": equity, "kind": "total"})
+    steps.append({"label": _t('Oman pääoman arvo'), "value": equity, "kind": "total"})
     return steps
 
 
@@ -168,6 +161,7 @@ def _investment_grade(rating):
     return None
 
 
+@localized_input(0)
 def build_wacc_risk_caveat_blocks(input_data):
     """Transparency caveat when the engine's discount rate does not reflect the
     company's own credit risk (weak rating / high bankruptcy risk / negative
@@ -192,36 +186,34 @@ def build_wacc_risk_caveat_blocks(input_data):
 
     risk_bits = []
     if rating:
-        risk_bits.append(f"luottoluokitus {rating}")
+        risk_bits.append(_tf('luottoluokitus {0}', f'{rating}'))
     if _is_num(bankruptcy):
-        risk_bits.append(f"konkurssiriski {_fmt_pct(bankruptcy)}")
+        risk_bits.append(_tf('konkurssiriski {0}', f'{_fmt_pct(bankruptcy)}'))
     if neg_equity:
-        risk_bits.append("oma pääoma on negatiivinen koko ennustejakson")
+        risk_bits.append(_t('oma pääoma on negatiivinen koko ennustejakson'))
     param_bits = []
     if _is_num(cost_of_debt):
-        param_bits.append(f"vieraan pääoman kustannus {_fmt_pct(cost_of_debt)}")
+        param_bits.append(_tf('vieraan pääoman kustannus {0}', f'{_fmt_pct(cost_of_debt)}'))
     if _is_num(liq):
-        param_bits.append(f"likviditeettipreemio {_fmt_pct(liq)}")
+        param_bits.append(_tf('likviditeettipreemio {0}', f'{_fmt_pct(liq)}'))
 
     text = (
-        "Diskonttokorko (WACC) tulee valuaatiomoottorista, eikä sitä ole tässä "
-        "raportissa oikaistu yhtiön luottoriskillä. Huomioi jännite: "
-        + (", ".join(risk_bits) or "kohonnut luottoriski")
-        + ", mutta " + ("; ".join(param_bits) or "diskonttokoron komponentit")
-        + " ovat maltilliset tähän riskitasoon nähden"
+        _t('Diskonttokorko (WACC) tulee valuaatiomoottorista, eikä sitä ole tässä raportissa oikaistu yhtiön luottoriskillä. Huomioi jännite: ')
+        + (", ".join(risk_bits) or _t('kohonnut luottoriski'))
+        + _t(', mutta ') + ("; ".join(param_bits) or _t('diskonttokoron komponentit'))
+        + _t(' ovat maltilliset tähän riskitasoon nähden')
     )
     if _is_num(tgt) and neg_equity:
-        text += (f". Lisäksi tavoitepääomarakenne D/(D+E) {_fmt_pct(tgt)} on "
-                 "ristiriidassa negatiivisen oman pääoman kanssa (kiertokulkuoletus)")
-    text += (". Todellinen tuottovaatimus voisi olla korkeampi, jolloin oman "
-             "pääoman arvo olisi konservatiivista perusskenaariota matalampi.")
+        text += (_tf('. Lisäksi tavoitepääomarakenne D/(D+E) {0} on ristiriidassa negatiivisen oman pääoman kanssa (kiertokulkuoletus)', f'{_fmt_pct(tgt)}'))
+    text += (_t('. Todellinen tuottovaatimus voisi olla korkeampi, jolloin oman pääoman arvo olisi konservatiivista perusskenaariota matalampi.'))
     return [{
         "type": "callout", "variant": "warning",
-        "title": "Diskonttokoron ja luottoriskin suhde",
+        "title": _t('Diskonttokoron ja luottoriskin suhde'),
         "text": text,
     }]
 
 
+@localized_input(0)
 def build_dcf_detail_blocks(input_data):
     ve = (input_data or {}).get("valuation_engine") or {}
     dcf = ve.get("dcf") or {}
@@ -243,8 +235,8 @@ def build_dcf_detail_blocks(input_data):
             return [{
                 "type": "callout",
                 "variant": "warning",
-                "title": "DCF-erittelyä ei voitu koota",
-                "text": (
+                "title": _t('DCF-erittelyä ei voitu koota'),
+                "text": _t(
                     "Valuaatiomoottorin dcf-lohkosta puuttuu vuosi-, FCFF- tai "
                     "diskontattu FCFF -sarja, joten vuosittaista FCFF-erittelyä ei "
                     "voitu rakentaa. Tarkista vaiheen 0 datan "
@@ -257,7 +249,7 @@ def build_dcf_detail_blocks(input_data):
     years = years[:n]
     terminal_pv = _terminal_pv(dcf, discounted, n)
     terminal_label = str(dcf.get("terminal") or "TRM")
-    cols = ["Erä"] + [str(y) for y in years]
+    cols = [_t('Erä')] + [str(y) for y in years]
     if _is_num(terminal_pv):
         cols.append(terminal_label)
 
@@ -269,7 +261,7 @@ def build_dcf_detail_blocks(input_data):
     ev = _first_num(_get_list(dcf, "cumulative_discounted_fcff"))
     big = max((abs(v) for v in [ev, terminal_pv] + fcff[:n] if _is_num(v)), default=0)
     from .render import _scale_from_teur
-    div, unit, dec = _scale_from_teur(big) if big >= 1_000_000 else (1.0, "tEUR", 0)
+    div, unit, dec = _scale_from_teur(big) if big >= 1_000_000 else (1.0, current().unit, 0)
 
     def fmt(v, decimals=dec):
         return _fmt_num(v / div, decimals) if _is_num(v) else ""
@@ -285,21 +277,21 @@ def build_dcf_detail_blocks(input_data):
             rows.append(r)
 
     add("EBIT", _first_available_list((dcf, "ebit"), (forecast, "ebit")))
-    add("+ Poistot", _get_list(dcf, "depreciation_total"))
-    add("- Maksetut verot", _get_list(dcf, "taxes_paid"))
-    add("- Rahoituskulujen verovaikutus", _get_list(dcf, "tax_fin_expenses"))
-    add("+ Rahoitustuottojen verovaikutus", _get_list(dcf, "tax_fin_income"))
-    add("- Käyttöpääoman muutos", _get_list(dcf, "change_in_working_capital"))
-    add("Liiketoiminnan kassavirta", _get_list(dcf, "operating_cash_flow"))
+    add(_t('+ Poistot'), _get_list(dcf, "depreciation_total"))
+    add(_t('- Maksetut verot'), _get_list(dcf, "taxes_paid"))
+    add(_t('- Rahoituskulujen verovaikutus'), _get_list(dcf, "tax_fin_expenses"))
+    add(_t('+ Rahoitustuottojen verovaikutus'), _get_list(dcf, "tax_fin_income"))
+    add(_t('- Käyttöpääoman muutos'), _get_list(dcf, "change_in_working_capital"))
+    add(_t('Liiketoiminnan kassavirta'), _get_list(dcf, "operating_cash_flow"))
     add(
-        "+ Korottomien rahoitusvelkojen muutos",
+        _t('+ Korottomien rahoitusvelkojen muutos'),
         _get_list(dcf, "change_in_non_interest_bearing_financial_liabilities"),
     )
-    add("- Bruttoinvestoinnit", _get_list(dcf, "gross_capex"))
-    add("Operatiivinen vapaa kassavirta", _get_list(dcf, "free_operating_cash_flow"))
-    add("+/- Muut erät", _get_list(dcf, "other_items_fcf"))
-    add("Vapaa kassavirta (FCFF)", _first_available_list((dcf, "fcff"), (forecast, "free_cash_flow_to_firm")))
-    add("Diskontattu FCFF", discounted, terminal_pv)
+    add(_t('- Bruttoinvestoinnit'), _get_list(dcf, "gross_capex"))
+    add(_t('Operatiivinen vapaa kassavirta'), _get_list(dcf, "free_operating_cash_flow"))
+    add(_t('+/- Muut erät'), _get_list(dcf, "other_items_fcf"))
+    add(_t('Vapaa kassavirta (FCFF)'), _first_available_list((dcf, "fcff"), (forecast, "free_cash_flow_to_firm")))
+    add(_t('Diskontattu FCFF'), discounted, terminal_pv)
     # A true forward running sum of the discounted-FCFF row. The engine's
     # `cumulative_discounted_fcff` field is a reverse remaining-PV series (its
     # first element is the EV, consumed as such at lines 73/88 and in
@@ -312,7 +304,7 @@ def build_dcf_detail_blocks(input_data):
         if _is_num(v):
             _acc += v
         running.append(_acc)
-    add("Kumulatiivinen diskontattu FCFF", running, ev)
+    add(_t('Kumulatiivinen diskontattu FCFF'), running, ev)
 
     if not rows:
         return []
@@ -322,7 +314,7 @@ def build_dcf_detail_blocks(input_data):
         {
             "type": "table",
             "table_id": "deterministic_dcf_fcff_drivers",
-            "title": "DCF-laskelma: FCFF ja nykyarvo vuosittain",
+            "title": _t('DCF-laskelma: FCFF ja nykyarvo vuosittain'),
             "unit": unit,
             "columns": cols,
             "rows": rows,
@@ -331,7 +323,7 @@ def build_dcf_detail_blocks(input_data):
             "type": "chart",
             "chart_id": "deterministic_ev_equity_waterfall",
             "chart_type": "waterfall",
-            "title": "Arvon muodostuminen: yritysarvosta oman pääoman arvoon",
+            "title": _t('Arvon muodostuminen: yritysarvosta oman pääoman arvoon'),
             "unit": unit,
             "steps": [{**s, "value": s["value"] / div}
                       for s in _waterfall_steps(dcf, ev)],
@@ -339,26 +331,17 @@ def build_dcf_detail_blocks(input_data):
         {
             "type": "table",
             "table_id": "deterministic_dcf_equity_bridge",
-            "title": "Yritysarvosta oman pääoman arvoon",
+            "title": _t('Yritysarvosta oman pääoman arvoon'),
             "unit": unit,
-            "columns": ["Erä", "Arvo"],
+            "columns": [_t('Erä'), _t('Arvo')],
             "rows": _bridge_rows(dcf, pv_forecast, fmt),
         },
         {
             "type": "callout",
             "variant": "info",
-            "title": "Mistä diskontattu FCFF tulee?",
+            "title": _t('Mistä diskontattu FCFF tulee?'),
             "text": (
-                "Taulukko seuraa Valuatumin DCF-rivejä: EBITistä edetään veroihin, "
-                "käyttöpääoman muutokseen, investointeihin ja muihin eriin, joista "
-                "muodostuu vapaa kassavirta (FCFF). Diskontattu FCFF on saman "
-                "DCF-taulukon nykyarvorivi, ja ennustejakson diskontattujen FCFF:ien "
-                f"summa on {fmt(pv_forecast)} {unit}. Tekoäly ei laske DCF:ää "
-                "uudelleen, vaan esittää Valuatum-moottorin antamat rivit. "
-                "Miinusmerkillä (−) alkavat rivit vähennetään kassavirrasta; "
-                "tappiollisena vuonna rivi “− Maksetut verot” voi "
-                "silti näyttää positiivista lukua, jolloin kyse on verohyödystä, "
-                "joka kasvattaa vapaata kassavirtaa."
+                _tf('Taulukko seuraa Valuatumin DCF-rivejä: EBITistä edetään veroihin, käyttöpääoman muutokseen, investointeihin ja muihin eriin, joista muodostuu vapaa kassavirta (FCFF). Diskontattu FCFF on saman DCF-taulukon nykyarvorivi, ja ennustejakson diskontattujen FCFF:ien summa on {0} {1}. Tekoäly ei laske DCF:ää uudelleen, vaan esittää Valuatum-moottorin antamat rivit. Miinusmerkillä (−) alkavat rivit vähennetään kassavirrasta; tappiollisena vuonna rivi “− Maksetut verot” voi silti näyttää positiivista lukua, jolloin kyse on verohyödystä, joka kasvattaa vapaata kassavirtaa.', f'{fmt(pv_forecast)}', f'{unit}')
             ),
         },
     ]

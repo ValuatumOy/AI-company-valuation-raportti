@@ -7,6 +7,7 @@ arrays from every stage into one list sorted by the canonical section order
 1,2,3,4,5,6,8,9,10,11,12,13,14,15,16 (there is no section 7), and returns the
 final report object that feeds the renderer.
 """
+from .report_i18n import t as _t, current, report_context, locale_from
 from . import (dcf_detail, financials, headcount_efficiency, peers, scenario_compare,
                scenario_waterfall, sensitivity, valuation_equivalence)
 from .runner import SECTION_ORDER
@@ -111,7 +112,7 @@ def _is_old_fcff_table(block):
     # markers, years-as-columns instead of a "vuosi"/"fcff" column name, so the
     # check above never matches it and it survives alongside the real one.
     title = str(block.get("title") or "").lower()
-    if "fcff" not in title and "dcf-laskelma" not in title:
+    if "fcff" not in title and "dcf-laskelma" not in title and "dcf calculation" not in title:
         return False
     labels = _row_labels(block)
     fcff_markers = ("ebit", "fcff", "diskontattu fcff", "liiketoiminnan kassavirta")
@@ -124,10 +125,12 @@ def _is_old_dcf_bridge_table(block):
     if str(block.get("table_id", "")).startswith("deterministic_dcf_"):
         return False
     title = str(block.get("title") or "").lower()
-    if "yritysarvosta" in title and "oman pääoman" in title:
+    if (("yritysarvosta" in title and "oman pääoman" in title)
+            or ("enterprise value" in title and "equity value" in title)):
         return True
     labels = _row_labels(block)
-    bridge_markers = ("terminaaliarvon", "yritysarvo", "oman pääoman arvo")
+    bridge_markers = ("terminaaliarvon", "yritysarvo", "oman pääoman arvo",
+                      "terminal value", "enterprise value", "equity value")
     return sum(any(m in lab for m in bridge_markers) for lab in labels) >= 2
 
 
@@ -139,7 +142,7 @@ def _is_stale_dcf_detail(b):
         return False
     if str(b.get("table_id", "")).startswith("deterministic_dcf_"):
         return True
-    return b.get("type") == "callout" and str(b.get("title") or "").strip() == "Mistä diskontattu FCFF tulee?"
+    return b.get("type") == "callout" and str(b.get("title") or "").strip() in ("Mistä diskontattu FCFF tulee?", "Where discounted FCFF comes from")
 
 
 def _inject_dcf_detail_blocks(sections, input_data):
@@ -249,7 +252,7 @@ def _surface_method_scoring(sections):
     blocks = [b for b in (s7.get("blocks") or []) if isinstance(b, dict)]
     if not blocks:
         return sections
-    moved = [{"type": "heading", "text": "Menetelmävalinnan pisteytys",
+    moved = [{"type": "heading", "text": _t('Menetelmävalinnan pisteytys'),
               "_from_section7": True}]
     for b in blocks:
         nb = dict(b)
@@ -322,6 +325,12 @@ def _inject_financial_statement_blocks(sections, input_data):
 
 
 def assemble(run):
+    outputs = _ok_outputs_by_order(run)
+    with report_context(outputs.get(0)):
+        return _assemble(run)
+
+
+def _assemble(run):
     """Build the final report dict from a finished run. Best-effort: returns
     whatever can be assembled even if stage 6 did not complete."""
     outputs = _ok_outputs_by_order(run)
@@ -338,6 +347,17 @@ def assemble(run):
     if wrapper is None:
         wrapper = dict(outputs[max(outputs)])
 
+    source = outputs.get(0) or {}
+    source_meta = source.get("meta") or {}
+    if any(k in source_meta for k in ("report_language", "country_code", "currency")):
+        ctx = locale_from(source)
+        written_meta = wrapper.get("meta") or {}
+        if ((written_meta.get("currency") and written_meta["currency"] != ctx.currency)
+                or (written_meta.get("unit") and written_meta["unit"] != ctx.unit)):
+            raise ValueError("Report metadata currency/unit conflicts with source financial data")
+        wrapper["meta"] = {**(wrapper.get("meta") or {}),
+                           "report_language": ctx.language, "country_code": ctx.country,
+                           "currency": ctx.currency, "unit": ctx.unit}
     sections = merge_sections(outputs)
     _inject_dcf_detail_blocks(sections, outputs.get(0))
     _inject_dcf_caveats(sections, outputs.get(0))

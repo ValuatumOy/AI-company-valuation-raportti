@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from . import openrouter, peers, revenue_anomalies, store, validators
+from . import openrouter, peers, report_context, revenue_anomalies, store, validators
 from .models import DATA_FETCHER_MODEL
 from fetchers.company_data import fetch_company_data
 
@@ -262,9 +262,14 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
     if stage["model"] == DATA_FETCHER_MODEL:
         try:
             if run_input_data is not None:
-                data = run_input_data  # manual paste path
+                data = report_context.normalize_input(run_input_data, params)
             elif identifier:
+                locale = report_context.resolve_context(None, params)
+                if locale["country_code"] != "FI" or locale["currency"] != "EUR":
+                    raise ValueError("Foreign demos require supplied normalized input_data; "
+                                     "automatic Finland export is disabled")
                 data = await fetch_company_data(identifier, params or {})
+                data = report_context.normalize_input(data, params)
             else:
                 raise ValueError(
                     "Stage 0: ei input_dataa eikä tunnistetta. Liitä FAKTAT-JSON "
@@ -282,7 +287,9 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
         return res
 
     # Other stages — substitute + call OpenRouter.
-    prompt, err = substitute(stage["prompt_template"], context)
+    locale = report_context.resolve_context(context.get("input_data") or run_input_data, params)
+    template = report_context.adapt_template(stage["prompt_template"], locale)
+    prompt, err = substitute(template, context)
     if err:
         res["status"] = "error"
         res["error_message"] = err
@@ -293,6 +300,11 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
     if correction:
         prompt = _correction_prompt(prompt, correction)
 
+    locale_args = {}
+    directive = report_context.system_directive(locale)
+    if directive:
+        locale_args["system_prompt"] = directive
+
     try:
         r = await openrouter.chat(
             model=stage["model"],
@@ -302,6 +314,7 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
             reasoning_effort=stage["reasoning_effort"],
             expects_json=stage["expects_json"],
             web_search=stage.get("web_search", False),
+            **locale_args,
         )
     except Exception as e:
         res["status"] = "error"
@@ -344,6 +357,7 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
                     reasoning_effort=stage["reasoning_effort"],
                     expects_json=stage["expects_json"],
                     web_search=stage.get("web_search", False),
+                    **locale_args,
                 )
                 res["raw_response"] = r2["text"]
                 res["finish_reason"] = r2["finish_reason"]
@@ -374,7 +388,8 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
     res["status"] = "ok"
 
     if stage["validator_code"]:
-        report = validators.run_validator(stage["validator_code"], output, context)
+        code = report_context.adapt_validator(stage["validator_code"], locale)
+        report = validators.run_validator(code, output, context)
         res["validator_report"] = report
         res["validator_passed"] = bool(report.get("passed"))
         if not res["validator_passed"]:
@@ -450,6 +465,8 @@ async def _run_stages(run, stages, only=None, from_order=None):
     stop_on_failure = run.get("stop_on_failure", True)
     identifier = run.get("identifier")
     params = run.get("params", {})
+    if input_data is not None:
+        input_data = report_context.normalize_input(input_data, params)
 
     stages = sorted(stages, key=lambda s: s["order"])
     existing = {r["order"]: r for r in (store.get_run(rid) or {}).get("results", [])}
@@ -541,13 +558,17 @@ async def _run_stages(run, stages, only=None, from_order=None):
             prev = existing[s["order"]]
             if prev.get("status") in ("ok", "validation_failed"):
                 out = _output_value(prev)
+                if s["order"] == 0 and isinstance(out, dict):
+                    out = report_context.normalize_input(out, params)
                 _contribute(context, s, out)
                 # A writer-only rerun skips enrichment, and with it the peer
                 # resolution below — so take the peers that run already
                 # resolved rather than regenerating the report without them.
                 if (s["order"] == 1 and isinstance(out, dict)
                         and out.get("peers")
-                        and isinstance(context.get("input_data"), dict)):
+                        and isinstance(context.get("input_data"), dict)
+                        and report_context.resolve_context(context["input_data"], params)["country_code"] == "FI"
+                        and report_context.resolve_context(context["input_data"], params)["currency"] == "EUR"):
                     context["input_data"]["peers"] = out["peers"]
                     context["input_data"]["peers_summary"] = (
                         out.get("peers_summary")
@@ -639,7 +660,9 @@ async def _run_stages(run, stages, only=None, from_order=None):
         # worth — so the two are joined here, between the two stages, and the
         # writer reads them through `input_data.peers` like any other fact.
         if (s["order"] == 1 and res["status"] in ("ok", "validation_failed")
-                and isinstance(context.get("input_data"), dict)):
+                and isinstance(context.get("input_data"), dict)
+                and report_context.resolve_context(context["input_data"], params)["country_code"] == "FI"
+                and report_context.resolve_context(context["input_data"], params)["currency"] == "EUR"):
             found = await peers.resolve(
                 _output_value(res),
                 ((context["input_data"].get("meta") or {}).get("company_name")),

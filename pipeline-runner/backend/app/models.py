@@ -50,6 +50,18 @@ class RunIn(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     stop_on_failure: bool = True
 
+    @model_validator(mode="after")
+    def _report_context(self):
+        from .report_context import has_report_context, normalize_input, resolve_context
+        if not has_report_context(self.input_data, self.params):
+            return self
+        locale = resolve_context(self.input_data, self.params)
+        if self.input_data is not None:
+            normalize_input(self.input_data, self.params)
+        elif locale["country_code"] != "FI" or locale["currency"] != "EUR":
+            raise ValueError("Foreign demos require supplied normalized input_data")
+        return self
+
 
 class AccessKeyIn(BaseModel):
     label: str = Field(min_length=1, max_length=200)

@@ -10,6 +10,7 @@ A row with no data in any year is dropped rather than shown empty. The balance
 sheet is a selection of the export's rows, not a balancing statement — hence
 "päärivit"; vastaavaa does not foot to vastattavaa here.
 """
+from .report_i18n import t as _t, tf as _tf, localized_input, current, number
 
 INCOME_ROWS = [
     ("Liikevaihto", "net_sales"),
@@ -51,10 +52,7 @@ def _is_num(x):
 
 
 def _fmt_num(v):
-    if not _is_num(v):
-        return ""
-    sign = "-" if v < 0 else ""
-    return f"{sign}{round(abs(v)):,.0f}".replace(",", " ")
+    return number(v) if _is_num(v) else ""
 
 
 def _rows(block, spec, n):
@@ -64,7 +62,7 @@ def _rows(block, spec, n):
         values = values if isinstance(values, list) else []
         cells = [_fmt_num(values[i] if i < len(values) else None) for i in range(n)]
         if any(cells):
-            out.append([label] + cells)
+            out.append([_t(label)] + cells)
     return out
 
 
@@ -84,8 +82,8 @@ def _statement_blocks(source, suffix, title_suffix, id_suffix):
     n = len(years)
     blocks = []
     for spec, key, title, table_id in (
-        (INCOME_ROWS, "income_statement", "Tuloslaskelma", "deterministic_income_statement"),
-        (BALANCE_ROWS, "balance_sheet", "Taseen päärivit", "deterministic_balance_sheet"),
+        (INCOME_ROWS, "income_statement", _t('Tuloslaskelma'), "deterministic_income_statement"),
+        (BALANCE_ROWS, "balance_sheet", _t('Taseen päärivit'), "deterministic_balance_sheet"),
     ):
         # Runs exported before 2026-08-27 have no forecast statements, but
         # their forecast block carries net_sales / ebitda / ebit / equity /
@@ -93,33 +91,34 @@ def _statement_blocks(source, suffix, title_suffix, id_suffix):
         # gets a per-year forecast table, just a shorter one.
         rows = _rows(source.get(key) or source, spec, n)
         shown, rows = _drop_empty_years(years, rows)
-        columns = ["Erä"] + [f"{y}{suffix}" for y in shown]
+        columns = [_t('Erä')] + [f"{y}{suffix}" for y in shown]
         if rows:
             blocks.append({
                 "type": "table",
                 "table_id": table_id + id_suffix,
                 "title": title + title_suffix,
-                "unit": "tEUR",
+                "unit": _t('tEUR'),
                 "columns": columns,
                 "rows": rows,
             })
     return blocks
 
 
+@localized_input(0)
 def build_financial_statement_blocks(input_data):
     """Blocks per section id: the actual years belong to section 5 (history),
     the forecast years (marked "e") to section 6 (ennusteet)."""
     data = input_data or {}
     return {
         "5": _statement_blocks(data.get("actuals"), "", "", ""),
-        "6": _statement_blocks(data.get("forecast"), "e", " (ennuste)", "_forecast"),
+        "6": _statement_blocks(data.get("forecast"), "e", _t(' (ennuste)'), "_forecast"),
     }
 
 
 # ------------------------------------------------------------ forecast origin
 
 def _pct(v):
-    return f"{v:.1f}".replace(".", ",") + " %"
+    return number(v, 1) + " %"
 
 
 def _last_num(xs):
@@ -129,6 +128,7 @@ def _last_num(xs):
     return None
 
 
+@localized_input(0)
 def build_forecast_origin_block(input_data, params=None):
     """One deterministic callout at the top of §6 saying where the forecast
     comes from and why the margin moves the way it does.
@@ -153,17 +153,21 @@ def build_forecast_origin_block(input_data, params=None):
     p = params or {}
     edited = bool(p.get("forecast_edits") or p.get("forecast_changes"))
     text_id = "deterministic_forecast_origin"
+    if current().country != "FI":
+        return {
+            "type": "callout", "variant": "info", "table_id": text_id,
+            "title": _t("Mistä ennuste tulee"),
+            "text": _tf(
+                "Luvut ovat tallennettu lähde-ennuste. Saatavilla oleva ennustejakso on {0}–{1}. "
+                "EBIT-marginaali on jakson alussa {2} ja lopussa {3}.",
+                y0, yn, _pct(m[0]), _pct(m[-1])),
+        }
     if edited:
         return {
             "type": "callout", "variant": "info", "table_id": text_id,
-            "title": "Mistä ennuste tulee",
+            "title": _t('Mistä ennuste tulee'),
             "text": (
-                "Liikevaihto- ja EBIT-ennuste on tilaajan antama: Valuatumin "
-                "perusuraa on muokattu tilaajan omilla luvuilla, ja laskentamoottori "
-                "on johtanut niistä muut rivit (kassavirta, tase, verot). "
-                f"Viimeisen ennustevuoden {yn} EBIT-marginaali {_pct(m[-1])} jatkuu "
-                "terminaalissa muuttumattomana, joten se painaa arvossa enemmän kuin "
-                "yksikään muu yksittäinen vuosi."
+                _tf('Liikevaihto- ja EBIT-ennuste on tilaajan antama: Valuatumin perusuraa on muokattu tilaajan omilla luvuilla, ja laskentamoottori on johtanut niistä muut rivit (kassavirta, tase, verot). Viimeisen ennustevuoden {0} EBIT-marginaali {1} jatkuu terminaalissa muuttumattomana, joten se painaa arvossa enemmän kuin yksikään muu yksittäinen vuosi.', f'{yn}', f'{_pct(m[-1])}')
             ),
         }
 
@@ -189,30 +193,20 @@ def build_forecast_origin_block(input_data, params=None):
             cap = (pairs[0][1], pairs[-1][1])
 
     parts = [
-        "Ennuste on Valuatumin laskentamoottorin deterministinen perusura — ei "
-        "tekoälyn eikä yhtiön johdon näkemys."
+        _t('Ennuste on Valuatumin laskentamoottorin deterministinen perusura — ei tekoälyn eikä yhtiön johdon näkemys.')
     ]
     if last_act:
-        parts.append(f"Lähtökohta on viimeisin toteutunut tilikausi {last_act[0]} "
-                     f"(EBIT-% {_pct(last_act[1])}).")
+        parts.append(_tf('Lähtökohta on viimeisin toteutunut tilikausi {0} (EBIT-% {1}).', f'{last_act[0]}', f'{_pct(last_act[1])}'))
     steps = [b - a for a, b in zip(m, m[1:])]
     linear = (max(steps) - min(steps)) < 0.5 and all((x < 0) == (steps[0] < 0) for x in steps)
-    verb = ("laskee" if m[-1] < m[0] else "nousee") + (" tasaisesti" if linear else "")
-    parts.append(f"EBIT-marginaali {verb} {_pct(m[0])} ({y0}) → {_pct(m[-1])} ({yn}), "
-                 f"ja viimeisen vuoden taso jatkuu terminaalissa muuttumattomana.")
+    verb = (_t('laskee') if m[-1] < m[0] else _t('nousee')) + (_t(' tasaisesti') if linear else "")
+    parts.append(_tf('EBIT-marginaali {0} {1} ({2}) → {3} ({4}), ja viimeisen vuoden taso jatkuu terminaalissa muuttumattomana.', f'{verb}', f'{_pct(m[0])}', f'{y0}', f'{_pct(m[-1])}', f'{yn}'))
     if _is_num(wacc):
-        parts.append("Uran taustalla on mallin yleinen oletus, että pääoman tuotto lähestyy "
-                     f"pääoman kustannusta (WACC {_pct(wacc)}): ylituotto ei säily "
-                     "ikuisesti, koska kilpailu syö sen — eikä alituotto jää pysyväksi.")
+        parts.append(_tf('Uran taustalla on mallin yleinen oletus, että pääoman tuotto lähestyy pääoman kustannusta (WACC {0}): ylituotto ei säily ikuisesti, koska kilpailu syö sen — eikä alituotto jää pysyväksi.', f'{_pct(wacc)}'))
     if roic:
-        parts.append(f"Sijoitetun pääoman tuotto (NOPLAT / pääomakanta) on ennusteen alussa "
-                     f"{_pct(roic[0])} ja lopussa {_pct(roic[1])}.")
+        parts.append(_tf('Sijoitetun pääoman tuotto (NOPLAT / pääomakanta) on ennusteen alussa {0} ja lopussa {1}.', f'{_pct(roic[0])}', f'{_pct(roic[1])}'))
         if _is_num(wacc) and roic[1] < wacc - 1.0 and cap and cap[1] > cap[0] * 1.2:
-            parts.append("Ura päätyy pääoman kustannuksen alapuolelle, koska mallin "
-                         f"pääomakanta kasvaa ennustejaksolla {_fmt_num(cap[0])} → "
-                         f"{_fmt_num(cap[1])} tEUR kertyvistä voittovaroista eikä "
-                         "marginaaliuraa lasketa uudelleen kasvaneelle pääomalle.")
-    parts.append("Tämä on mallin oletus, ei yhtiökohtainen näkemys: sen voi korvata omalla "
-                 "ennusteella, jolloin oma viimeisen vuoden marginaali jatkuu terminaalissa.")
+            parts.append(_tf('Ura päätyy pääoman kustannuksen alapuolelle, koska mallin pääomakanta kasvaa ennustejaksolla {0} → {1} tEUR kertyvistä voittovaroista eikä marginaaliuraa lasketa uudelleen kasvaneelle pääomalle.', f'{_fmt_num(cap[0])}', f'{_fmt_num(cap[1])}'))
+    parts.append(_t('Tämä on mallin oletus, ei yhtiökohtainen näkemys: sen voi korvata omalla ennusteella, jolloin oma viimeisen vuoden marginaali jatkuu terminaalissa.'))
     return {"type": "callout", "variant": "info", "table_id": text_id,
-            "title": "Mistä ennuste tulee", "text": " ".join(parts)}
+            "title": _t('Mistä ennuste tulee'), "text": " ".join(parts)}

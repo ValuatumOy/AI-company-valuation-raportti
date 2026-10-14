@@ -10,6 +10,7 @@ engine's own given outputs (cumulative_discounted_fcff, equity_value_before_
 floor) rather than re-derived from formula. This guarantees the center cell
 of each matrix reproduces the reported base-case equity value exactly.
 """
+from .report_i18n import t as _t, tf as _tf, localized_input, current, number
 import math
 
 _WACC_STEPS_PP = [-2.0, -1.0, 0.0, 1.0, 2.0]
@@ -26,11 +27,11 @@ def _fmt_pct(v):
     s = f"{v:.1f}"
     if s.endswith(".0"):
         s = s[:-2]
-    return s.replace(".", ",") + " %"
+    return (s if current().language == "en" else s.replace(".", ",")) + " %"
 
 
 def _fmt_teur(v):
-    return f"{round(v):,}".replace(",", " ") + " tEUR"
+    return number(v) + _t(' tEUR')
 
 
 def _year_exponents(fcff, discounted_fcff, wacc_pct):
@@ -100,9 +101,8 @@ def _wacc_growth_matrix(fcff, disc, cum, equity_gt, wacc_base, bridge_adj):
 
     return {
         "type": "chart", "chart_id": "wacc_growth_sensitivity",
-        "title": "Herkkyys: WACC x pitkän aikavälin kasvu (oman pääoman arvo, tEUR) "
-                 "— likimääräinen malli, kalibroitu konservatiivisen perusskenaarion lukuihin",
-        "chart_type": "heatmap_or_matrix", "unit": "tEUR",
+        "title": _t('Herkkyys: WACC x pitkän aikavälin kasvu (oman pääoman arvo, tEUR) — likimääräinen malli, kalibroitu konservatiivisen perusskenaarion lukuihin'),
+        "chart_type": "heatmap_or_matrix", "unit": _t('tEUR'),
         "x_axis": [_fmt_pct(g) for g in growth_values],
         "series": series, "status": "available",
     }
@@ -132,9 +132,8 @@ def _revenue_margin_matrix(pv_forecast_base, pv_terminal_base, bridge_adj,
         series.append({"name": _fmt_teur(rev), "values": row})
     return {
         "type": "chart", "chart_id": "revenue_ebit_sensitivity",
-        "title": "Herkkyys: liikevaihto x EBIT-% (oman pääoman arvo, tEUR) "
-                 "— likimääräinen malli, olettaa kassavirran skaalautuvan suoraan EBIT:n mukana",
-        "chart_type": "heatmap_or_matrix", "unit": "tEUR",
+        "title": _t('Herkkyys: liikevaihto x EBIT-% (oman pääoman arvo, tEUR) — likimääräinen malli, olettaa kassavirran skaalautuvan suoraan EBIT:n mukana'),
+        "chart_type": "heatmap_or_matrix", "unit": _t('tEUR'),
         "x_axis": [_fmt_pct(m) for m in margin_values],
         "series": series, "status": "available",
     }
@@ -148,6 +147,7 @@ def _historical_best_margin(input_data):
     return max(margins) if margins else None
 
 
+@localized_input(0)
 def build_terminal_margin_range_blocks(input_data):
     """Show the base-case equity value against an alternative computed at the
     company's best HISTORICALLY ACHIEVED EBIT margin, so a terminal assumption
@@ -187,29 +187,24 @@ def build_terminal_margin_range_blocks(input_data):
         {
             "type": "table",
             "table_id": "deterministic_terminal_margin_range",
-            "title": "Oman pääoman arvo vaihtoehtoisella terminaali-EBIT-marginaalilla",
-            "unit": "tEUR",
-            "columns": ["Terminaali-EBIT-%", "Oman pääoman arvo"],
+            "title": _t('Oman pääoman arvo vaihtoehtoisella terminaali-EBIT-marginaalilla'),
+            "unit": _t('tEUR'),
+            "columns": [_t('Terminaali-EBIT-%'), _t('Oman pääoman arvo')],
             "rows": [
-                [f"{_fmt_pct(base_margin)} (konservatiivinen perusskenaario)", _fmt_teur(equity_gt)],
-                [f"{_fmt_pct(alt_margin)} (paras toteutunut)", _fmt_teur(alt_equity)],
+                [_tf('{0} (konservatiivinen perusskenaario)', f'{_fmt_pct(base_margin)}'), _fmt_teur(equity_gt)],
+                [_tf('{0} (paras toteutunut)', f'{_fmt_pct(alt_margin)}'), _fmt_teur(alt_equity)],
             ],
         },
         {
             "type": "paragraph",
             "text": (
-                f"Konservatiivinen perusskenaario olettaa terminaalivuoden EBIT-marginaaliksi "
-                f"{_fmt_pct(base_margin)}. Jos terminaalimarginaali jää yhtiön "
-                f"parhaaseen toteutuneeseen tasoon {_fmt_pct(alt_margin)}, DCF:n "
-                f"oman pääoman arvo on likimäärin {_fmt_teur(alt_equity)} — arvon "
-                f"herkkyys terminaalioletukselle on siis suuri. Laskelma on "
-                f"likimääräinen: se skaalaa vain terminaaliarvon marginaalin "
-                f"suhteessa eikä muuta ennustejakson kassavirtoja."
+                _tf('Konservatiivinen perusskenaario olettaa terminaalivuoden EBIT-marginaaliksi {0}. Jos terminaalimarginaali jää yhtiön parhaaseen toteutuneeseen tasoon {1}, DCF:n oman pääoman arvo on likimäärin {2} — arvon herkkyys terminaalioletukselle on siis suuri. Laskelma on likimääräinen: se skaalaa vain terminaaliarvon marginaalin suhteessa eikä muuta ennustejakson kassavirtoja.', f'{_fmt_pct(base_margin)}', f'{_fmt_pct(alt_margin)}', f'{_fmt_teur(alt_equity)}')
             ),
         },
     ]
 
 
+@localized_input(0)
 def build_sensitivity_blocks(input_data):
     """Returns a list of ready-to-render `chart` blocks (possibly empty if the
     given data doesn't support the calculation)."""
