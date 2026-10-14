@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from app import assemble, dcf_detail, financials, headcount_efficiency, render
+from app import assemble, dcf_detail, financials, headcount_efficiency, render, valuation_equivalence
 from app.report_i18n import current, report_context
 
 
@@ -71,7 +71,7 @@ def test_english_assembly_keeps_numbers_and_localizes_all_injected_blocks(curren
     assert '<html lang="en">' in text
     assert "Odotusarvo &amp; Sons &lt;Test&gt;" in text
     assert "Forecast origin" in text
-    assert "Primary valuation method and reconciliation" in text
+    assert ("Primary valuation method and reconciliation" if country == "FI" else "Source method values") in text
     assert "Where discounted FCFF comes from" in text
     assert "Discount rate and credit risk" in text
     assert "Annual EVA calculation" in text
@@ -323,3 +323,193 @@ def test_english_restater_does_not_match_company_name_substrings():
     with report_context(report):
         assert render._fix_restated_figures(report, {"expected_value": 5000, "range_low": 2000, "range_high": 8000}) == []
     assert paragraph["text"] == text
+
+
+def _unpriced_scenarios_report():
+    report = assemble.assemble(_run("DKK", "DK"))
+    report["cover"] = {"headline_value": "Not reliably determinable from the available data",
+                       "base_case_value": "13 357 695 tDKK"}
+    report["expected_value"] = {"value": None, "unit": "tDKK"}
+    report["machine_readable"]["base_case_value_before_floor"] = 13357695
+    report["machine_readable"]["scenarios"] = [
+        {"name": "Pessimistic", "value_teur": None, "probability_pct": 20},
+        {"name": "Conservative", "value_teur": 13357695, "probability_pct": 60},
+        {"name": "Optimistic", "value_teur": None, "probability_pct": 20}]
+    report["sections"][0]["blocks"] = [{"type": "metric_cards", "cards": [
+        {"label": "Scenario expected value", "value": "Not reliably determinable from the available data", "emphasis": True},
+        {"label": "Conservative base case", "value": "13 357 695 tDKK"},
+        {"label": "Scenario range", "value": "Not quantified"}]}]
+    return report
+
+
+def test_missing_scenario_prices_never_turn_base_case_into_expected_value_or_range():
+    report = _unpriced_scenarios_report()
+    with report_context(report):
+        canonical = render._canonical_figures(report, render._derive(report))
+        assert "expected_value" not in canonical and "range_low" not in canonical
+    text = render.render_html(report)
+    cover = text[text.index('<section class="page cover">'):text.index('</section>')]
+    assert "Equity value · conservative base case" in cover
+    assert "13.36 bn DKK" in cover
+    assert "Scenario expected value and range are not quantified" in cover
+    summary = text[text.index('id="sec-1"'):text.index('id="sec-2"')]
+    assert summary.index("Conservative base case") < summary.index("Scenario expected value")
+    assert "Not reliably determinable from the available data" in summary
+    assert "Not quantified" in summary
+
+
+def test_section_reference_resolution_is_idempotent_across_html_then_pdf_render_passes():
+    report = assemble.assemble(_run())
+    report["sections"][0]["blocks"] = [{"type": "paragraph", "text": "See section 9 and section 11. Scoring is in section 7."}]
+    first = render.render_html(report)
+    second = render.render_html(report)
+    assert first == second
+    assert 'class="secref">section 5</a>' in second
+    assert 'class="secref">section 7</a>' in second
+    assert 'href="#sec-4" class="secref">section 4</a>' in second
+    assert "9section" not in render._strip_tags(second)
+
+
+def test_english_compound_and_table_references_follow_final_section_order_idempotently():
+    report = assemble.assemble(_run())
+    ids = ["1", "3", "4", "5", "6", "8", "9", "10", "11", "12", "13", "14", "2", "16", "17"]
+    report["sections"] = [{"id": sid, "title": "Section " + sid, "blocks": []} for sid in ids]
+    report["sections"][0]["blocks"] = [
+        {"type": "paragraph", "text": "See sections 9 and 10 for DCF and EVA; input conventions are in section 2. Revenue was 215,938,000 tUSD. See section 15."},
+        {"type": "table", "columns": ["Issue", "Reference"], "rows": [["Discounting", "See section 2"], ["Methods", "Sections 9, 10 and 11"]]},
+        {"type": "callout", "items": ["See sections 9/10."], "paragraphs": ["See section 2."]},
+    ]
+    first = render.render_html(report)
+    assert first == render.render_html(report)
+    assert 'href="#sec-7" class="secref">sections 7</a> and <a href="#sec-8" class="secref">8</a>' in first
+    assert '<td style="text-align:left">See <a href="#sec-13" class="secref">section 13</a></td>' in first
+    assert 'Sections 7</a>, <a href="#sec-8" class="secref">8</a> and <a href="#sec-9" class="secref">9</a>' in first
+    assert "215,938,000 tUSD" in first and "See section 15" in first
+    assert "\x00" not in first
+
+
+@pytest.mark.parametrize("equity", [3433082299.37939, 3421816443.38729])
+def test_foreign_eva_waterfall_never_claims_equivalence_from_close_or_equal_values(equity):
+    report = assemble.assemble(_run())
+    report["_eva_waterfall"]["equity"] = equity
+    report["_eva_waterfall"]["dcf_equity"] = 3421816443.38729
+    with report_context(report):
+        figure = render._eva_waterfall_html(report)
+    assert "Separate source-model values; equivalence has not been established." in figure
+    assert "report DCF 3,421.82 bn USD" in figure
+    assert ("Source EVA 3,433.08 bn USD" if equity != 3421816443.38729 else "Source EVA 3,421.82 bn USD") in figure
+    assert "equals the report" not in figure
+    assert "a separate source-model value" in render.render_html(report)
+    assert "an separate" not in render.render_html(report)
+
+
+def test_foreign_large_statements_and_combo_chart_scale_display_without_changing_data():
+    report = assemble.assemble(_run())
+    table = {"type": "table", "table_id": "deterministic_balance_sheet_forecast", "unit": "tUSD", "title": "Forecast assets", "columns": ["Item"] + [str(y) + "e" for y in range(2027, 2037)], "rows": [["Total assets"] + [1206126232] * 10]}
+    chart = {"type": "chart", "chart_type": "bar_line", "unit": "tUSD / %", "title": "Revenue and EBIT margin", "x_axis": ["2025", "2026"], "series": [{"type": "bar", "name": "Revenue", "values": [130497000, 215938000]}, {"type": "line", "name": "EBIT margin", "values": [62.42, 60.38]}]}
+    before = copy.deepcopy((table, chart))
+    with report_context(report):
+        table_html = render._block_table(table)
+        chart_html = render._block_chart(chart)
+        expected_svg = render._svg_combo(chart["x_axis"], [130.497, 215.938], [62.42, 60.38], bar_name="Revenue", line_name="EBIT margin")
+    assert "(bn USD)" in table_html and table_html.count("1,206.13") == 10
+    assert "1,206,126,232" not in table_html
+    assert "(bn USD / %)" in chart_html and expected_svg in chart_html
+    assert (table, chart) == before
+
+
+def test_example_badge_and_all_value_flow_divider_captions_are_english():
+    report = _unpriced_scenarios_report()
+    report["meta"]["is_sample_report"] = True
+    report["_value_flow"] = {"ev_teur": 15257946, "equity_teur": 13357695,
+                             "bridge_delta_teur": -1900251,
+                             "bridge_components_teur": {"interest_bearing_debt": -21372,
+                                                        "cash": 76233, "prev_year_dividends": -1955112}}
+    text = render.render_html(report)
+    assert "Example report" in text and ">Part</div>" in text
+    assert "Dividend adjustment" in text
+    assert "0.05 bn DKK" in text and "-1.96 bn DKK" in text
+    for fi in (">Osa<", "Diskonttaus nykyhetkeen", "rahoitusrakenteen vaikutus", "omistajien osuus", ">toteutunut<", "summa "):
+        assert fi not in text
+
+
+def test_foreign_source_eva_is_preserved_and_never_replaced_by_dcf_equivalence():
+    run = _run("DKK", "DK")
+    data = run["results"][0]["parsed_json"]
+    data["valuation_engine"]["dcf"]["equity_value_before_floor"] = 13357695
+    data["valuation_engine"]["eva"]["equity_value_before_floor_raw"] = 6439515
+    wrapper = run["results"][-1]["parsed_json"]
+    wrapper["_scoring"] = {"method_scoring": [
+        {"method": "DCF", "weight_pct": 100, "status": "accepted"},
+        {"method": "EVA", "weight_pct": 0, "status": "reference"}]}
+    report = assemble.assemble(run)
+    assert report["_scoring"]["method_scoring"][1]["value_teur"] == 6439515
+    method_block = next(b for s in report["sections"] for b in s["blocks"]
+                        if b.get("table_id") == "deterministic_valuation_source_methods")
+    assert method_block["rows"][1][1] == "6,439,515"
+    text = render.render_html(report)
+    assert "EVA is not replaced with the DCF value" in text
+    assert "both produce the same equity value" not in text
+    assert "EVA demonstrates the internal consistency" not in text
+    # A re-assembly refreshes its own source-method blocks without duplication.
+    valuation_equivalence.normalize_report(report, data)
+    assert sum(b.get("table_id") == "deterministic_valuation_source_methods"
+               for s in report["sections"] for b in s["blocks"]) == 1
+
+
+def test_foreign_eva_table_includes_signed_dividends_without_inferred_adjustments():
+    run = _run("DKK", "DK")
+    eva = run["results"][0]["parsed_json"]["valuation_engine"]["eva"]
+    eva["bridge"]["prev_year_dividends"] = -50
+    eva["equity_value_before_floor_raw"] = 4750
+    report = assemble.assemble(run)
+    block = next(b for s in report["sections"] for b in s["blocks"]
+                 if b.get("table_id") == "deterministic_eva_reconciliation")
+    assert ["Dividend adjustment", "-50"] in block["rows"]
+    assert ["Component total", "4,750"] in block["rows"]
+    assert report["_eva_waterfall"]["equity"] == 4750
+    assert report["_eva_waterfall"]["other"] == -50
+
+
+def test_foreign_eva_uses_full_source_bridge_aggregate_when_breakdown_is_incomplete():
+    run = _run("DKK", "DK")
+    eva = run["results"][0]["parsed_json"]["valuation_engine"]["eva"]
+    eva["additional"] = -250
+    eva["equity_value_before_floor_raw"] = 4750
+    report = assemble.assemble(run)
+    block = next(b for s in report["sections"] for b in s["blocks"]
+                 if b.get("table_id") == "deterministic_eva_reconciliation")
+    assert ["Source financing and other adjustments", "-250"] in block["rows"]
+    assert ["Component total", "4,750"] in block["rows"]
+    assert not any(r[0] in ("− Interest-bearing debt", "+ Cash", "Dividend adjustment") for r in block["rows"])
+    assert report["_eva_waterfall"]["bridge_aggregate"] is True
+    assert report["_eva_waterfall"]["other"] == -250
+    assert report["_eva_waterfall"]["debt"] is None
+
+
+@pytest.mark.parametrize("schedule", [[10, 20], [10, None], None])
+def test_foreign_eva_derived_capital_uses_matching_annual_wacc_or_is_omitted(schedule):
+    run = _run("USD", "US")
+    wp = run["results"][0]["parsed_json"]["valuation_engine"]["wacc_parameters"]
+    wp["years"] = [2026, 2027]
+    wp["wacc_pct_by_year"] = schedule
+    report = assemble.assemble(run)
+    table = next(b for s in report["sections"] for b in s["blocks"]
+                 if b.get("table_id") == "deterministic_eva_years")
+    capital = next((r for r in table["rows"] if r[0] == "Invested capital (capital charge base)"), None)
+    if schedule == [10, 20]:
+        assert capital[1:3] == ["1,000", "500"]
+    else:
+        assert capital is None
+
+
+def test_foreign_large_cap_eva_year_table_scales_source_currency_without_fx():
+    run = _run("USD", "US")
+    eva = run["results"][0]["parsed_json"]["valuation_engine"]["eva"]
+    for key in ("noplat", "cost_of_capital", "eva", "discounted_eva", "cumulative_discounted_eva"):
+        eva[key] = [v * 1_000_000 for v in eva[key]]
+    eva["invested_capital"] *= 1_000_000
+    report = assemble.assemble(run)
+    table = next(b for s in report["sections"] for b in s["blocks"] if b.get("table_id") == "deterministic_eva_years")
+    assert table["unit"] == "bn USD"
+    assert table["rows"][0][1:3] == ["264.00", "384.00"]

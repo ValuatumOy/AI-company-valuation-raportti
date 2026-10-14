@@ -5,7 +5,7 @@ forecast, WACC, invested-capital roll-forward and terminal assumptions are used.
 The report should not double-count DCF and EVA as two independent weighted
 methods in that case.
 """
-from .report_i18n import t as _t, tf as _tf, localized_input, current, number
+from .report_i18n import t as _t, tf as _tf, localized_input, current, number, money_scale
 
 
 def _is_num(x):
@@ -173,7 +173,7 @@ def _num(x):
     return x if _is_num(x) else None
 
 
-def _normalize_scoring(scoring, value):
+def _normalize_scoring(scoring, value, source_eva=None, independent=False):
     if not isinstance(scoring, dict) or not _is_num(value):
         return scoring
     methods = [m for m in scoring.get("method_scoring") or [] if isinstance(m, dict)]
@@ -197,8 +197,9 @@ def _normalize_scoring(scoring, value):
         m["method"] = "EVA"
         m["status"] = "reference" if current().language == "en" else "viite"
         m["weight_pct"] = 0
-        m["value_teur"] = value
+        m["value_teur"] = source_eva if independent else value
         m["rationale"] = (
+            _t("Erillinen lähdemallin EVA-arvo; sitä ei painoteta DCF-perusarvoon.") if independent else
             _t('Täsmäytysnäkökulma samaan ennusteeseen ja WACCiin; ei erillinen painotettava menetelmä.')
         )
 
@@ -221,7 +222,7 @@ def _normalize_scoring(scoring, value):
         if mv is not None and mw is not None:
             weighted += mv * mw / 100.0
     scoring["weighted_base_case_teur"] = round(weighted, 2)
-    scoring["weights_source"] = "DCF/EVA equivalence" if current().language == "en" else "DCF/EVA ekvivalenssi"
+    scoring["weights_source"] = _t("DCF on ensisijainen; EVA on lähdemallin vertailuarvo.") if independent else ("DCF/EVA equivalence" if current().language == "en" else "DCF/EVA ekvivalenssi")
     return scoring
 
 
@@ -267,6 +268,34 @@ def _is_old_method_paragraph(block):
 
 def _normalize_section8(sections, input_data, value):
     if not _is_num(value):
+        return
+    if current().country != "FI":
+        raw = (((input_data or {}).get("valuation_engine") or {}).get("eva") or {}).get("equity_value_before_floor_raw")
+        blocks = [
+            {"type": "paragraph", "text": _t("DCF on raportin ensisijainen menetelmä. Lähteen EVA-arvo esitetään erillisenä malliarvona. Lähdemallien oletusten yhtäläisyyttä tai arvojen täsmäytystä ei ole vahvistettu.")},
+            {"type": "table", "table_id": "deterministic_valuation_source_methods",
+             "title": _t("Lähdemallien arvot"), "unit": current().unit,
+             "columns": [_t("Menetelmä"), _t("Arvo"), _t("Rooli")],
+             "rows": [["DCF", _fmt_num(value), _t("Päämenetelmä")],
+                      ["EVA", _fmt_num(raw) if _is_num(raw) else _t("ei saatavilla lähdedatassa"),
+                       _t("Erillinen lähdemallin vertailuarvo")]]},
+        ]
+        if _is_num(raw) and abs(raw - value) > max(1.0, 0.005 * abs(value)):
+            blocks.append({"type": "callout", "variant": "warning", "title": _t("EVA- ja DCF-mallin ero"),
+                           "text": _tf("Lähteen EVA-arvo on {0} {2} ja DCF-arvo {1} {2}. Ero säilytetään; EVA-arvoa ei korvata DCF-arvolla.", _fmt_num(raw), _fmt_num(value), current().unit)})
+        for block in blocks:
+            block["_source_method_comparison"] = True
+        stale_text = {_t("DCF ja EVA ovat sama arvo kahdella eri tavalla laskettuna. DCF diskonttaa yhtiön tuottaman vapaan kassavirran pääoman tuottovaatimuksella (WACC). EVA mittaa saman asian toisin: paljonko voittoa jää sen jälkeen, kun sitoutuneelle pääomalle on veloitettu sama tuottovaatimus. Koska molemmat nojaavat samaan ennusteeseen, samaan WACCiin ja samaan pääomapohjaan, ne antavat aina saman lopputuloksen — alla ne antavat saman oman pääoman arvon."),
+                      _t("DCF ja EVA perustuvat samaan ennustepolkuun, WACCiin ja velka-/kassasiltaan. Näillä samoilla oletuksilla EVA ei ole toinen riippumaton arvonmääritysmenetelmä, vaan DCF:n laskennallinen täsmäytysnäkökulma.")}
+        for sec in sections:
+            if isinstance(sec, dict) and str(sec.get("id")) == "8":
+                kept = [b for b in sec.get("blocks") or [] if not (isinstance(b, dict) and
+                        (b.get("_source_method_comparison") or _is_old_weight_table(b) or _is_old_method_chart(b)
+                         or b.get("table_id") == "deterministic_dcf_eva_equivalence"
+                         or (isinstance(b.get("text"), str) and b["text"] in stale_text)
+                         or b.get("title") == _t("Menetelmien ekvivalenssi")))]
+                sec["blocks"] = blocks + kept
+                return
         return
     new_blocks = [
         {
@@ -367,14 +396,28 @@ def _normalize_section10(sections, input_data, value):
                  _fmt_num(pv_term) if _is_num(pv_term) else _t('ei saatavilla lähdedatassa')])
     if _is_num(cap_change):
         rows.append([_t('Pääomapohjan muutoksen nykyarvo'), _fmt_num(cap_change)])
+    bridge_row_start = len(rows)
     if _is_num(debt):
         rows.append([_t('− Korolliset velat'), _fmt_num(debt)])
     if _is_num(cash):
         rows.append([_t('+ Kassa'), _fmt_num(cash)])
+    extra_bridge = []
+    if current().country != "FI":
+        for key, label in (("associated_market_value", "Osakkuusyhtiöt / muut erät"),
+                           ("minority_market_value", "Vähemmistöosuudet"),
+                           ("prev_year_dividends", "Edellisen vuoden osingot")):
+            if _is_num(bridge.get(key)):
+                extra_bridge.append(bridge[key])
+                rows.append([_t(label), _fmt_num(bridge[key])])
+    bridge_total = _sum_nums([debt, cash]) + sum(extra_bridge)
+    additional = eva.get("additional")
+    if current().country != "FI" and _is_num(additional) and abs(additional - bridge_total) > 1e-6:
+        rows[bridge_row_start:] = [[_t("Lähteen rahoitus- ja muut oikaisut"), _fmt_num(additional)]]
+        bridge_total = additional
     total = (
         (ic if _is_num(ic) else 0) + pv_exp + (pv_term if _is_num(pv_term) else 0)
         + (cap_change if _is_num(cap_change) else 0)
-        + (debt if _is_num(debt) else 0) + (cash if _is_num(cash) else 0)
+        + bridge_total
     )
     # Only claim a reconciliation when the components actually add up to the
     # EVA engine's own equity value. If a field this code does not model shows
@@ -382,10 +425,10 @@ def _normalize_section10(sections, input_data, value):
     # the sum silently drifts — so verify per run instead of trusting the shape.
     complete = (
         _is_num(ic) and _is_num(pv_term) and _is_num(raw)
-        and abs(total - raw) <= max(1.0, 0.005 * abs(raw))
+        and abs(total - raw) <= (1.0 if current().country != "FI" else max(1.0, 0.005 * abs(raw)))
     )
     if complete:
-        rows.append(["Komponenttien summa", _fmt_num(total)])
+        rows.append([_t("Komponenttien summa"), _fmt_num(total)])
     if _is_num(raw):
         rows.append([_t('EVA-moottorin oma arvo ennen normalisointia'), _fmt_num(raw)])
     rows.append([_t('Oman pääoman arvo (DCF, käytetty raportissa)'), _fmt_num(value)])
@@ -398,6 +441,8 @@ def _normalize_section10(sections, input_data, value):
         intro = (
             _t('EVA-erittelyn komponentit eivät täsmää EVA-moottorin omaan arvoon tai jokin komponentti puuttuu lähdedatasta, joten täsmäytyssummaa ei esitetä. Raportin arvostus perustuu DCF-menetelmään; EVA on tässä raportissa DCF:n rinnakkaisnäkymä, ei itsenäinen menetelmäarvo.')
         )
+    if current().country != "FI":
+        intro = _t("EVA-erät esitetään lähdemallin arvoina. Summa esitetään vain, jos erät täsmäävät lähteen omaan EVA-arvoon. Raportin ensisijainen arvonmääritys perustuu DCF:ään; mallien vastaavuutta ei oleteta.")
     diff_note = None
     if _is_num(raw) and abs(raw - value) > max(1.0, 0.01 * abs(value)):
         diff_note = {
@@ -436,6 +481,16 @@ def _normalize_section10(sections, input_data, value):
             return
 
 
+def _year_wacc(parameters, years):
+    source_years = parameters.get("years") or []
+    rates = parameters.get("wacc_pct_by_year") or []
+    if len(source_years) != len(rates) or len(set(source_years)) != len(source_years):
+        return None
+    by_year = dict(zip(source_years, rates))
+    matched = [by_year.get(y) for y in years]
+    return matched if all(_is_num(v) and v > 0 for v in matched) else None
+
+
 def _eva_year_blocks(input_data):
     """Year-by-year EVA table, the twin of the DCF FCFF table, so every figure
     in the reconciliation can be traced to its year. The capital row is the
@@ -450,21 +505,36 @@ def _eva_year_blocks(input_data):
     if not n or any(len(v) != n or not all(_is_num(x) for x in v)
                     for v in rows_in.values()):
         return []
-    wacc = (ve.get("wacc_parameters") or {}).get("wacc_pct")
+    parameters = ve.get("wacc_parameters") or {}
+    wacc = parameters.get("wacc_pct")
     disc = rows_in["discounted_eva"]
     cum0 = _first_num(eva.get("cumulative_discounted_eva"))
     term = cum0 - sum(disc) if _is_num(cum0) else None
     has_t = _is_num(term)
+    divisor, unit, decimals = 1.0, current().unit, 0
+    if current().country != "FI" and current().language == "en":
+        magnitude = max([abs(v) for vals in rows_in.values() for v in vals]
+                        + [abs(v) for v in (cum0, eva.get("invested_capital")) if _is_num(v)], default=0)
+        if magnitude >= 1_000_000:
+            divisor, unit, decimals = money_scale(magnitude)
+
+    def cell(v):
+        return number(v / divisor, decimals) if _is_num(v) else ""
 
     def row(label, vals, t=None):
-        cells = [_fmt_num(v) for v in vals]
+        cells = [cell(v) for v in vals]
         if has_t:
-            cells.append(_fmt_num(t) if _is_num(t) else "")
+            cells.append(cell(t))
         return [label] + cells
 
     rows = [row("NOPLAT", rows_in["noplat"])]
     capital = None
-    if _is_num(wacc) and wacc > 0:
+    if current().country != "FI":
+        rates = _year_wacc(parameters, years)
+        if rates:
+            capital = [-c / (rate / 100) for c, rate in zip(rows_in["cost_of_capital"], rates)]
+            rows.append(row(_t('Sijoitettu pääoma (pääomakustannuksen pohja)'), capital))
+    elif _is_num(wacc) and wacc > 0:
         capital = [-c / (wacc / 100) for c in rows_in["cost_of_capital"]]
         rows.append(row(_t('Sijoitettu pääoma (pääomakustannuksen pohja)'), capital))
     rows.append(row(_t('- Pääomakustannus'), rows_in["cost_of_capital"]))
@@ -477,12 +547,16 @@ def _eva_year_blocks(input_data):
     rows.append(row(_t('Kumulatiivinen diskontattu EVA'), running, cum0))
 
     note = (_t('Sijoitetun pääoman rivi on laskentamoottorin pääomakustannus jaettuna WACCilla. Viimeisen sarakkeen kumulatiivinen summa on tulevien EVA-erien nykyarvo yhteensä (ennustejakso ja terminaali).'))
+    if current().country != "FI":
+        note = _t("Viimeisen sarakkeen kumulatiivinen summa on lähteen tulevien EVA-erien nykyarvo yhteensä.")
+        if capital:
+            note = _t("Pääomarivi on kunkin vuoden lähdepääomakustannus jaettuna saman vuoden lähde-WACCilla. ") + note
     ic = eva.get("invested_capital")
     if capital and _is_num(ic) and abs(ic - capital[0]) > max(1.0, 0.01 * abs(ic)):
         note += (_tf(' Huom: arvonmäärityshetken sijoitettu pääoma ({0} tEUR), josta EVA-arvo lähtee, poikkeaa vuoden {1} pääomakustannuksen pohjasta ({2} tEUR).', f'{_fmt_num(ic)}', f'{years[0]}', f'{_fmt_num(capital[0])}'))
     return [
         {"type": "table", "table_id": "deterministic_eva_years",
-         "title": _t('EVA-laskelma vuosittain'), "unit": _t('tEUR'),
+         "title": _t('EVA-laskelma vuosittain'), "unit": unit,
          "columns": [_t('Erä')] + [str(y) for y in years]
                     + ([str(eva.get("terminal") or "TRM")] if has_t else []),
          "rows": rows},
@@ -517,18 +591,26 @@ def eva_waterfall_figures(input_data, dcf_value=None):
     add = eva.get("additional")
     if not _is_num(add):
         add = _sum_nums([debt, cash])
+        if ((input_data or {}).get("meta") or {}).get("country_code", "FI") != "FI":
+            add += _sum_nums([bridge.get(k) for k in
+                              ("associated_market_value", "minority_market_value", "prev_year_dividends")])
     if not all(_is_num(x) for x in (ic, cum0, raw)):
         return None
-    if abs(ic + cum0 + add - raw) > max(1.0, 0.005 * abs(raw)):
+    foreign = ((input_data or {}).get("meta") or {}).get("country_code", "FI") != "FI"
+    if abs(ic + cum0 + add - raw) > (1.0 if foreign else max(1.0, 0.005 * abs(raw))):
         return None
     explicit = sum(disc)
     other = add - _sum_nums([debt, cash])
+    bridge_aggregate = foreign and _is_num(eva.get("additional")) and abs(other) > 1e-6
+    if bridge_aggregate:
+        debt = cash = None
+        other = add
 
     kr = (input_data or {}).get("key_ratios") or {}
     hist = [(y, v) for y, v in zip(kr.get("years") or [], kr.get("eva") or [])
             if _is_num(y) and _is_num(v) and y < years[0]]
     wacc = (ve.get("wacc_parameters") or {}).get("wacc_pct")
-    return {
+    out = {
         "invested_capital": ic,
         "explicit": explicit,
         "terminal": cum0 - explicit,
@@ -543,6 +625,10 @@ def eva_waterfall_figures(input_data, dcf_value=None):
         "hist_eva": [v for _, v in hist],
         "wacc_pct": wacc if _is_num(wacc) else None,
     }
+    if foreign:
+        out["bridge_aggregate"] = bridge_aggregate
+        out["wacc_pct_by_year"] = _year_wacc(ve.get("wacc_parameters") or {}, years)
+    return out
 
 
 @localized_input(1)
@@ -558,7 +644,8 @@ def normalize_report(report, input_data):
         return report
     scoring = report.get("_scoring")
     if isinstance(scoring, dict):
-        _normalize_scoring(scoring, value)
+        source_eva = (((input_data or {}).get("valuation_engine") or {}).get("eva") or {}).get("equity_value_before_floor_raw")
+        _normalize_scoring(scoring, value, source_eva, current().country != "FI")
     wf = eva_waterfall_figures(input_data, value)
     if wf is not None:
         report["_eva_waterfall"] = wf

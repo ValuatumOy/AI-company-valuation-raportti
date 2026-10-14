@@ -134,6 +134,9 @@ def value_flow_figures(input_data):
         out["equity_teur"] = equity
     if _is_num(ev) and _is_num(equity):
         out["bridge_delta_teur"] = equity - ev
+    if ((input_data or {}).get("meta") or {}).get("country_code", "FI") != "FI":
+        out["bridge_components_teur"] = {k: v for k, v in (dcf.get("bridge") or {}).items() if _is_num(v)}
+        out["wacc_pct_by_year"] = wacc.get("wacc_pct_by_year")
     if _is_num(wacc.get("wacc_pct")):
         out["wacc_pct"] = wacc["wacc_pct"]
     years = [y for y in (forecast.get("years") or []) if y]

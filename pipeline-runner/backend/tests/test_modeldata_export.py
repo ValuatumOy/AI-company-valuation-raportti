@@ -267,3 +267,92 @@ def test_forecast_carries_the_same_statement_rows_as_actuals():
     actuals = export.build_payload(model, None)["actuals"]
     assert set(actuals["income_statement"]) == set(forecast["income_statement"])
     assert set(actuals["balance_sheet"]) == set(forecast["balance_sheet"])
+
+
+def _foreign_valuation_model(currency="DKK", **forecast):
+    model = _model(ns=1.0)
+    model["currency"] = currency
+    model["dataMap"]["2025"] = forecast
+    return model
+
+
+def test_foreign_cash_flow_capex_and_dividend_alias_close_source_equations():
+    model = _foreign_valuation_model(
+        operating_cash_flow=100, gross_cap_expenditure_nega=-5,
+        cr_cf_gross_capex_nega=-12, free_operating_cash_flow=88,
+        free_cash_flow_to_firm=88, cum_disc_fcff=1000,
+        ib_debt_nega_prev_year=-20, cash_prev_year=70,
+        cr_dcf_dividends=-195, value_of_equity_fcff=855,
+        prol_cap_invested=100, cum_disc_eva=400, eva_additional=-145,
+        value_of_equity_eva=355)
+    payload = export.build_payload(model, country_code="DK")
+    dcf = payload["valuation_engine"]["dcf"]
+    assert payload["unit"] == payload["valuation_engine"]["unit"] == "tDKK"
+    assert dcf["gross_capex"] == [-12000]
+    assert dcf["operating_cash_flow"][0] + dcf["gross_capex"][0] == dcf["fcff"][0]
+    bridge = dcf["bridge"]
+    assert bridge["prev_year_dividends"] == -195000
+    assert (dcf["cumulative_discounted_fcff"][0] + bridge["interest_bearing_debt"]
+            + bridge["cash"] + bridge["prev_year_dividends"]) == dcf["equity_value_before_floor"]
+    eva = payload["valuation_engine"]["eva"]
+    assert eva["equity_value_before_floor"] == eva["equity_value_before_floor_raw"] == 355000
+    assert (eva["invested_capital"] + eva["cumulative_discounted_eva"][0]
+            + eva["additional"]) == eva["equity_value_before_floor"]
+    assert eva["equity_value_before_floor"] != dcf["equity_value_before_floor"]
+
+
+def test_foreign_combined_capex_and_canonical_dividend_are_preserved_without_cr_aliases():
+    model = _foreign_valuation_model("USD", operating_cash_flow=100,
+        gross_cap_expenditure_nega=-18, inv_gross=15,
+        free_cash_flow_to_firm=82, dcf_dividends=-9,
+        value_of_equity_fcff=1000, value_of_equity_eva=950)
+    payload = export.build_payload(model, country_code="US")
+    dcf = payload["valuation_engine"]["dcf"]
+    assert payload["valuation_engine"]["unit"] == "tUSD"
+    assert dcf["gross_capex"] == [-18000]  # inv_gross can omit intangible capex.
+    assert dcf["operating_cash_flow"][0] + dcf["gross_capex"][0] == dcf["fcff"][0]
+    assert dcf["bridge"]["prev_year_dividends"] == -9000
+    assert payload["valuation_engine"]["eva"]["equity_value_before_floor"] == 950000
+
+
+def test_foreign_missing_eva_is_not_filled_with_dcf_and_zero_adjustments_do_not_fall_back():
+    model = _foreign_valuation_model(gross_cap_expenditure_nega=-5,
+        cr_cf_gross_capex_nega=0, dcf_dividends=0, cr_dcf_dividends=-195,
+        value_of_equity_fcff=855)
+    payload = export.build_payload(model, country_code="DK")
+    assert payload["valuation_engine"]["dcf"]["gross_capex"] == [0]
+    assert payload["valuation_engine"]["dcf"]["bridge"]["prev_year_dividends"] == 0
+    assert payload["valuation_engine"]["eva"]["equity_value_before_floor"] is None
+
+
+def test_finland_capex_dividend_and_eva_contract_stays_unchanged_with_foreign_aliases():
+    model = _model(ns=1.0)
+    model["dataMap"]["2025"] = {
+        "gross_cap_expenditure_nega": -5, "cr_cf_gross_capex_nega": -12,
+        "cr_dcf_dividends": -195, "value_of_equity_fcff": 855, "value_of_equity_eva": 355}
+    payload = export.build_payload(model)
+    assert payload["valuation_engine"]["dcf"]["gross_capex"] == [-5000]
+    assert payload["valuation_engine"]["dcf"]["bridge"]["prev_year_dividends"] is None
+    assert payload["valuation_engine"]["eva"]["equity_value_before_floor"] == 855000
+    assert payload["valuation_engine"]["eva"]["equity_value_before_floor_raw"] == 355000
+
+
+def test_foreign_wacc_schedule_keeps_source_year_alignment_and_missing_values():
+    model = _foreign_valuation_model("USD", wacc=0.0643)
+    model["dataMap"].update({"2026": {"wacc": 0.0703}, "2027": {}})
+    parameters = export.build_payload(model, country_code="US")["valuation_engine"]["wacc_parameters"]
+    assert parameters["wacc_pct"] == 6.43
+    assert parameters["years"] == [2025, 2026, 2027]
+    assert parameters["wacc_pct_by_year"] == [6.43, 7.03, None]
+
+
+def test_finland_wacc_parameters_keep_the_exact_existing_scalar_shape():
+    model = _model(ns=1)
+    model["dataMap"]["2025"] = {"wacc": 0.0643}
+    model["dataMap"]["2026"] = {"wacc": 0.0703}
+    assert export.build_payload(model)["valuation_engine"]["wacc_parameters"] == {
+        "risk_free_rate_pct": None, "market_risk_premium_pct": None,
+        "liquidity_premium_pct": None, "equity_beta": None,
+        "cost_of_equity_pct": None, "cost_of_debt_pct": None,
+        "tax_rate_wacc_pct": None, "target_d_to_de_pct": None,
+        "wacc_pct": 6.43}

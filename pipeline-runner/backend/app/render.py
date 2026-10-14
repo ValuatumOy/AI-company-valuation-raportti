@@ -322,6 +322,10 @@ def _report_scale(report, derived):
         if v is not None:
             cand.append(v)
     if not cand:
+        if current().language == "en":
+            base = _to_num(cover.get("base_case_value"))
+            if base is not None:
+                cand.append(base)
         sc = report.get("_scenarios") or {}
         v = _to_num(sc.get("expected_value_teur"))
         if v is not None:
@@ -438,6 +442,8 @@ def _num_cell(v):
     # just the domain (e.g. ytj.fi) as the visible text, but keep it a clickable
     # link to the full source so the reader can verify the claim ("verify me").
     if isinstance(v, str):
+        if current().language == "en" and _SECREF_MARKER_RE.search(v):
+            return _inline(v)
         m = _URL_CELL_RE.match(v)
         if m:
             href = html.escape(v.strip(), quote=True)
@@ -949,7 +955,7 @@ def _derive(report):
     vals = _scenario_values(report)
     if vals:
         nums = [v["value"] for v in vals if v["value"] is not None]
-        if nums:
+        if nums and (current().language == "fi" or len(nums) >= 2 and len(nums) == len(vals)):
             lo, hi = min(nums), max(nums)
             d["range"] = {"low": lo, "high": hi, "mid": ev if ev is not None else base}
         d["weights_donut"] = [
@@ -1197,13 +1203,17 @@ def _canonical_figures(report, derived):
     if len(nums) == 3 and all(p is not None for p in probs) and abs(sum(probs) - 100) <= 1:
         calc = sum(p * v for p, v in zip(probs, nums)) / 100.0
         ev = calc if ev is None or abs(calc - ev) > max(1.0, 0.005 * abs(ev)) else ev
-    if ev is None:
+    if ev is None and current().language == "fi":
         rng = derived.get("range") or {}
         ev = _to_num(rng.get("mid"))
     if ev is not None:
         out["expected_value"] = ev
-    if nums:
+    if nums and (current().language == "fi" or len(nums) >= 2 and len(nums) == len(vals)):
         out["range_low"], out["range_high"] = min(nums), max(nums)
+    if current().language == "en":
+        base = _to_num((report.get("cover") or {}).get("base_case_value"))
+        if base is not None:
+            out["base_case_value"] = base
     return out
 
 
@@ -1290,12 +1300,18 @@ def _block_metric_cards(b):
         label = _clean(c.get("label")).lower()
         if "luottamustaso" in label or "confidence" in label:
             continue
+        if current().language == "en" and "expected value" in label and _canonical_ctx.get().get("expected_value") is None:
+            if _to_num(c.get("value")) is not None:
+                c = {**c, "label": "Conservative base case", "value": _unit_fmt(_canonical_ctx.get().get("base_case_value"), current().unit)} if _canonical_ctx.get().get("base_case_value") is not None else {**c, "value": "Not quantified"}
         fixed = _canonical_card_value(c.get("label"), c.get("value"))
         if fixed is not None:
             c = {**c, "value": fixed}
         cards.append(c)
     if not cards:
         return ""
+    if current().language == "en" and _canonical_ctx.get().get("expected_value") is None:
+        cards = [{**c, "emphasis": "conservative base case" in str(c.get("label", "")).lower()} for c in cards]
+        cards.sort(key=lambda c: not c["emphasis"])
     n = max(1, min(len(cards), 4))
     cells = []
     scale = _report_scale_ctx.get()
@@ -1494,7 +1510,12 @@ def _block_table(b):
         reason = b.get("reason") or "Tietoa ei saatavilla."
         head = f'<h4 class="blk">{_esc(b.get("title"))}</h4>' if b.get("title") else ""
         return f'{head}<p class="muted" style="font-style:italic">{_esc(reason)}</p>'
-    return _render_table(b.get("columns"), b.get("rows"), b.get("title"), b.get("unit"))
+    rows, unit = b.get("rows"), b.get("unit")
+    if current().country != "FI" and unit == current().unit and str(b.get("table_id", "")).startswith(("deterministic_income_statement", "deterministic_balance_sheet")):
+        values = [_to_num(v) for row in rows or [] for v in row[1:]]
+        div, unit, dec = _scale_from_teur(max((abs(v) for v in values if v is not None), default=0))
+        rows = [[row[0]] + [_fmt(_to_num(v) / div, dec) if _to_num(v) is not None else v for v in row[1:]] for row in rows or []]
+    return _render_table(b.get("columns"), rows, b.get("title"), unit)
 
 
 def _block_chart(b):
@@ -1503,6 +1524,12 @@ def _block_chart(b):
         head = f'<h4 class="blk">{_esc(b.get("title"))}</h4>' if b.get("title") else ""
         return f'{head}<p class="muted" style="font-style:italic">{_esc(reason)}</p>'
     title = b.get("title")
+    if current().country != "FI" and b.get("chart_type") == "bar_line" and str(b.get("unit", "")).startswith(current().unit):
+        bars = [v for s in b.get("series") or [] if s.get("type", "bar") == "bar" for v in _nums(s.get("values")) if v is not None]
+        div, unit, _ = _scale_from_teur(max((abs(v) for v in bars), default=0))
+        if div != 1:
+            b = {**b, "series": [{**s, "values": [v / div if v is not None else None for v in _nums(s.get("values"))]} if s.get("type", "bar") == "bar" else s for s in b.get("series") or []]}
+            title = f"{title or ''} ({unit} / %)"
     head = f'<h4 class="blk">{_esc(title)}</h4>' if title else ""
     svg = _chart_svg(b)
     return f'<div class="chart-host">{head}{svg}</div>' if svg else head
@@ -1612,6 +1639,8 @@ def _cover(report, derived):
     div, unit_lab, dec = scale or (1.0, current().unit, 0)
     hv = cover.get("headline_value")  # scenario expected value (AI-weighted)
     bcv = cover.get("base_case_value")  # conservative base case (DCF/EVA-based)
+    if current().language == "en" and _canonical_ctx.get().get("expected_value") is None:
+        hv = None
     rng = derived.get("range")
     industry = _display_industry(meta)
     if current().language == "en" and industry and not meta.get("industry_display_en"):
@@ -1635,6 +1664,10 @@ def _cover(report, derived):
         note = (_t('Konservatiivinen perusskenaario ei tue positiivista omistaja-arvoa. Mahdollinen arvo on optio- tai strategista arvoa — arvoa, joka perustuu epävarman tulevaisuuden mahdollisuuden toteutumiseen, ei nykyiseen kassavirtaan. Se kuvataan skenaarioissa eikä esitetä yrityksen arvona.'))
     else:
         note = (_t('Skenaarioiden todennäköisyyksillä painotettu odotusarvo. Todennäköisyydet ovat AI:n muodostamia, muokattavia oletuksia. Konservatiivinen perusskenaario ja haarukan ääripäät esitetään alla.'))
+    if current().language == "en" and hv is None and bcv not in (None, ""):
+        note = "The conservative base case is shown. Scenario expected value and range are not quantified because the required scenario prices are unavailable."
+        if _canonical_ctx.get().get("range_low") is not None:
+            note = "The conservative base case is shown. Scenario expected value is not quantified because complete probability assumptions are unavailable."
     # downside/upside bridge: show WHY the expected value differs from the base
     bridge_html = ""
     scen = _scenario_values(report)
@@ -1662,6 +1695,10 @@ def _cover(report, derived):
     band = (
         _tf('<div class="band"><div class="brand">{0} · Yritysanalyysi · AI</div><div class="kicker">Arvonmääritysraportti</div></div>', f'{_esc(_brand(report)[0])}')
     )
+    if meta.get("is_sample_report"):
+        band += '<div style="background:var(--green-soft);padding:2mm 15mm;font-size:8pt;font-weight:700">' + _esc(_t("Esimerkkiraportti")) + '</div>'
+    if current().language == "en" and meta.get("publication_status") == "internal_review":
+        band += '<div style="background:#fff2e8;padding:3mm 15mm;font-size:9pt;font-weight:700">INTERNAL REVIEW DRAFT — publication withheld.<br>Stored forecast requires economic validation; this model value is not approved for valuation use.</div>'
     meta_row = (
         _tf('<div style="margin:0 0 7mm"><div class="lab">Yhtiö</div><div class="co" style="font-size:24pt;line-height:1.15;margin:1mm 0">{0}</div><div class="sub">{1}</div></div><div class="meta" style="grid-template-columns:repeat(2,1fr)"><div><div class="lab">Y-tunnus</div><div class="val">{2}</div></div><div><div class="lab">Raportin päivä</div><div class="val">{3}</div></div></div>', f"{_esc(meta.get('company_name'))}", f'{_esc(industry)}', f"{_esc(meta.get('y_tunnus'))}", f"{_esc(meta.get('report_date'))}")
     )
@@ -2070,7 +2107,7 @@ def _eva_waterfall_html(report):
     if f.get("cash") is not None:
         steps.append(("delta", _t('Kassa'), f["cash"], None))
     if f.get("other") is not None:
-        steps.append(("delta", _t('Muut|erät'), f["other"], None))
+        steps.append(("delta", "Source bridge|adjustments" if f.get("bridge_aggregate") else _t('Muut|erät'), f["other"], None))
     steps.append(("total", _t('Oma|pääoma (EVA)'), f["equity"], C["green"]))
 
     # --- waterfall ---------------------------------------------------------
@@ -2183,30 +2220,38 @@ def _eva_waterfall_html(report):
         g2.append(f'<line x1="{dx:.1f}" y1="{pt2 - 12}" x2="{dx:.1f}" y2="{H2 - pb2:.1f}" '
                   f'stroke="{C["gray"]}" stroke-width="0.8" stroke-dasharray="1.5 2.5"/>')
         g2.append(f'<text x="{dx - 5:.1f}" y="{pt2 - 13}" text-anchor="end" '
-                  f'font-size="8.5" fill="{C["gray"]}">toteutunut</text>')
+                  f'font-size="8.5" fill="{C["gray"]}">{_t("toteutunut")}</text>')
         g2.append(_tf('<text x="{0}" y="{1}" font-size="8.5" fill="{2}">ennuste</text>', f'{dx + 5:.1f}', f'{pt2 - 13}', f"{C['gray']}"))
     bot_svg = _svg(W2, H2, "".join(g2))
 
     meta = (report or {}).get("meta") or {}
     tag = [str(meta.get("company_name") or "").upper()]
     if f.get("wacc_pct") is not None:
-        tag.append(f"WACC {_fmt(f['wacc_pct'], 1)} %")
+        rates = f.get("wacc_pct_by_year") or []
+        if current().language == "en" and current().country != "FI":
+            tag.append(f"Annual WACC {_fmt(min(rates), 2)}–{_fmt(max(rates), 2)} %" if rates else f"Initial WACC {_fmt(f['wacc_pct'], 2)} %")
+        else:
+            tag.append(f"WACC {_fmt(f['wacc_pct'], 1)} %")
     tag.append(unit.upper())
     tag = " · ".join(t for t in tag if t)
     total = f["explicit"] + f["terminal"]
-    summa = f"summa {num(total)} {unit}"
+    summa = f"{_t('summa')} {num(total)} {unit}"
     if total and f["terminal"] * total > 0:
-        summa += (f", josta terminaali {num(f['terminal'])} "
+        summa += (f"{_t(', josta terminaali')} {num(f['terminal'])} "
                   f"({_fmt(f['terminal'] / total * 100)} %)")
     bridge = _sum_nums_r([f.get("debt"), f.get("cash"), f.get("other")])
-    intro = (_t('Sijoitettuun pääomaan lisätään ennustejakson ja terminaalin diskontattu lisäarvo (EVA). ') + (_t('Nettokassa') if bridge >= 0 else "Nettovelka")
+    intro = (_t('Sijoitettuun pääomaan lisätään ennustejakson ja terminaalin diskontattu lisäarvo (EVA). ') + (_t('Nettokassa') if bridge >= 0 else _t("Nettovelka"))
              + _t(' siltaa yritysarvon oman pääoman arvoon.'))
+    if current().language == "en" and current().country != "FI":
+        intro = "Invested capital plus discounted source EVA produces enterprise value. Signed financing and other source adjustments bridge enterprise value to equity value."
     note = _t('EVA = NOPLAT − WACC × sijoitettu pääoma.')
     if nh:
         note += _t(' Toteutuneet vuodet nimellisinä, ennustevuodet diskontattuina.')
     dcf = f.get("dcf_equity")
     if dcf is not None:
-        if abs(f["equity"] - dcf) > max(1.0, 0.01 * abs(dcf)):
+        if current().country != "FI":
+            note += _tf(' Lähteen EVA {0} {2}; raportin DCF {1} {2}. Erilliset lähdemallien arvot; vastaavuutta ei ole vahvistettu.', num(f["equity"]), num(dcf), unit)
+        elif abs(f["equity"] - dcf) > max(1.0, 0.01 * abs(dcf)):
             note += (_tf(' Raportin arvo (DCF) {0} {1}; ero EVA-menetelmään selitetään tekstissä.', f'{num(dcf)}', f'{unit}'))
         else:
             note += _t(' EVA-menetelmän arvo vastaa raportin DCF-arvoa.')
@@ -2254,6 +2299,10 @@ def _value_flow_html(report, derived):
         delta_num = f"{'+' if delta >= 0 else '−'} {_fmt(abs(delta) / div, dec)} {unit_lab}"
 
     wacc_num = f"{_fmt(vf['wacc_pct'], 1)} %" if vf.get("wacc_pct") is not None else None
+    if current().language == "en":
+        rates = vf.get("wacc_pct_by_year") or []
+        if rates and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in rates):
+            wacc_num = f"{_fmt(min(rates), 2)}–{_fmt(max(rates), 2)} % (annual)"
     ev_num = _fmt_scaled(vf.get("ev_teur"), scale) if vf.get("ev_teur") is not None else None
     equity_num = (_fmt_scaled(vf.get("equity_teur"), scale)
                   if vf.get("equity_teur") is not None else None)
@@ -2261,13 +2310,28 @@ def _value_flow_html(report, derived):
     steps = [
         (_t('Ennustetut kassavirrat'), _t('yhtiön toteutuneista luvuista ja ennusteesta'),
          vf.get("forecast_years")),
-        ("Diskonttaus nykyhetkeen", _t('tuottovaatimuksella (WACC)'), wacc_num),
+        (_t("Diskonttaus nykyhetkeen"), _t('tuottovaatimuksella (WACC)'), wacc_num),
         (_t('Yritysarvo'), _t('koko liiketoiminnan arvo'), ev_num),
-        (_t('− velat + kassa'), "rahoitusrakenteen vaikutus", delta_num),
-        (_t('Oman pääoman arvo'), "omistajien osuus", equity_num),
+        (_t('− velat + kassa'), _t("rahoitusrakenteen vaikutus"), delta_num),
+        (_t('Oman pääoman arvo'), _t("omistajien osuus"), equity_num),
         (_t('Skenaariopainotus'), _t('kolme skenaariota todennäköisyyksin'), scen_num),
         (_t('Odotusarvo'), _t('kannen ja tiivistelmän johtava luku'), exp_num),
     ]
+    if current().language == "en":
+        if _canonical_ctx.get().get("expected_value") is None:
+            steps = steps[:5]
+        components = vf.get("bridge_components_teur") or {}
+        if components:
+            debt_cash = sum(components.get(k, 0) for k in ("interest_bearing_debt", "cash"))
+            bridge_steps = [("− Debt + cash", "Signed source adjustments", _fmt_scaled(debt_cash, scale))]
+            for key, label in (("prev_year_dividends", "Dividend adjustment"),
+                               ("associated_market_value", "Associated companies adjustment"),
+                               ("minority_market_value", "Minority interests adjustment")):
+                if components.get(key):
+                    bridge_steps.append((label, "Signed source adjustment", _fmt_scaled(components[key], scale)))
+            steps[3:4] = bridge_steps
+        else:
+            steps[3] = ("Equity bridge adjustment", "May include dividends and other adjustments", delta_num)
     box = ('<div style="background:#fff;border:1px solid #D8DED8;padding:8px 10px;'
            'border-radius:2px;break-inside:avoid">'
            '<div style="font-weight:700;font-size:9pt">{t}</div>'
@@ -2303,7 +2367,7 @@ def _part_divider(report, title, desc, listing, extra=""):
         '<div class="pbody">'
         '<div style="max-width:120mm;margin:14mm auto 0;text-align:center">'
         '<div style="font-size:8pt;text-transform:uppercase;letter-spacing:.14em;'
-        'color:var(--lime-deep);font-weight:700;margin-bottom:8px">Osa</div>'
+        'color:var(--lime-deep);font-weight:700;margin-bottom:8px">' + _t("Osa") + '</div>'
         f'<h2 style="font-size:22pt;margin-bottom:10px">{_esc(title)}</h2>'
         f'<p class="muted">{_esc(desc)}</p></div>'
         f'{lower}'
@@ -2424,6 +2488,7 @@ def _collect_source_urls(report):
 # prefix/whitespace so only the number is rewritten and case is preserved:
 # "osiossa 9" / "osion 10" / "Osio 17".
 _SECTION_REF_RE = re.compile(r"\b(osio\w*|section)(\s+)(\d{1,2})\b", re.IGNORECASE)
+_EN_SECTION_REF_RE = re.compile(r"\b(section(?:s)?)(\s+)(\d{1,2}\b(?:\s*(?:,\s*(?:and\s+)?|and\s+|/\s*|&\s*)\d{1,2}\b)*)", re.IGNORECASE)
 
 
 def _resolve_section_refs(sections):
@@ -2443,6 +2508,8 @@ def _resolve_section_refs(sections):
     """
     display_by_id = {str(s.get("id")): i for i, s in enumerate(sections, start=1)
                      if isinstance(s, dict) and s.get("id") is not None}
+    if current().language == "en" and "8" in display_by_id:
+        display_by_id.setdefault("7", display_by_id["8"])
 
     def _repl(m):
         disp = display_by_id.get(m.group(3))
@@ -2451,12 +2518,48 @@ def _resolve_section_refs(sections):
         text = f"{m.group(1)}{m.group(2)}{disp}"
         return f"\x00{disp}\x00{text}\x00"
 
+    def _english_repl(m):
+        first = True
+
+        def number_ref(n):
+            nonlocal first
+            prefix = m.group(1) + m.group(2) if first else ""
+            first = False
+            disp = display_by_id.get(n.group(0))
+            return prefix + n.group(0) if disp is None else f"\x00{disp}\x00{prefix}{disp}\x00"
+
+        return re.sub(r"\d{1,2}", number_ref, m.group(3))
+
+    pattern, replace = (_EN_SECTION_REF_RE, _english_repl) if current().language == "en" else (_SECTION_REF_RE, _repl)
+
+    def resolve_text(text):
+        parts, start = [], 0
+        for marked in _SECREF_MARKER_RE.finditer(text):
+            parts.append(pattern.sub(replace, text[start:marked.start()]))
+            parts.append(marked.group(0))
+            start = marked.end()
+        parts.append(pattern.sub(replace, text[start:]))
+        return "".join(parts)
+
+    def resolve_values(value):
+        if isinstance(value, str):
+            return resolve_text(value)
+        if isinstance(value, list):
+            return [resolve_values(v) for v in value]
+        if isinstance(value, dict):
+            return {k: resolve_values(v) for k, v in value.items()}
+        return value
+
     for sec in sections:
         if not isinstance(sec, dict):
             continue
         for b in sec.get("blocks") or []:
             if isinstance(b, dict) and isinstance(b.get("text"), str):
-                b["text"] = _SECTION_REF_RE.sub(_repl, b["text"])
+                b["text"] = resolve_text(b["text"])
+            if current().language == "en" and isinstance(b, dict):
+                for field in ("paragraphs", "items", "rows"):
+                    if field in b:
+                        b[field] = resolve_values(b[field])
     return sections
 
 

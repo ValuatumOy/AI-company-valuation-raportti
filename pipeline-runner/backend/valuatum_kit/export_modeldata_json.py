@@ -93,6 +93,8 @@ EXTRA_VARS = [
     "market_value_of_associated",
     "market_value_of_minorities_nega",
     "dcf_dividends",
+    "cr_dcf_dividends",
+    "cr_cf_gross_capex_nega",
     "pv_of_eva_ty",
     "pv_of_cap_base_change",
 ]
@@ -555,6 +557,9 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                 "tax_rate_wacc_pct": scalar(data_map, first_forecast, "tax_rate_wacc", pct=True),
                 "target_d_to_de_pct": scalar(data_map, first_forecast, "target_dde", pct=True),
                 "wacc_pct": scalar(data_map, first_forecast, "wacc", pct=True),
+                **({"years": forecast_years,
+                    "wacc_pct_by_year": arr(data_map, forecast_years, "wacc", pct=True)}
+                   if country_code != "FI" else {}),
             },
             "dcf": {
                 "years": forecast_years,
@@ -569,7 +574,11 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                 "change_in_non_interest_bearing_financial_liabilities": arr(
                     data_map, forecast_years, "change_in_lt_liab_nib", money=True
                 ),
-                "gross_capex": arr(data_map, forecast_years, "gross_cap_expenditure_nega", money=True),
+                "gross_capex": arr(
+                    data_map, forecast_years,
+                    ["cr_cf_gross_capex_nega", "gross_cap_expenditure_nega"]
+                    if country_code != "FI" else "gross_cap_expenditure_nega",
+                    money=True),
                 "free_operating_cash_flow": arr(data_map, forecast_years, "free_operating_cash_flow", money=True),
                 "other_items_fcf": arr(data_map, forecast_years, "other_items_fcf", money=True),
                 "fcff": arr(data_map, forecast_years, "free_cash_flow_to_firm", money=True),
@@ -580,7 +589,10 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                     "cash": scalar(data_map, first_forecast, "cash_prev_year", money=True),
                     "associated_market_value": scalar(data_map, first_forecast, "market_value_of_associated", money=True),
                     "minority_market_value": scalar(data_map, first_forecast, "market_value_of_minorities_nega", money=True),
-                    "prev_year_dividends": scalar(data_map, first_forecast, "dcf_dividends", money=True),
+                    "prev_year_dividends": scalar(
+                        data_map, first_forecast,
+                        ["dcf_dividends", "cr_dcf_dividends"]
+                        if country_code != "FI" else "dcf_dividends", money=True),
                 },
                 "equity_value_before_floor": scalar(data_map, first_forecast, "value_of_equity_fcff", money=True),
                 "no_of_shares_total": scalar(data_map, first_forecast, "no_of_shares_total"),
@@ -614,11 +626,16 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                     "cash": scalar(data_map, first_forecast, "cash_prev_year", money=True),
                 },
                 "equity_value_before_floor_raw": scalar(data_map, first_forecast, "value_of_equity_eva", money=True),
-                "equity_value_before_floor": coalesce(
+                "equity_value_before_floor": scalar(
+                    data_map, first_forecast, "value_of_equity_eva", money=True
+                ) if country_code != "FI" else coalesce(
                     scalar(data_map, first_forecast, "value_of_equity_fcff", money=True),
                     scalar(data_map, first_forecast, "value_of_equity_eva", money=True),
                 ),
                 "equivalence_note": (
+                    "EVA and DCF are retained as separate source-engine values; equivalence "
+                    "has not been verified for this foreign model."
+                    if country_code != "FI" else
                     "EVA is normalized to DCF equity value when both use the same Valuatum forecast "
                     "and WACC; the raw EVA engine value is retained in equity_value_before_floor_raw."
                 ),
