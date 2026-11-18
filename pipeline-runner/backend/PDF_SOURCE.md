@@ -43,6 +43,24 @@ contract exists.
 4. Submit `no-run.json` to the admin run endpoint. This is a paid LLM run and
    needs explicit approval.
 
+## Norwegian orders
+
+Norwegian accounts are public, so an order is keyed on the organisation number,
+never on a customer's upload. Valuatum builds the model in its own PDF-service
+account and reads only that.
+
+1. The customer sends a request from company-valuation.com
+   (`/contact-international?country=Norway`, identifier prefilled when known).
+   The quote, invoice and 2–3 business day terms on the site apply.
+2. Signed in to Valuatum's own PDF-service account, upload the latest accounts:
+   company-valuation.com's PDF page fetches them from Brønnøysund by
+   organisation number, or download the copy from `data.brreg.no`.
+3. Run the probe on the new model, then steps 2–4 of the admin path above.
+4. Email the PDF to the customer.
+
+Online payment and a fixed price wait until the first Norwegian AI report has
+passed the probe and review.
+
 ## Not built yet
 
 There is no public search, readiness or checkout for the PDF source. Those
