@@ -265,12 +265,13 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
                 data = report_context.normalize_input(run_input_data, params)
             elif identifier:
                 locale = report_context.resolve_context(None, params)
-                if locale["country_code"] == "DK":
-                    from valuatum_kit.config import require_danish_orders
-                    require_danish_orders()
-                    if locale["currency"] not in {"DKK", "EUR"} or locale["report_language"] != "en":
-                        raise ValueError("Automatic Danish reports require English and verified source currency")
-                if locale["country_code"] not in {"FI", "DK"} or (locale["country_code"] == "FI" and locale["currency"] != "EUR"):
+                from valuatum_kit.config import ORDER_COUNTRIES, SOURCES, require_country_orders
+                spec = ORDER_COUNTRIES.get(locale["country_code"])
+                if spec:
+                    require_country_orders(locale["country_code"])
+                    if locale["currency"] not in spec["currencies"] or locale["report_language"] != "en":
+                        raise ValueError(f"Automatic {SOURCES[locale['country_code']][2]} reports require English and verified source currency")
+                if locale["country_code"] not in {"FI", *ORDER_COUNTRIES} or (locale["country_code"] == "FI" and locale["currency"] != "EUR"):
                     raise ValueError("Foreign demos require supplied normalized input_data; "
                                      "automatic Finland export is disabled")
                 data = await fetch_company_data(identifier, params or {})

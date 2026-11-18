@@ -12,6 +12,7 @@ async def fetch_company_data(identifier: str, params: dict) -> dict:
     """identifier: a Valuatum FID (numeric). params: {company_name, company_code,
     industry_*, actuals?, estimates?}. Returns FAKTAT input_data, or raises."""
     from app import valuatum
+    from valuatum_kit.config import ORDER_COUNTRIES
 
     params = params or {}
     try:
@@ -34,7 +35,8 @@ async def fetch_company_data(identifier: str, params: dict) -> dict:
         industry_id=params.get("industry_id"),
         industry_tree=params.get("industry_tree"),
         skip_estimate_generation=bool(params.get("skip_estimate_generation")),
-        **({"country_code": "DK", "report_language": "en", "source_currency": params.get("source_currency")} if params.get("country_code") == "DK" else {}),
+        **({"country_code": params["country_code"], "report_language": "en", "source_currency": params.get("source_currency")}
+           if params.get("country_code") in ORDER_COUNTRIES else {}),
     ):
         if ev.get("step") == "error":
             raise RuntimeError(ev.get("message") or "Valuatum-haku epäonnistui")

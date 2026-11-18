@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from valuatum_kit.config import api_base_url, api_token, require_danish_orders, require_writable_source
+from valuatum_kit.config import api_base_url, api_token, ORDER_COUNTRIES, require_country_orders, require_writable_source
 
 
 # ValuBuild rejects the whole import when a submitted value does not survive the
@@ -116,8 +116,8 @@ async def import_and_wait(base_fid: int, values: list[dict], country="FI") -> in
 
     try:
         require_writable_source(country)
-        if country == "DK":
-            require_danish_orders()
+        if country in ORDER_COUNTRIES:
+            require_country_orders(country)
     except ValueError as exc:
         raise ForecastImportError(str(exc)) from exc
     token = api_token(country) if country != "FI" else os.environ.get("VALUATUM_TOKEN", "").strip()

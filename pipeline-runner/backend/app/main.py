@@ -20,7 +20,7 @@ from sse_starlette.sse import EventSourceResponse
 load_dotenv()
 
 from . import (  # noqa: E402
-    email_delivery, forecast_import, forecast_interpret, openrouter, report, runner, seed, store,
+    email_delivery, estimate_trigger, forecast_import, forecast_interpret, openrouter, report, runner, seed, store,
     validators, valuatum,
 )
 from .models import (  # noqa: E402
@@ -29,7 +29,7 @@ from .models import (  # noqa: E402
     RedeemRoundIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
-from valuatum_kit.config import require_danish_orders  # noqa: E402
+from valuatum_kit.config import ORDER_COUNTRIES, SOURCES, require_country_orders  # noqa: E402
 
 
 @asynccontextmanager
@@ -495,10 +495,10 @@ async def company_search_public(q: str, request: Request, country: str = "FI"):
     checkout-generate endpoint, since the marketing site just needs "does this
     company exist in Valuatum", not the model picker /raportti has."""
     q = (q or "").strip()
-    if country not in {"FI", "DK"}:
-        raise HTTPException(422, "Country must be FI or DK")
-    if country == "DK":
-        _require_danish_checkout()
+    if country not in {"FI", *ORDER_COUNTRIES}:
+        raise HTTPException(422, "Country must be FI, DK or SE")
+    if country != "FI":
+        _require_order_checkout(country)
     if len(q) < valuatum.MIN_QUERY_LENGTH:
         return []
     # Own bucket, not the 5/hour order limit — that's sized for order submission,
@@ -508,7 +508,7 @@ async def company_search_public(q: str, request: Request, country: str = "FI"):
     if not _rate_ok("search", _client_ip(request)):
         raise HTTPException(429, "liian monta hakua — yritä hetken kuluttua uudelleen")
     try:
-        candidates = await valuatum.search_company(q, country="DK") if country == "DK" else await valuatum.search_company(q)
+        candidates = await valuatum.search_company(q, **_source(country))
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, e.response.text[:500])
     except RuntimeError as e:
@@ -528,41 +528,53 @@ async def company_search_public(q: str, request: Request, country: str = "FI"):
     return out
 
 
-def _require_danish_checkout():
+def _source(country) -> dict:
+    """Source kwarg for valuatum calls; the Finnish default stays implicit."""
+    return {} if country == "FI" else {"country": country}
+
+
+def _require_order_checkout(country):
+    name = SOURCES[country][2]
     try:
-        require_danish_orders()
+        require_country_orders(country)
         if not STRIPE_SECRET_KEY:
-            raise ValueError("Danish automatic orders require verified Stripe payment")
+            raise ValueError(f"{name} automatic orders require verified Stripe payment")
         if not os.environ.get("INTERNATIONAL_CLIENT_SITE_URL"):
-            raise ValueError("Danish report delivery site is not configured")
+            raise ValueError(f"{name} report delivery site is not configured")
     except ValueError as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
+def _order_enabled(country) -> bool:
+    try:
+        _require_order_checkout(country)
+        return True
+    except HTTPException:
+        return False
+
+
 @app.get("/api/public/capabilities")
 def public_capabilities():
-    try:
-        _require_danish_checkout()
-        enabled = True
-    except HTTPException:
-        enabled = False
-    return {"countries": {"DK": {"enabled": enabled, "currency": "DKK", "currencies": ["DKK", "EUR"], "language": "en"}},
+    return {"countries": {country: {"enabled": _order_enabled(country), "currency": spec["currencies"][0],
+                                    "currencies": list(spec["currencies"]), "language": "en"}
+                          for country, spec in ORDER_COUNTRIES.items()},
             "extra_review_price_cents": EXTRA_ROUND_PRICE_CENTS}
 
 
 @app.get("/api/public/company-readiness")
 async def public_company_readiness(request: Request, country: str, fid: int, code: str):
-    if country != "DK":
-        raise HTTPException(422, "This readiness check supports country DK")
-    _require_danish_checkout()
+    if country not in ORDER_COUNTRIES:
+        raise HTTPException(422, "This readiness check supports countries DK and SE")
+    _require_order_checkout(country)
     if not _rate_ok("search", _client_ip(request)):
         raise HTTPException(429, "Too many source checks; try again shortly")
     try:
-        return await valuatum.danish_company_readiness(fid, code)
+        return await valuatum.company_readiness(country, fid, code,
+                                                generate=ORDER_COUNTRIES[country]["generate_on_check"])
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    except httpx.HTTPError:
-        raise HTTPException(503, "Danish source could not be verified")
+    except (httpx.HTTPError, estimate_trigger.EstimateGenerationError):
+        raise HTTPException(503, f"{SOURCES[country][2]} source could not be verified")
 
 
 # ---- internal alerts ---------------------------------------------------------
@@ -1260,7 +1272,7 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
     # paid, uncancellable ValuBuild import.
     store.set_run_status(rid, "importing_forecast")
     try:
-        new_fid = await forecast_import.import_and_wait(base_fid, payload, country="DK") if source == "DK" else await forecast_import.import_and_wait(base_fid, payload)
+        new_fid = await forecast_import.import_and_wait(base_fid, payload, **_source(source))
     except forecast_import.ForecastImportError as exc:
         store.set_run_status(rid, "awaiting_forecast")
         raise await _forecast_import_failed(rid, payload, exc)
@@ -1351,11 +1363,11 @@ def _forecast_import_message(cells: list[dict], reason: str) -> str:
 
 
 def _forecast_source(run) -> str:
-    """Forecast edits import a new model into the run's own source. Only the FI and
-    DK sources are writable: other countries read customers' PDF-service uploads,
-    which must never be written to."""
+    """Forecast edits import a new model into the run's own source. Only FI and the
+    order countries' sources are writable: other countries read customers'
+    PDF-service uploads, which must never be written to."""
     country = (run.get("params") or {}).get("country_code") or "FI"
-    if country not in ("FI", "DK"):
+    if country not in ("FI", *ORDER_COUNTRIES):
         raise HTTPException(409, "Forecast edits are not available for this report's source.")
     return country
 
@@ -1381,7 +1393,7 @@ async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
         for e in edits
     ]
     try:
-        new_fid = await forecast_import.import_and_wait(parent_fid, payload, country="DK") if source == "DK" else await forecast_import.import_and_wait(parent_fid, payload)
+        new_fid = await forecast_import.import_and_wait(parent_fid, payload, **_source(source))
     except forecast_import.ForecastImportError as exc:
         # Import failed → no round starts, no quota/lineage consumed.
         raise await _forecast_import_failed(rid, payload, exc)
@@ -1810,9 +1822,9 @@ def _create_generation_run(
         raise HTTPException(404, "pipeline not found")
     _check_not_paused()
     params = {"company_name": company_name}
-    if country_code == "DK":
-        _require_danish_checkout()
-        params.update(country_code="DK", report_language="en", source_currency=source_currency)
+    if country_code in ORDER_COUNTRIES:
+        _require_order_checkout(country_code)
+        params.update(country_code=country_code, report_language="en", source_currency=source_currency)
     if company_code:
         params["company_code"] = company_code
     if industry_text:
@@ -1919,7 +1931,7 @@ _CHECKOUT_LOCKS: dict[str, asyncio.Lock] = {}
 def _paid_checkout_identity(body, session):
     metadata = session.get("metadata") or {}
     country = metadata.get("country", "FI")
-    if country not in {"FI", "DK"} or country != body.country:
+    if country not in {"FI", *ORDER_COUNTRIES} or country != body.country:
         raise HTTPException(409, "Paid checkout country does not match the requested country")
     code = metadata.get("businessId") or metadata.get("business_id")
     if not code:
@@ -1939,11 +1951,12 @@ def _paid_checkout_identity(body, session):
     email = (session.get("customer_details") or {}).get("email") or metadata.get("customerEmail")
     if not email:
         raise HTTPException(403, "Paid checkout delivery email is missing")
-    if country == "DK":
-        _require_danish_checkout()
+    if country in ORDER_COUNTRIES:
+        _require_order_checkout(country)
         if metadata.get("product") != VALUATION_PRODUCT_TAG or not fid \
-                or language != "en" or metadata.get("reportCurrency") not in {"DKK", "EUR"}:
-            raise HTTPException(403, "Danish checkout requires exact CVR/FID, English and verified source currency")
+                or language != "en" or metadata.get("reportCurrency") not in ORDER_COUNTRIES[country]["currencies"]:
+            raise HTTPException(403, f"{SOURCES[country][2]} checkout requires exact "
+                                     f"{'CVR' if country == 'DK' else 'organisation number'}/FID, English and verified source currency")
     return {"country": country, "code": normalized[1], "fid": fid,
             "language": language, "email": email,
             "company_name": metadata.get("companyName"),
@@ -1977,8 +1990,8 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
                 "language": body.report_language or "fi", "email": body.email,
                 "company_name": body.company_name,
                 "forecast": body.mode == "forecast"}
-    if body.country == "DK":
-        _require_danish_checkout()
+    if body.country != "FI":
+        _require_order_checkout(body.country)
     if STRIPE_SECRET_KEY:
         try:
             session = await _stripe_get_checkout_session(
@@ -2010,11 +2023,11 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
             existing_run = store.get_run(existing.get("run_id") or "")
             if existing_run and (existing_run.get("params") or {}).get("country_code", "FI") != identity["country"]:
                 raise HTTPException(409, "Paid session was already bound to another country")
-            if identity["country"] == "DK" or not existing_run or existing_run.get("status") != "error":
+            if identity["country"] in ORDER_COUNTRIES or not existing_run or existing_run.get("status") != "error":
                 return {"run_id": existing.get("run_id"), "key": existing.get("access_key")}
         _check_not_paused()
         try:
-            candidates = await valuatum.search_company(identity["code"], country="DK") if identity["country"] == "DK" else await valuatum.search_company(identity["code"])
+            candidates = await valuatum.search_company(identity["code"], **_source(identity["country"]))
         except httpx.HTTPStatusError as e:
             raise HTTPException(e.response.status_code, e.response.text[:500])
         except RuntimeError as e:
@@ -2022,16 +2035,18 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
         candidate = _checkout_candidate(candidates, identity["fid"])
         if session is not None and identity["fid"] is not None and (not candidate or candidate["fid"] != identity["fid"]):
             raise HTTPException(409, "Paid followed model is not present in the selected source")
-        if identity["country"] == "DK" and (not candidate or candidate.get("country_code") != "DK"
-                                                or str(candidate.get("company_code", "")).removesuffix("K") != identity["code"]):
-            raise HTTPException(409, "Danish source company binding failed")
-        if identity["country"] == "DK":
+        order_country = identity["country"] if identity["country"] in ORDER_COUNTRIES else None
+        if order_country:
+            name = SOURCES[order_country][2]
+            if not candidate or candidate.get("country_code") != order_country \
+                    or str(candidate.get("company_code", "")).removesuffix("K") != identity["code"]:
+                raise HTTPException(409, f"{name} source company binding failed")
             try:
-                eligibility = await valuatum.danish_company_readiness(candidate["fid"], identity["code"])
+                eligibility = await valuatum.company_readiness(order_country, candidate["fid"], identity["code"])
             except (httpx.HTTPError, ValueError):
-                raise HTTPException(503, "Danish source readiness could not be verified")
+                raise HTTPException(503, f"{name} source readiness could not be verified")
             if not eligibility["eligible"]:
-                raise HTTPException(409, eligibility["reason"] or "Danish source forecast is incomplete")
+                raise HTTPException(409, eligibility["reason"] or f"{name} source forecast is incomplete")
             if eligibility["currency"] != identity["currency"] \
                     or identity["company_code"] != candidate["company_code"]:
                 raise HTTPException(409, "Paid checkout source currency or model scope changed")
@@ -2054,7 +2069,7 @@ async def public_checkout_generate(body: CheckoutGenerateIn, request: Request):
             industry_tree=candidate.get("industry_tree"), delivery_email=identity["email"],
             user_input=body.user_input, access_key=key,
             forecast_mode=identity["forecast"],
-            **({"country_code": "DK", "report_language": "en", "source_currency": identity["currency"]} if identity["country"] == "DK" else {}),
+            **({"country_code": order_country, "report_language": "en", "source_currency": identity["currency"]} if order_country else {}),
         )
         store.create_paid_order(
             candidate.get("company_name") or identity["company_name"], identity["email"], body.user_input, body.stripe_session_id,

@@ -23,7 +23,7 @@ from pathlib import Path
 import httpx
 
 from . import estimate_trigger
-from valuatum_kit.config import api_base_url, api_token, require_danish_orders
+from valuatum_kit.config import ORDER_COUNTRIES, SOURCES, api_base_url, api_token, order_code, require_country_orders
 
 KIT = Path(__file__).resolve().parent.parent / "valuatum_kit"
 FETCH = KIT / "fetch_modeldata.py"
@@ -59,9 +59,9 @@ def _normalize_query(query: str, country="FI") -> tuple[str, str]:
     """A Finnish y-tunnus is 7 digits + a check digit (hyphen optional, e.g.
     "1612398-8" or "16123988"); anything else is treated as a name search."""
     clean = re.sub(r"[\s-]", "", query.strip()).upper()
-    if country == "DK":
-        clean = re.sub(r"^DK\s*", "", query.strip().upper())
-        return ("code", clean) if re.fullmatch(r"\d{8}", clean) else ("name", query.strip())
+    if country in ORDER_COUNTRIES:
+        code = order_code(country, query)
+        return ("code", code) if code else ("name", query.strip())
     if country == "PDF":  # Uploaded statements of any country: digits are a code as stored.
         return ("code", clean) if clean.isdigit() else ("name", query.strip())
     if country != "FI":
@@ -212,13 +212,14 @@ async def search_company(query: str, country="FI") -> list[dict]:
     if len(value) < MIN_QUERY_LENGTH:
         return []
     rows = await _company_rows(param, value) if country == "FI" else await _company_rows(param, value, country)
+    spec = ORDER_COUNTRIES.get(country)
     out = []
     for c in rows:
-        if country == "DK" and (not re.fullmatch(r"\d{8}K?", str(c.get("companyCode") or ""))
-                               or (param == "code" and str(c.get("companyCode")).removesuffix("K") != value)):
+        if spec and (not re.fullmatch(spec["code"], str(c.get("companyCode") or ""))
+                     or (param == "code" and str(c.get("companyCode")).removesuffix("K") != value)):
             continue
         industry = _industry_metadata(c)
-        if country == "DK":
+        if spec:
             industry["industry_text"] = c.get("industryText")
         for m in c.get("models") or []:
             fid = m.get("followedModelId")
@@ -235,8 +236,8 @@ async def search_company(query: str, country="FI") -> list[dict]:
                 "city": _company_city(c),
                 **industry,
                 "analyst_name": m.get("analystName"),
-                **({"country": "DK", "country_code": "DK",
-                    "report_language": "en"} if country == "DK" else {}),
+                **({"country": country, "country_code": country,
+                    "report_language": "en"} if spec else {}),
             })
     return out
 
@@ -375,11 +376,12 @@ async def export_stream(
     forecast-edit round (ACE #3048) — the edited fid is a fresh model whose
     values ARE the user's forecasts, and running the gate (updateEstimates, which
     does not apply consensus) would overwrite them."""
-    if country_code == "DK":
+    spec = ORDER_COUNTRIES.get(country_code)
+    if spec:
         try:
-            require_danish_orders()
-            if report_language != "en" or not re.fullmatch(r"\d{8}K?", company_code_override or ""):
-                raise ValueError("Danish exports require English and an exact eight-digit CVR")
+            require_country_orders(country_code)
+            if report_language != "en" or not re.fullmatch(spec["code"], company_code_override or ""):
+                raise ValueError(f"{SOURCES[country_code][2]} exports require English and {spec['id']}")
         except ValueError as exc:
             yield {"step": "error", "message": str(exc)}
             return
@@ -402,10 +404,7 @@ async def export_stream(
                    "label": "Skipping estimate generation (edited forecast model)"}
         else:
             yield {"step": "estimates", "label": "Generating estimates"}
-            if country_code == "DK":
-                await estimate_trigger.trigger_and_wait(fid, country="DK")
-            else:
-                await estimate_trigger.trigger_and_wait(fid)
+            await estimate_trigger.trigger_and_wait(fid, **({"country": country_code} if spec else {}))
 
         # 1. modeldata → base JSON
         yield {"step": "fetch", "label": "Fetching modeldata"}
@@ -418,17 +417,18 @@ async def export_stream(
         ]
         if company_code_override:
             cmd += ["--company-code-override", company_code_override.strip()]
-        if country_code == "DK":
-            if source_currency not in {"DKK", "EUR"}:
-                raise ValueError("Danish export requires a verified source currency DKK or EUR")
-            cmd += ["--country-code", "DK", "--report-language", "en", "--source-currency", source_currency]
-        rc, out, err = await asyncio.to_thread(_run, cmd, "DK") if country_code == "DK" else await asyncio.to_thread(_run, cmd)
+        if spec:
+            if source_currency not in spec["currencies"]:
+                raise ValueError(f"{SOURCES[country_code][2]} export requires a verified source currency "
+                                 + " or ".join(spec["currencies"]))
+            cmd += ["--country-code", country_code, "--report-language", "en", "--source-currency", source_currency]
+        rc, out, err = await asyncio.to_thread(_run, cmd, country_code) if spec else await asyncio.to_thread(_run, cmd)
         if rc != 0 or not base.exists():
             yield {"step": "error",
                    "message": "modeldata-haku epäonnistui:\n" + (err or out)[:1500]}
             return
         base_data = json.loads(base.read_text(encoding="utf-8"))
-        company_code = company_code_override if country_code == "DK" else _derive_company_code(base_data, company_code_override)
+        company_code = company_code_override if spec else _derive_company_code(base_data, company_code_override)
 
         # There used to be a step 2 here: a Profinder MCP backfill that refilled
         # ~14 income-statement and balance-sheet rows the export left null. Those
@@ -455,11 +455,11 @@ async def export_stream(
                 company_code=company_code or meta.get("y_tunnus"),
             )
         data = _apply_company_metadata(data, supplied_metadata)
-        if country_code == "DK":
+        if spec:
             from scripts.prepare_report_demo import generation_readiness
             readiness = generation_readiness(data)
             if not readiness["numerical_input_ready"]:
-                raise ValueError("Danish forecast is incomplete: " + "; ".join(readiness["blockers"]))
+                raise ValueError(f"{SOURCES[country_code][2]} forecast is incomplete: " + "; ".join(readiness["blockers"]))
         warnings += _analyze(data)
         filename = f"{_slug(company_name)}_{fid}_modeldata_complete.json"
         yield {"step": "ready", "filename": filename, "warnings": warnings,
@@ -470,33 +470,38 @@ async def export_stream(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-async def danish_company_readiness(fid: int, code: str) -> dict:
-    """Read existing source data only: never generate estimates or import edits."""
+async def company_readiness(country: str, fid: int, code: str, generate: bool = False) -> dict:
+    """Check the source model before checkout. Never imports edits; generates
+    estimates only when asked, for sources whose models carry none until then."""
     from valuatum_kit import export_modeldata_json as exporter, fetch_modeldata as fetcher
     from scripts.prepare_report_demo import generation_readiness
-    if not re.fullmatch(r"\d{8}", code) or fid <= 0:
-        raise ValueError("An exact eight-digit CVR and positive followed model are required")
-    candidates = await search_company(code, country="DK")
+    spec, name = ORDER_COUNTRIES[country], SOURCES[country][2]
+    if order_code(country, code) != code or fid <= 0:
+        raise ValueError(f"{spec['id'][0].upper()}{spec['id'][1:]} and positive followed model are required")
+    candidates = await search_company(code, country=country)
     candidate = next((row for row in candidates if row["fid"] == fid), None)
+    currency = spec["currencies"][0]
     result = {"eligible": False, "company_name": (candidate or {}).get("company_name"),
               "company_code": (candidate or {}).get("company_code"), "fid": fid,
-              "actual_year": None, "forecast_years": [], "currency": "DKK", "unit": "tDKK"}
+              "actual_year": None, "forecast_years": [], "currency": currency, "unit": "t" + currency}
     if not candidate:
-        return {**result, "reason": "Followed model does not belong to the selected Danish company"}
+        return {**result, "reason": f"Followed model does not belong to the selected {name} company"}
     if not isinstance(candidate.get("company_name"), str) or not candidate["company_name"].strip():
-        return {**result, "reason": "Danish source company name is missing"}
+        return {**result, "reason": f"{name} source company name is missing"}
+    if generate:
+        await estimate_trigger.trigger_and_wait(fid, country=country)
     var_poses = fetcher.build_var_poses(9, 10)
     positions = [f"Y-{i}" for i in range(1, 10)] + [f"Y+{i}" for i in range(10)]
     var_poses += [{"varName": var, "relPos": pos} for var in exporter.EXTRA_VARS for pos in positions]
-    models = await modeldata([fid], var_poses, country="DK")
+    models = await modeldata([fid], var_poses, country=country)
     model = models.get(str(fid)) or {}
-    if model.get("currency") not in {"DKK", "EUR"} or model.get("companyCode") != candidate["company_code"] \
-            or model.get("countryCode") not in (None, "DK"):
+    if model.get("currency") not in spec["currencies"] or model.get("companyCode") != candidate["company_code"] \
+            or model.get("countryCode") not in (None, country):
         return {**result, "reason": "Source company identity or currency mismatch"}
     currency = model["currency"]
     result.update(currency=currency, unit="t" + currency)
     try:
-        data = exporter.build_payload(model, [], report_language="en", country_code="DK", source_currency=currency, verify_cashflows=True)
+        data = exporter.build_payload(model, [], report_language="en", country_code=country, source_currency=currency, verify_cashflows=True)
     except ValueError as exc:
         return {**result, "reason": str(exc)}
     readiness = generation_readiness(data)

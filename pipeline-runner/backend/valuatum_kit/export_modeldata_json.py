@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .config import COUNTRIES, CURRENCIES, LANGUAGES, SOURCE_VERIFIED_COUNTRIES, api_base_url
+    from .config import COUNTRIES, CURRENCIES, LANGUAGES, ORDER_COUNTRIES, SOURCE_VERIFIED_COUNTRIES, api_base_url
 except ImportError:  # Direct script execution.
-    from config import COUNTRIES, CURRENCIES, LANGUAGES, SOURCE_VERIFIED_COUNTRIES, api_base_url
+    from config import COUNTRIES, CURRENCIES, LANGUAGES, ORDER_COUNTRIES, SOURCE_VERIFIED_COUNTRIES, api_base_url
 
 
 EXTRA_VARS = [
@@ -481,6 +481,13 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                     if str(year).isdigit() and len(str(year)) == 4 and 1900 <= int(year) <= 2100}
         if not data_map:
             raise ValueError("Source contains no annual financial years")
+        # Years before the first filed statement hold only valuation parameters
+        # (beta, WACC) in some sources; they would print as empty columns.
+        filed = [int(year) for year, row in data_map.items()
+                 if any(isinstance((row or {}).get(key), (int, float)) and not isinstance((row or {}).get(key), bool)
+                        for key in ("ns", "bs_total_assets"))]
+        if filed:
+            data_map = {year: row for year, row in data_map.items() if int(year) >= min(filed)}
     years = sorted((int(year) for year in data_map), key=int)
     current_year = int(model.get("currentYear") or min(years))
     actual_years = [year for year in years if year < current_year]
@@ -748,11 +755,13 @@ def main() -> None:
     extend_fetch_vars(module)
     token = args.token or os.environ.get("VALUATUM_TOKEN") or module.TOKEN
     model = module.fetch_modeldata(args.fid, args.actuals, args.estimates, token)
-    if args.country_code == "DK":
-        if model.get("currency") != args.source_currency or args.source_currency not in {"DKK", "EUR"} or str(model.get("companyCode")) != args.company_code_override:
-            raise ValueError("Danish source model must match the paid CVR and source currency")
-        if model.get("countryCode") not in (None, "DK"):
-            raise ValueError("Danish source model country mismatch")
+    if args.country_code in ORDER_COUNTRIES:
+        name = {"DK": "Danish", "SE": "Swedish"}[args.country_code]
+        if model.get("currency") != args.source_currency or args.source_currency not in ORDER_COUNTRIES[args.country_code]["currencies"] \
+                or str(model.get("companyCode")) != args.company_code_override:
+            raise ValueError(f"{name} source model must match the paid {'CVR' if args.country_code == 'DK' else 'organisation number'} and source currency")
+        if model.get("countryCode") not in (None, args.country_code):
+            raise ValueError(f"{name} source model country mismatch")
     elif args.country_code in SOURCE_VERIFIED_COUNTRIES and model.get("currency") != args.source_currency:
         raise ValueError("Source model currency must match --source-currency")
     if args.company_code_override or args.company_name_override:

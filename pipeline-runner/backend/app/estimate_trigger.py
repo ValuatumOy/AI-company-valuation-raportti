@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from valuatum_kit.config import api_base_url, api_token, require_danish_orders, require_writable_source
+from valuatum_kit.config import api_base_url, api_token, ORDER_COUNTRIES, require_country_orders, require_writable_source
 
 
 POLL_INTERVAL_SECONDS = 10.0
@@ -62,8 +62,8 @@ async def trigger_and_wait(fid: int, country="FI") -> None:
 
     try:
         require_writable_source(country)
-        if country == "DK":
-            require_danish_orders()
+        if country in ORDER_COUNTRIES:
+            require_country_orders(country)
     except ValueError as exc:
         raise EstimateGenerationError(str(exc)) from exc
     token = api_token(country) if country != "FI" else os.environ.get("VALUATUM_TOKEN", "").strip()

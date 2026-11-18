@@ -95,7 +95,7 @@ def test_readiness_uses_readonly_source_and_reconciles_signs(monkeypatch, curren
         return {"349862": source}
     monkeypatch.setattr(valuatum, "search_company", search)
     monkeypatch.setattr(valuatum, "modeldata", data)
-    readiness = asyncio.run(valuatum.danish_company_readiness(349862, "24256790"))
+    readiness = asyncio.run(valuatum.company_readiness("DK", 349862, "24256790"))
     assert readiness["eligible"], readiness
     assert readiness["currency"] == currency and readiness["unit"] == "t" + currency
     assert readiness["company_code"] == "24256790K"
@@ -120,11 +120,11 @@ def test_incomplete_forecasts_never_become_eligible(monkeypatch):
         return {"349862": source}
     monkeypatch.setattr(valuatum, "search_company", search)
     monkeypatch.setattr(valuatum, "modeldata", data)
-    readiness = asyncio.run(valuatum.danish_company_readiness(349862, "24256790"))
+    readiness = asyncio.run(valuatum.company_readiness("DK", 349862, "24256790"))
     assert readiness["eligible"] is False
     assert "forecast ebit is missing" in readiness["reason"]
     source["currency"] = "USD"
-    assert asyncio.run(valuatum.danish_company_readiness(349862, "24256790"))["eligible"] is False
+    assert asyncio.run(valuatum.company_readiness("DK", 349862, "24256790"))["eligible"] is False
 
 
 def test_paid_danish_identity_idempotency_and_source_binding(monkeypatch):
@@ -144,7 +144,7 @@ def test_paid_danish_identity_idempotency_and_source_binding(monkeypatch):
         return {"eligible": True, "currency": "DKK", "reason": None}
     monkeypatch.setattr(main, "_stripe_get_checkout_session", paid)
     monkeypatch.setattr(valuatum, "search_company", search)
-    monkeypatch.setattr(valuatum, "danish_company_readiness", readiness)
+    monkeypatch.setattr(valuatum, "company_readiness", readiness)
     body = {"business_id": "24256790", "fid": 349862, "company_name": "Forged name ignored",
             "email": "forged@example.com", "country": "DK", "report_language": "en",
             "stripe_session_id": "cs_danish_automatic_test"}
