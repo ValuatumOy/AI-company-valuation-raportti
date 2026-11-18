@@ -46,3 +46,21 @@ def test_calendar_year_baseline_keeps_comparable_forecast_growth():
     fiscal_periods.omit_incomparable_forecast_growth(source)
     assert source["forecast"]["net_sales_growth_pct"] == [10]
     assert fiscal_periods.label(source["actuals"], 0) == "2025"
+
+
+def test_missing_accounting_dates_do_not_stop_report_preparation():
+    source = {
+        "actuals": {"years": [2025], "periods": [{"start": None, "end": None}],
+                    "income_statement": {"net_sales": [2000]}},
+        "forecast": {"years": [2026], "net_sales_growth_pct": [15]},
+    }
+    stage = {"id": "source", "order": 0, "name": "Source", "model": runner.DATA_FETCHER_MODEL}
+
+    result = asyncio.run(runner._execute_stage(stage, {}, source, None, {}))
+
+    assert result["status"] == "ok", result
+    prepared = result["parsed_json"]
+    assert prepared["forecast"]["net_sales_growth_pct"] == [None]
+    table = financials.build_financial_statement_blocks(prepared)["5"][0]
+    assert table["columns"][1] == "—"
+    assert next(row for row in table["rows"] if row[0] == "Liikevaihto")[1] == "2 000"

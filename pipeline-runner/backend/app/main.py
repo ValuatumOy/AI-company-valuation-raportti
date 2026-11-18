@@ -64,7 +64,7 @@ MONITOR_PATH = "/api/monitor/summary"
 _MONITOR_TOKEN = (os.getenv("MONITOR_TOKEN") or "").strip()
 
 # Bump on deploy to confirm which build is live (surfaced in /api/health).
-BUILD = "2026-10-07-valuation-model-update"
+BUILD = "2026-11-18-report-fiscal-periods"
 
 # Round-2 refinement writer. Same model as round 1 (the stage's own
 # `openai/gpt-6.1-sol`) — a refinement has to preserve the previous report
