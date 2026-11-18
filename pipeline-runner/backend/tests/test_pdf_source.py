@@ -88,3 +88,13 @@ def test_norwegian_run_refuses_forecast_edits_through_the_endpoint(monkeypatch):
     response = client.post(f"/api/runs/{rid}/round2", headers={"Authorization": "Bearer admin-only"}, json=edit)
     assert response.status_code == 409 and "not available for this report's source" in response.text
     assert calls == []
+
+
+def test_finnish_report_may_still_mention_swedish_or_norwegian_amounts():
+    report = {"meta": {"country_code": "FI", "currency": "EUR", "report_language": "fi"},
+              "peers": [{"name": "Svensk AB", "currency": "SEK", "revenue": "2 300 MSEK"}],
+              "summary": "Kilpailijan liikevaihto 2 300 MSEK ja norjalaisen 900 MNOK."}
+    assert report_i18n.locale_from(report).currency == "EUR"
+    report["summary"] = "Liikevaihto 1 200 tDKK."
+    with pytest.raises(ValueError):
+        report_i18n.locale_from(report)

@@ -7,7 +7,9 @@ import re
 
 from valuatum_kit.config import COUNTRIES, CURRENCIES, LANGUAGES
 
-_CURRENCY_RE = "|".join(CURRENCIES)
+# Labels that conflict with the report currency. Other currencies (a Swedish
+# competitor's MSEK in a Finnish report) stay free text, as before NOK and SEK.
+_CHECKED_CURRENCIES = ("EUR", "DKK", "USD")
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,9 @@ def tf(text, *values):
 
 def validate_report_units(report, currency=None):
     currency = currency or current().currency
-    pattern = re.compile(rf"\b(?:t|M\s*|bn\s*)({_CURRENCY_RE})\b|\b({_CURRENCY_RE})/employee\b|(?P<euro>€)", re.I)
+    checked = set(_CHECKED_CURRENCIES) | {currency}
+    names = "|".join(sorted(checked))
+    pattern = re.compile(rf"\b(?:t|M\s*|bn\s*)({names})\b|\b({names})/employee\b|(?P<euro>€)", re.I)
 
     def check(value, path="report"):
         if isinstance(value, dict):
@@ -116,7 +120,7 @@ def validate_report_units(report, currency=None):
                 if key in ("company_name", "url", "source", "source_url", "industry", "industry_display_en",
                            "domicile", "source_id", "source_identifier", "identifier", "business_id", "y_tunnus"):
                     continue
-                if key in ("currency", "unit") and val in CURRENCIES and val != currency:
+                if key in ("currency", "unit") and val in checked and val != currency:
                     raise ValueError(f"Report currency {currency} conflicts with {val} label at {path}.{key}")
                 check(val, path + "." + str(key))
         elif isinstance(value, list):
