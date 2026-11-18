@@ -5,6 +5,7 @@ forecast, WACC, invested-capital roll-forward and terminal assumptions are used.
 The report should not double-count DCF and EVA as two independent weighted
 methods in that case.
 """
+from . import fiscal_periods
 from .report_i18n import t as _t, tf as _tf, localized_input, current, number, money_scale
 
 
@@ -110,7 +111,10 @@ def _basics(input_data):
         out["balance_sheet_total_teur"] = assets
     years = actuals.get("years") or []
     if years:
-        out["fiscal_year"] = years[-1]
+        if "periods" not in actuals:
+            out["fiscal_year"] = years[-1]
+        elif fiscal_periods.bounds(actuals, len(years) - 1):
+            out["fiscal_year"] = fiscal_periods.label(actuals, len(years) - 1)
     kaypa = _verottaja_kaypa(input_data)
     if kaypa is not None:
         out["verottaja_value_teur"] = round(kaypa["kaypa"], 1)

@@ -28,6 +28,8 @@ except ImportError:  # Direct script execution.
 
 
 EXTRA_VARS = [
+    "cr_fiscal_year_start",
+    "cr_fiscal_year_end",
     "cr_employees",
     "employees",
     "headcount",
@@ -407,6 +409,18 @@ def income_statement(data_map: dict[str, dict[str, Any]], years: list[int]) -> d
     }
 
 
+def fiscal_periods(data_map: dict[str, dict[str, Any]], years: list[int]) -> list[dict[str, Any]]:
+    def source_date(year, field):
+        value = raw(data_map, year, field)
+        try:
+            return datetime.strptime(str(value).removesuffix(".0"), "%Y%m%d").date().isoformat()
+        except ValueError:
+            return None
+
+    return [{"start": source_date(year, "cr_fiscal_year_start"),
+             "end": source_date(year, "cr_fiscal_year_end")} for year in years]
+
+
 def balance_sheet(data_map: dict[str, dict[str, Any]], years: list[int]) -> dict[str, Any]:
     return {
         "development_costs": arr(data_map, years, "cr_development_expenditure", money=True),
@@ -521,6 +535,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         },
         "actuals": {
             "years": actual_years,
+            **({"periods": fiscal_periods(data_map, actual_years)} if country_code == "FI" else {}),
             "unit": unit,
             "income_statement": income_statement(data_map, actual_years),
             "balance_sheet": balance_sheet(data_map, actual_years),

@@ -3,6 +3,8 @@ import copy
 import json
 import re
 
+from . import fiscal_periods
+
 LANGUAGES = {"fi", "en"}
 COUNTRIES = {"FI", "DK", "US"}
 CURRENCIES = {"EUR", "DKK", "USD"}
@@ -87,6 +89,7 @@ def normalize_input(input_data, params=None):
             if context["currency"] != "EUR" and (peer_currency != context["currency"]
                                                   or peer_unit != context["unit"]):
                 raise ValueError("Foreign peer monetary values require matching currency and unit")
+    fiscal_periods.omit_incomparable_forecast_growth(data)
     return data
 
 

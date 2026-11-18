@@ -6,6 +6,7 @@ field name yet, so it's derived locally from ebit and headcount instead of
 guessing a varname. Never invented — a row is dropped entirely if none of its
 years have data.
 """
+from . import fiscal_periods
 from .report_i18n import t as _t, tf as _tf, localized_input, current, number
 
 
@@ -87,6 +88,8 @@ def build_headcount_efficiency_blocks(input_data):
     inc = actuals.get("income_statement") or {}
     per_emp = actuals.get("per_employee") or {}
 
+    labels = ([fiscal_periods.label(actuals, i) for i in range(n)]
+              if years == actuals.get("years") else [str(year) for year in years])
     corrected = (_implied_headcounts(hc, _align(_get_list(inc, "personnel_costs"), n))
                  if current().country == "FI" and current().currency == "EUR" else {})
     # Engine per_employee ratios were computed with the reported headcount, so
@@ -152,11 +155,11 @@ def build_headcount_efficiency_blocks(input_data):
         "table_id": "deterministic_headcount_efficiency",
         "title": _t('Henkilöstötehokkuus'),
         "unit": _t('Henkilöstö: lkm, muut rivit €/henkilö'),
-        "columns": [_t('Erä')] + [str(y) for y in years],
+        "columns": [_t('Erä')] + labels,
         "rows": rows,
     }]
     if corrected:
-        yrs = ", ".join(str(years[i]) for i in sorted(corrected))
+        yrs = ", ".join(labels[i] for i in sorted(corrected))
         blocks.append({
             "type": "callout",
             "variant": "info",

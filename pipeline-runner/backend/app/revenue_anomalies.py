@@ -8,6 +8,11 @@ brief that stage 1 can use for web searches.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
+
+from . import fiscal_periods
+
 
 RATIO_UP = 2.0
 RATIO_DOWN = 0.5
@@ -34,15 +39,22 @@ def _num(v):
     return None
 
 
-def _series_from_parallel(years, values):
+def _series_from_parallel(years, values, actuals):
     if not isinstance(years, list) or not isinstance(values, list):
         return []
     out = []
-    for y, v in zip(years, values):
+    for i, (y, v) in enumerate(zip(years, values)):
         year = _num(y)
         val = _num(v)
         if year is not None and val is not None:
-            out.append({"year": int(year), "revenue_teur": val})
+            point = {"year": int(year), "revenue_teur": val}
+            if "periods" in actuals:
+                period = fiscal_periods.bounds(actuals, i)
+                if not fiscal_periods.annual(period):
+                    continue
+                point.update(year=period[1].year, period_start=period[0].isoformat(),
+                             period_end=period[1].isoformat())
+            out.append(point)
     return out
 
 
@@ -82,11 +94,11 @@ def revenue_series(input_data):
         years = actuals.get("years")
         income = actuals.get("income_statement") or {}
         for key in ("net_sales", "revenue", "liikevaihto", "turnover", "sales"):
-            series = _series_from_parallel(years, income.get(key))
+            series = _series_from_parallel(years, income.get(key), actuals)
             if len(series) >= 2:
                 return sorted(series, key=lambda x: x["year"])
         for key in ("net_sales", "revenue", "liikevaihto", "turnover", "sales"):
-            series = _series_from_parallel(years, actuals.get(key))
+            series = _series_from_parallel(years, actuals.get(key), actuals)
             if len(series) >= 2:
                 return sorted(series, key=lambda x: x["year"])
 
@@ -148,6 +160,9 @@ def detect(input_data):
     anomalies = []
     meta = input_data.get("meta") if isinstance(input_data, dict) else {}
     for prev, cur in zip(series, series[1:]):
+        if "period_end" in prev:
+            if date.fromisoformat(prev["period_end"]) + timedelta(days=1) != date.fromisoformat(cur["period_start"]):
+                continue
         p = prev["revenue_teur"]
         c = cur["revenue_teur"]
         change = c - p

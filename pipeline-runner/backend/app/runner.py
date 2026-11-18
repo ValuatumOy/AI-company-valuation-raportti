@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from . import openrouter, peers, report_context, revenue_anomalies, store, validators
+from . import fiscal_periods, openrouter, peers, report_context, revenue_anomalies, store, validators
 from .models import DATA_FETCHER_MODEL
 from fetchers.company_data import fetch_company_data
 
@@ -306,7 +306,10 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
         prompt = _correction_prompt(prompt, correction)
 
     locale_args = {}
-    directive = report_context.system_directive(locale)
+    directive = " ".join(filter(None, (
+        report_context.system_directive(locale),
+        fiscal_periods.writer_directive(context.get("input_data") or run_input_data),
+    )))
     if directive:
         locale_args["system_prompt"] = directive
 

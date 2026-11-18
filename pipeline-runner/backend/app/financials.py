@@ -10,6 +10,7 @@ A row with no data in any year is dropped rather than shown empty. The balance
 sheet is a selection of the export's rows, not a balancing statement — hence
 "päärivit"; vastaavaa does not foot to vastattavaa here.
 """
+from . import fiscal_periods
 from .report_i18n import t as _t, tf as _tf, localized_input, current, number
 
 INCOME_ROWS = [
@@ -90,7 +91,8 @@ def _statement_blocks(source, suffix, title_suffix, id_suffix):
         # interest_bearing_debt under those same names — so an old run still
         # gets a per-year forecast table, just a shorter one.
         rows = _rows(source.get(key) or source, spec, n)
-        shown, rows = _drop_empty_years(years, rows)
+        labels = [fiscal_periods.label(source, i) for i in range(n)] if not suffix else years
+        shown, rows = _drop_empty_years(labels, rows)
         columns = [_t('Erä')] + [f"{y}{suffix}" for y in shown]
         if rows:
             blocks.append({
@@ -177,7 +179,7 @@ def build_forecast_origin_block(input_data, params=None):
     aeb = (act.get("income_statement") or {}).get("ebit") or []
     last_act = None
     if ays and len(ans) == len(ays) and len(aeb) == len(ays) and _is_num(ans[-1]) and ans[-1] and _is_num(aeb[-1]):
-        last_act = (ays[-1], aeb[-1] / ans[-1] * 100)
+        last_act = (fiscal_periods.label(act, len(ays) - 1), aeb[-1] / ans[-1] * 100)
 
     ve = data.get("valuation_engine") or {}
     wacc = (ve.get("wacc_parameters") or {}).get("wacc_pct")
