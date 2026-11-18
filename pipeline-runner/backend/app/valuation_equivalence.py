@@ -1,10 +1,12 @@
-"""DCF/EVA equivalence normalization.
+"""DCF-primary valuation with source EVA as an unweighted reference.
 
 EVA/residual-income valuation is algebraically equivalent to DCF when the same
 forecast, WACC, invested-capital roll-forward and terminal assumptions are used.
 The report should not double-count DCF and EVA as two independent weighted
 methods in that case.
 """
+import re
+
 from .report_i18n import t as _t, tf as _tf, localized_input, current, number, money_scale
 
 
@@ -22,9 +24,9 @@ def _sum_nums(xs):
 
 def _method_key(name):
     s = str(name or "").strip().lower()
-    if "dcf" in s:
+    if re.search(r"\bdcf\b", s):
         return "dcf"
-    if "eva" in s:
+    if re.search(r"\beva\b", s):
         return "eva"
     return s
 
@@ -54,11 +56,21 @@ def _last_num(xs):
     return None
 
 
-def _first_num(xs):
-    for x in xs or []:
-        if _is_num(x):
-            return x
-    return None
+def _first_value(xs):
+    return xs[0] if xs else None
+
+
+def _eva_bridge(eva):
+    bridge = eva.get("bridge") or {}
+    keys = ["interest_bearing_debt", "cash"]
+    keys += [key for key in ("associated_market_value", "minority_market_value", "prev_year_dividends")
+             if key in bridge]
+    complete = all(_is_num(bridge.get(key)) for key in keys)
+    components = _sum_nums([bridge.get(key) for key in keys])
+    aggregate = eva.get("additional")
+    if _is_num(aggregate):
+        return aggregate, not complete or abs(aggregate - components) > 1e-6
+    return (components, False) if complete else (None, False)
 
 
 def _avg_last(xs, k=3):
@@ -143,11 +155,11 @@ def _verottaja_blocks(input_data, value):
         {
             "type": "table",
             "table_id": "deterministic_valuation_crosscheck",
-            "title": _t('Arvon ristiintarkistus: DCF/EVA vs. verottajan malli'),
+            "title": _t('Arvon ristiintarkistus: DCF/EVA vs. verottajan malli').replace("DCF/EVA", "DCF"),
             "unit": _t('tEUR'),
             "columns": [_t('Menetelmä'), _t('Arvo')],
             "rows": [
-                [_t('Raportin arvo (DCF/EVA)'), _fmt_num(value)],
+                [_t('Raportin arvo (DCF/EVA)').replace("DCF/EVA", "DCF"), _fmt_num(value)],
                 [_t('Tuottoarvo (3 v:n keskitulos / 15 %)'), _fmt_num(tuottoarvo)],
                 [_t('Substanssiarvo (oma pääoma ilman pääomalainoja)'),
                  _fmt_num(substanssiarvo)],
@@ -158,6 +170,7 @@ def _verottaja_blocks(input_data, value):
             "type": "paragraph",
             "text": (
                 _t('Verottajan mallissa (Verohallinnon arvostusohje) tuottoarvo on kolmen viime vuoden keskimääräinen nettotulos pääomitettuna 15 %:n tuottovaatimuksella ja substanssiarvo on yhtiön oma pääoma ilman pääomalainoja. Käypä arvo on näiden keskiarvo, kun tuottoarvo ylittää substanssiarvon, muutoin substanssiarvo. Malli on karkea julkinen vertailukohta (perintö- ja lahjaverotus), ei tämän raportin ensisijainen menetelmä: DCF/EVA on tarkempi, koska se käyttää yhtiön omia ennusteita ja WACCia yksittäisen keskituloksen sijaan.')
+                .replace("DCF/EVA", "DCF")
                 + ((" " + " ".join(floor_notes)) if floor_notes else "")
             ),
         },
@@ -173,7 +186,7 @@ def _num(x):
     return x if _is_num(x) else None
 
 
-def _normalize_scoring(scoring, value, source_eva=None, independent=False):
+def _normalize_scoring(scoring, value, source_eva=None):
     if not isinstance(scoring, dict) or not _is_num(value):
         return scoring
     methods = [m for m in scoring.get("method_scoring") or [] if isinstance(m, dict)]
@@ -197,10 +210,9 @@ def _normalize_scoring(scoring, value, source_eva=None, independent=False):
         m["method"] = "EVA"
         m["status"] = "reference" if current().language == "en" else "viite"
         m["weight_pct"] = 0
-        m["value_teur"] = source_eva if independent else value
+        m["value_teur"] = source_eva if _is_num(source_eva) else None
         m["rationale"] = (
-            _t("Erillinen lähdemallin EVA-arvo; sitä ei painoteta DCF-perusarvoon.") if independent else
-            _t('Täsmäytysnäkökulma samaan ennusteeseen ja WACCiin; ei erillinen painotettava menetelmä.')
+            _t("Erillinen lähdemallin EVA-arvo; sitä ei painoteta DCF-perusarvoon.")
         )
 
     weight_bearing = [m for m in methods if _method_key(m.get("method")) != "eva" and _accepted(m)]
@@ -222,16 +234,8 @@ def _normalize_scoring(scoring, value, source_eva=None, independent=False):
         if mv is not None and mw is not None:
             weighted += mv * mw / 100.0
     scoring["weighted_base_case_teur"] = round(weighted, 2)
-    scoring["weights_source"] = _t("DCF on ensisijainen; EVA on lähdemallin vertailuarvo.") if independent else ("DCF/EVA equivalence" if current().language == "en" else "DCF/EVA ekvivalenssi")
+    scoring["weights_source"] = _t("DCF on ensisijainen; EVA on lähdemallin vertailuarvo.")
     return scoring
-
-
-def _method_rows(value):
-    val = _fmt_num(value)
-    return [
-        ["DCF", val, _t('Päämenetelmä')],
-        ["EVA", val, _t('Täsmäytys samaan ennusteeseen ja WACCiin, ei erillinen paino')],
-    ]
 
 
 def _is_old_weight_table(block):
@@ -266,7 +270,62 @@ def _is_old_method_paragraph(block):
     return mentions_methods and mentions_weighting
 
 
-def _normalize_section8(sections, input_data, value):
+def _strip_equivalence_claims(block):
+    text = block.get("text")
+    if not isinstance(text, str) or not (re.search(r"\bdcf\b", text, re.I) and re.search(r"\beva\b", text, re.I)):
+        return block
+    claims = ("ekvival", "equival", "normalisoi", "normalisoitu", "normalized",
+              "sama arvo", "samat arvot", "saman lopputuloksen", "saman oman pääoman arvon",
+              "samaan ennuste", "sama ennuste", "samaan wacc", "samaan arvoon",
+              "same value", "same forecast", "both produce", "molempien raportoitava",
+              "täsmäytysnäkökulma")
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-ZÄÖÅ])", text)
+    def equality_claim(sentence):
+        lower = sentence.lower()
+        if not re.search(r"\b(?:dcf|eva|molemmat|molempien|both)\b", lower):
+            return False
+        if re.search(r"(?:eivät|ei)\s+(?:ole|anna|tuota)\s+(?:\w+\s+){0,2}(?:ekvivalent|sama|yhtä|normalisoitu)", lower):
+            return False
+        if re.search(r"(?:not|never)\s+(?:\w+\s+){0,2}(?:equivalent|equal|the same|normalized)", lower):
+            return False
+        return any(phrase in lower for phrase in claims)
+
+    kept = [sentence for sentence in sentences if not equality_claim(sentence)]
+    if not kept:
+        return None
+    return dict(block, text=" ".join(kept))
+
+
+def _refresh_source_method_table(block, value, raw, scoring):
+    columns = [str(c).lower() for c in block.get("columns") or []]
+    method_col = next((i for i, c in enumerate(columns) if c in ("menetelmä", "method")), None)
+    if block.get("type") != "table" or method_col is None:
+        return
+    source_methods = {"dcf": value, "eva": raw}
+    scored = {_method_key(m.get("method")): m for m in (scoring or {}).get("method_scoring") or []
+              if isinstance(m, dict)}
+    for row in block.get("rows") or []:
+        if not isinstance(row, list) or len(row) <= method_col:
+            continue
+        key = _method_key(row[method_col])
+        if key not in source_methods:
+            continue
+        row[method_col] = key.upper()
+        for i, column in enumerate(columns[:len(row)]):
+            if column.startswith("arvo") or column.startswith("value"):
+                row[i] = (_fmt_num(source_methods[key]) if _is_num(source_methods[key])
+                          else _t("ei saatavilla lähdedatassa"))
+            elif key == "eva" and column in ("status", "tila"):
+                row[i] = "reference" if current().language == "en" else "viite"
+            elif "paino" in column or "weight" in column:
+                weight = 0 if key == "eva" else scored.get(key, {}).get("weight_pct")
+                if _is_num(weight):
+                    row[i] = f"{_fmt_num(weight)} %" if isinstance(row[i], str) else weight
+            elif key == "eva" and any(word in column for word in ("perustelu", "rationale", "reason")):
+                row[i] = _t("Erillinen lähdemallin EVA-arvo; sitä ei painoteta DCF-perusarvoon.")
+
+
+def _normalize_section8(sections, input_data, value, scoring=None):
     if not _is_num(value):
         return
     if current().country != "FI":
@@ -297,57 +356,50 @@ def _normalize_section8(sections, input_data, value):
                 sec["blocks"] = blocks + kept
                 return
         return
+    raw = (((input_data or {}).get("valuation_engine") or {}).get("eva") or {}).get("equity_value_before_floor_raw")
     new_blocks = [
-        {
-            "type": "paragraph",
-            "text": (
-                _t('DCF ja EVA ovat sama arvo kahdella eri tavalla laskettuna. DCF diskonttaa yhtiön tuottaman vapaan kassavirran pääoman tuottovaatimuksella (WACC). EVA mittaa saman asian toisin: paljonko voittoa jää sen jälkeen, kun sitoutuneelle pääomalle on veloitettu sama tuottovaatimus. Koska molemmat nojaavat samaan ennusteeseen, samaan WACCiin ja samaan pääomapohjaan, ne antavat aina saman lopputuloksen — alla ne antavat saman oman pääoman arvon.')
-            ),
-        },
-        {
-            "type": "table",
-            "table_id": "deterministic_dcf_eva_equivalence",
-            "title": _t('Arvonmäärityksen päämenetelmä ja täsmäytys'),
-            "unit": _t('tEUR'),
-            "columns": [_t('Näkökulma'), _t('Arvo'), _t('Rooli')],
-            "rows": _method_rows(value),
-        },
-        {
-            "type": "paragraph",
-            "text": (
-                _t('DCF ja EVA perustuvat samaan ennustepolkuun, WACCiin ja velka-/kassasiltaan. Näillä samoilla oletuksilla EVA ei ole toinen riippumaton arvonmääritysmenetelmä, vaan DCF:n laskennallinen täsmäytysnäkökulma.')
-            ),
-        },
-        {
-            "type": "callout",
-            "variant": "info",
-            "title": _t('Menetelmien ekvivalenssi'),
-            "text": (
-                _tf('Painotettu base case ei keskiarvoista DCF:ää ja EVA:a. Raportin ankkuriarvo on {0} tEUR, ja EVA:n tehtävä on osoittaa saman ennusteen sisäinen johdonmukaisuus.', f'{_fmt_num(value)}')
-            ),
-        },
-    ] + _verottaja_blocks(input_data, value)
+        {"type": "paragraph", "text": _t("DCF on raportin ensisijainen menetelmä. Lähteen EVA-arvo esitetään erillisenä malliarvona. Lähdemallien oletusten yhtäläisyyttä tai arvojen täsmäytystä ei ole vahvistettu.")},
+        {"type": "table", "table_id": "deterministic_valuation_source_methods",
+         "title": _t("Lähdemallien arvot"), "unit": current().unit,
+         "columns": [_t("Menetelmä"), _t("Arvo"), _t("Rooli")],
+         "rows": [["DCF", _fmt_num(value), _t("Päämenetelmä")],
+                  ["EVA", _fmt_num(raw) if _is_num(raw) else _t("ei saatavilla lähdedatassa"),
+                   _t("Erillinen lähdemallin vertailuarvo")]]},
+    ]
+    if _is_num(raw) and abs(raw - value) > max(1.0, 0.005 * abs(value)):
+        new_blocks.append({"type": "callout", "variant": "warning", "title": _t("EVA- ja DCF-mallin ero"),
+                           "text": _tf("Lähteen EVA-arvo on {0} {2} ja DCF-arvo {1} {2}. Ero säilytetään; EVA-arvoa ei korvata DCF-arvolla.", _fmt_num(raw), _fmt_num(value), current().unit)})
+    new_blocks += _verottaja_blocks(input_data, value)
+    for block in new_blocks:
+        block["_source_method_comparison"] = True
     for sec in sections:
         if not (isinstance(sec, dict) and str(sec.get("id")) == "8"):
             continue
-        # A DCF+EVA paragraph is only the old weighting prose at the top of the
-        # section or under the weighting heading. Under e.g. "Arvostusväli" it is
-        # the writer's own answer, and dropping it left the heading empty.
-        kept, heading = [], ""
+        kept, heading, after_tax_table = [], "", False
         for b in sec.get("blocks") or []:
-            if isinstance(b, dict) and b.get("type") == "heading":
-                heading = str(b.get("text") or "").lower()
-            under_weighting = not heading or "painot" in heading or "weight" in heading
-            if (_is_old_weight_table(b) or _is_old_method_chart(b)
-                    or (under_weighting and _is_old_method_paragraph(b))):
-                continue
+            if isinstance(b, dict):
+                if b.get("type") == "heading":
+                    heading = str(b.get("text") or "").lower()
+                if b.get("table_id") == "deterministic_valuation_crosscheck":
+                    after_tax_table = True
+                    continue
+                if after_tax_table and b.get("type") == "paragraph":
+                    after_tax_table = False
+                    continue
+                after_tax_table = False
+                under_weighting = not heading or "painot" in heading or "weight" in heading
+                b = _strip_equivalence_claims(b)
+                if b is None:
+                    continue
+                if b.get("_from_section7"):
+                    _refresh_source_method_table(b, value, raw, scoring)
+                if (b.get("_source_method_comparison")
+                        or b.get("table_id") in ("deterministic_dcf_eva_equivalence", "deterministic_valuation_source_methods")
+                        or b.get("title") == _t("Menetelmien ekvivalenssi")
+                        or _is_old_weight_table(b) or _is_old_method_chart(b)
+                        or (under_weighting and _is_old_method_paragraph(b))):
+                    continue
             kept.append(b)
-        if any(isinstance(b, dict) and b.get("table_id") == "deterministic_dcf_eva_equivalence"
-               for b in sec.get("blocks") or []):
-            # Already normalized (a refinement round copies the previous report,
-            # empty headings included) — only clear the headings left empty.
-            sec["blocks"] = _drop_empty_headings(sec.get("blocks") or [])
-            return
         sec["blocks"] = new_blocks + _drop_empty_headings(kept)
         return
 
@@ -361,11 +413,17 @@ def _drop_empty_headings(blocks):
 
 
 def _normalize_section10(sections, input_data, value):
-    if not (_is_num(value) and _has_eva(input_data)):
+    if not _is_num(value) or (current().country != "FI" and not _has_eva(input_data)):
         return
     eva = ((input_data or {}).get("valuation_engine") or {}).get("eva") or {}
     ic = eva.get("invested_capital")
-    pv_exp = _sum_nums(eva.get("discounted_eva"))
+    discounted = eva.get("discounted_eva") or []
+    years = eva.get("years") or []
+    explicit_complete = (bool(years) and len(years) == len(discounted)
+                         and all(_is_num(y) for y in years)
+                         and len(set(years)) == len(years)
+                         and all(_is_num(x) for x in discounted))
+    pv_exp = _sum_nums(discounted)
     pv_term = eva.get("pv_of_trm_eva")
     if not _is_num(pv_term):
         # `pv_of_eva_ty` comes back null from /modeldata for every company.
@@ -375,8 +433,8 @@ def _normalize_section10(sections, input_data, value):
         # cum[0] − sum(discounted_eva) is the engine's terminal EVA. No DCF
         # figure enters this derivation; the backsolve warned about below is a
         # different, forbidden one.
-        cum0 = _first_num(eva.get("cumulative_discounted_eva"))
-        if _is_num(cum0):
+        cum0 = _first_value(eva.get("cumulative_discounted_eva"))
+        if _is_num(cum0) and explicit_complete:
             pv_term = cum0 - pv_exp
     cap_change = eva.get("pv_of_cap_base_change")
     raw = eva.get("equity_value_before_floor_raw")
@@ -391,33 +449,28 @@ def _normalize_section10(sections, input_data, value):
     rows = []
     if _is_num(ic):
         rows.append([_t('Investoitu pääoma'), _fmt_num(ic)])
-    rows.append([_t('PV, diskontatut EVA:t (ennustejakso)'), _fmt_num(pv_exp)])
+    rows.append([_t('PV, diskontatut EVA:t (ennustejakso)'),
+                 _fmt_num(pv_exp) if explicit_complete
+                 else _t("ei saatavilla lähdedatassa")])
     rows.append([_t('Jatkuvan arvon (terminaali-EVA) nykyarvo'),
                  _fmt_num(pv_term) if _is_num(pv_term) else _t('ei saatavilla lähdedatassa')])
     if _is_num(cap_change):
         rows.append([_t('Pääomapohjan muutoksen nykyarvo'), _fmt_num(cap_change)])
-    bridge_row_start = len(rows)
-    if _is_num(debt):
-        rows.append([_t('− Korolliset velat'), _fmt_num(debt)])
-    if _is_num(cash):
-        rows.append([_t('+ Kassa'), _fmt_num(cash)])
-    extra_bridge = []
-    if current().country != "FI":
-        for key, label in (("associated_market_value", "Osakkuusyhtiöt / muut erät"),
+    bridge_total, bridge_aggregate = _eva_bridge(eva)
+    if bridge_aggregate:
+        rows.append([_t("Lähteen rahoitus- ja muut oikaisut"), _fmt_num(bridge_total)])
+    else:
+        for key, label in (("interest_bearing_debt", "− Korolliset velat"), ("cash", "+ Kassa"),
+                           ("associated_market_value", "Osakkuusyhtiöt / muut erät"),
                            ("minority_market_value", "Vähemmistöosuudet"),
                            ("prev_year_dividends", "Edellisen vuoden osingot")):
-            if _is_num(bridge.get(key)):
-                extra_bridge.append(bridge[key])
-                rows.append([_t(label), _fmt_num(bridge[key])])
-    bridge_total = _sum_nums([debt, cash]) + sum(extra_bridge)
-    additional = eva.get("additional")
-    if current().country != "FI" and _is_num(additional) and abs(additional - bridge_total) > 1e-6:
-        rows[bridge_row_start:] = [[_t("Lähteen rahoitus- ja muut oikaisut"), _fmt_num(additional)]]
-        bridge_total = additional
+            if key in ("interest_bearing_debt", "cash") or key in bridge:
+                rows.append([_t(label), _fmt_num(bridge.get(key)) if _is_num(bridge.get(key))
+                             else _t("ei saatavilla lähdedatassa")])
     total = (
         (ic if _is_num(ic) else 0) + pv_exp + (pv_term if _is_num(pv_term) else 0)
         + (cap_change if _is_num(cap_change) else 0)
-        + bridge_total
+        + (bridge_total if _is_num(bridge_total) else 0)
     )
     # Only claim a reconciliation when the components actually add up to the
     # EVA engine's own equity value. If a field this code does not model shows
@@ -425,12 +478,14 @@ def _normalize_section10(sections, input_data, value):
     # the sum silently drifts — so verify per run instead of trusting the shape.
     complete = (
         _is_num(ic) and _is_num(pv_term) and _is_num(raw)
+        and explicit_complete and _is_num(bridge_total)
         and abs(total - raw) <= (1.0 if current().country != "FI" else max(1.0, 0.005 * abs(raw)))
     )
     if complete:
         rows.append([_t("Komponenttien summa"), _fmt_num(total)])
-    if _is_num(raw):
-        rows.append([_t('EVA-moottorin oma arvo ennen normalisointia'), _fmt_num(raw)])
+    if _is_num(raw) or current().country == "FI":
+        rows.append([_t('EVA-moottorin oma arvo ennen normalisointia'),
+                     _fmt_num(raw) if _is_num(raw) else _t("ei saatavilla lähdedatassa")])
     rows.append([_t('Oman pääoman arvo (DCF, käytetty raportissa)'), _fmt_num(value)])
 
     if complete:
@@ -441,7 +496,7 @@ def _normalize_section10(sections, input_data, value):
         intro = (
             _t('EVA-erittelyn komponentit eivät täsmää EVA-moottorin omaan arvoon tai jokin komponentti puuttuu lähdedatasta, joten täsmäytyssummaa ei esitetä. Raportin arvostus perustuu DCF-menetelmään; EVA on tässä raportissa DCF:n rinnakkaisnäkymä, ei itsenäinen menetelmäarvo.')
         )
-    if current().country != "FI":
+    if current().country != "FI" or not complete:
         intro = _t("EVA-erät esitetään lähdemallin arvoina. Summa esitetään vain, jos erät täsmäävät lähteen omaan EVA-arvoon. Raportin ensisijainen arvonmääritys perustuu DCF:ään; mallien vastaavuutta ei oleteta.")
     diff_note = None
     if _is_num(raw) and abs(raw - value) > max(1.0, 0.01 * abs(value)):
@@ -508,7 +563,7 @@ def _eva_year_blocks(input_data):
     parameters = ve.get("wacc_parameters") or {}
     wacc = parameters.get("wacc_pct")
     disc = rows_in["discounted_eva"]
-    cum0 = _first_num(eva.get("cumulative_discounted_eva"))
+    cum0 = _first_value(eva.get("cumulative_discounted_eva"))
     term = cum0 - sum(disc) if _is_num(cum0) else None
     has_t = _is_num(term)
     divisor, unit, decimals = 1.0, current().unit, 0
@@ -581,27 +636,22 @@ def eva_waterfall_figures(input_data, dcf_value=None):
     eva = ve.get("eva") or {}
     years = eva.get("years") or []
     disc = eva.get("discounted_eva") or []
-    if not years or len(years) != len(disc) or not all(_is_num(x) for x in disc):
+    if (not years or len(years) != len(disc) or not all(_is_num(y) for y in years)
+            or len(set(years)) != len(years) or not all(_is_num(x) for x in disc)):
         return None
     ic = eva.get("invested_capital")
-    cum0 = _first_num(eva.get("cumulative_discounted_eva"))
+    cum0 = _first_value(eva.get("cumulative_discounted_eva"))
     raw = eva.get("equity_value_before_floor_raw")
     bridge = eva.get("bridge") or {}
     debt, cash = bridge.get("interest_bearing_debt"), bridge.get("cash")
-    add = eva.get("additional")
-    if not _is_num(add):
-        add = _sum_nums([debt, cash])
-        if ((input_data or {}).get("meta") or {}).get("country_code", "FI") != "FI":
-            add += _sum_nums([bridge.get(k) for k in
-                              ("associated_market_value", "minority_market_value", "prev_year_dividends")])
-    if not all(_is_num(x) for x in (ic, cum0, raw)):
+    add, bridge_aggregate = _eva_bridge(eva)
+    if not all(_is_num(x) for x in (ic, cum0, raw, add)):
         return None
     foreign = ((input_data or {}).get("meta") or {}).get("country_code", "FI") != "FI"
     if abs(ic + cum0 + add - raw) > (1.0 if foreign else max(1.0, 0.005 * abs(raw))):
         return None
     explicit = sum(disc)
     other = add - _sum_nums([debt, cash])
-    bridge_aggregate = foreign and _is_num(eva.get("additional")) and abs(other) > 1e-6
     if bridge_aggregate:
         debt = cash = None
         other = add
@@ -616,7 +666,7 @@ def eva_waterfall_figures(input_data, dcf_value=None):
         "terminal": cum0 - explicit,
         "debt": debt if _is_num(debt) else None,
         "cash": cash if _is_num(cash) else None,
-        "other": other if abs(other) >= 0.5 else None,
+        "other": other if bridge_aggregate or abs(other) >= 0.5 else None,
         "equity": raw,
         "dcf_equity": dcf_value if _is_num(dcf_value) else None,
         "years": list(years),
@@ -640,17 +690,26 @@ def normalize_report(report, input_data):
     if basics is not None:
         report["_basics"] = basics
     value = _dcf_equity(input_data)
-    if not (_is_num(value) and _has_eva(input_data)):
+    if not _is_num(value) or (current().country != "FI" and not _has_eva(input_data)):
         return report
     scoring = report.get("_scoring")
     if isinstance(scoring, dict):
         source_eva = (((input_data or {}).get("valuation_engine") or {}).get("eva") or {}).get("equity_value_before_floor_raw")
-        _normalize_scoring(scoring, value, source_eva, current().country != "FI")
+        _normalize_scoring(scoring, value, source_eva)
     wf = eva_waterfall_figures(input_data, value)
     if wf is not None:
         report["_eva_waterfall"] = wf
+    else:
+        report.pop("_eva_waterfall", None)
     sections = report.get("sections") or []
-    _normalize_section8(sections, input_data, value)
+    _normalize_section8(sections, input_data, value, scoring)
+    if current().country == "FI":
+        for section in sections:
+            if isinstance(section, dict) and str(section.get("id")) not in ("8", "10"):
+                section["blocks"] = _drop_empty_headings([
+                    cleaned for block in section.get("blocks") or []
+                    if (cleaned := _strip_equivalence_claims(block) if isinstance(block, dict) else block) is not None
+                ])
     _normalize_section10(sections, input_data, value)
     # Underscore = renderer/QA-only. The post-assemble QA compares the cover
     # figures against this anchor (the AWAKE.AI case: cover 762 vs assembled

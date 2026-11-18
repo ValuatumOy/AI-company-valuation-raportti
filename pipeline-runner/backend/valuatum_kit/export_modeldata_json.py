@@ -29,6 +29,8 @@ except ImportError:  # Direct script execution.
 
 EXTRA_VARS = [
     "cr_employees",
+    "cr_fiscal_year_start",
+    "cr_fiscal_year_end",
     "employees",
     "headcount",
     "number_of_employees",
@@ -80,6 +82,7 @@ EXTRA_VARS = [
     "cr_non_current_advances_received",
     "cr_current_advances_received",
     "cr_current_trade_creditors",
+    "interest_bearing_liabilities_calc",
     "non_interest_bearing_liabilities_calc",
     # Credit risk. Fetched per fid like everything else — the Profinder MCP this
     # replaced was keyed by company code and returned the KONSERNI figures
@@ -407,6 +410,25 @@ def income_statement(data_map: dict[str, dict[str, Any]], years: list[int]) -> d
     }
 
 
+def fiscal_periods(data_map: dict[str, dict[str, Any]], years: list[int]) -> list[dict[str, Any]]:
+    """Keep actual fiscal dates alongside the model's relative year slots."""
+    def iso_date(value):
+        if isinstance(value, bool):
+            return None
+        try:
+            text = str(int(value))
+            if len(text) != 8 or float(value) != int(value):
+                return None
+            return datetime.strptime(text, "%Y%m%d").date().isoformat()
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    return [{"model_year": year,
+             "start": iso_date(raw(data_map, year, "cr_fiscal_year_start")),
+             "end": iso_date(raw(data_map, year, "cr_fiscal_year_end"))}
+            for year in years]
+
+
 def balance_sheet(data_map: dict[str, dict[str, Any]], years: list[int]) -> dict[str, Any]:
     return {
         "development_costs": arr(data_map, years, "cr_development_expenditure", money=True),
@@ -433,11 +455,11 @@ def balance_sheet(data_map: dict[str, dict[str, Any]], years: list[int]) -> dict
             ["cr_non_current_advances_received", "cr_current_advances_received"],
             money=True),
         "trade_payables": arr(data_map, years, "cr_current_trade_creditors", money=True),
-        # liab_ib_total EXCLUDES capital loans; interest_bearing_liabilities_calc
-        # is the same series plus them. The valuation engine treats a capital
-        # loan as equity-like (singlewriter.txt rule 25), so the debt line must
-        # be the excluding one or the net-debt bridge double-counts it.
+        # Keep both source series: their difference can include more than just
+        # capital loans (e.g. associated-company debt).
         "interest_bearing_debt": arr(data_map, years, "liab_ib_total", money=True),
+        "interest_bearing_debt_source_total": arr(
+            data_map, years, "interest_bearing_liabilities_calc", money=True),
         "non_interest_bearing_debt": arr(
             data_map, years, "non_interest_bearing_liabilities_calc", money=True),
     }
@@ -508,6 +530,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
             "country_code": country_code,
             "level": ("consolidated" if code.endswith("K") else "parent") if country_code == "FI" else model.get("level", "unknown"),
             "data_source": "profinder",
+            **({"scenario_timing_version": 2} if country_code == "FI" else {}),
             "run_id": str(uuid.uuid4()),
             "run_timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
@@ -521,6 +544,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         },
         "actuals": {
             "years": actual_years,
+            **({"periods": fiscal_periods(data_map, actual_years)} if country_code == "FI" else {}),
             "unit": unit,
             "income_statement": income_statement(data_map, actual_years),
             "balance_sheet": balance_sheet(data_map, actual_years),
@@ -585,6 +609,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                     ["gross_cap_expenditure_nega", "cr_cf_gross_capex_nega"] if country_code == "DK" and verify_cashflows else
                     ["cr_cf_gross_capex_nega", "gross_cap_expenditure_nega"] if country_code != "FI" else "gross_cap_expenditure_nega",
                     money=True),
+                "investing_cash_flow": arr(data_map, forecast_years, "cr_cf_gross_capex_nega", money=True),
                 "free_operating_cash_flow": arr(data_map, forecast_years, "free_operating_cash_flow", money=True),
                 "other_items_fcf": arr(data_map, forecast_years, "other_items_fcf", money=True),
                 "fcff": arr(data_map, forecast_years, "free_cash_flow_to_firm", money=True),
@@ -632,18 +657,10 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                     "cash": scalar(data_map, first_forecast, "cash_prev_year", money=True),
                 },
                 "equity_value_before_floor_raw": scalar(data_map, first_forecast, "value_of_equity_eva", money=True),
-                "equity_value_before_floor": scalar(
-                    data_map, first_forecast, "value_of_equity_eva", money=True
-                ) if country_code != "FI" else coalesce(
-                    scalar(data_map, first_forecast, "value_of_equity_fcff", money=True),
-                    scalar(data_map, first_forecast, "value_of_equity_eva", money=True),
-                ),
+                "equity_value_before_floor": scalar(data_map, first_forecast, "value_of_equity_eva", money=True),
                 "equivalence_note": (
                     "EVA and DCF are retained as separate source-engine values; equivalence "
-                    "has not been verified for this foreign model."
-                    if country_code != "FI" else
-                    "EVA is normalized to DCF equity value when both use the same Valuatum forecast "
-                    "and WACC; the raw EVA engine value is retained in equity_value_before_floor_raw."
+                    "must be verified from the source model and reconciliation."
                 ),
             },
         },

@@ -7,6 +7,8 @@ render.py's _scenario_values). Section 11's own prose/tables describe each
 scenario one at a time; this reads the same structured numbers and lays them
 side by side so a reader can compare without flipping between paragraphs.
 """
+import re
+
 from .report_i18n import t as _t, localized_input, number
 
 _ORDER = ["pessimistinen", "konservatiivinen", "optimistinen"]
@@ -25,7 +27,10 @@ def _classify(name):
     n = str(name or "").strip().lower()
     aliases = {"pessimistic": "pessimistinen", "conservative": "konservatiivinen",
                "base case": "konservatiivinen", "realistic": "konservatiivinen",
+               "base-case": "konservatiivinen", "perusskenaario": "konservatiivinen",
                "realistinen": "konservatiivinen", "optimistic": "optimistinen"}
+    if re.fullmatch(r"base(?:\s+scenario)?", n):
+        return "konservatiivinen"
     for alias, key in aliases.items():
         if alias in n:
             return key

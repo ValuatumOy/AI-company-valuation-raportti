@@ -5,6 +5,7 @@ This is an async generator so the HTTP layer can stream progress live.
 """
 import asyncio
 import json
+import math
 import os
 import re
 import time
@@ -13,7 +14,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
-from . import openrouter, peers, report_context, revenue_anomalies, store, validators
+from . import (dcf_quality, debt_quality, financials, fiscal_periods, legacy_investing, openrouter, peers, report_context,
+               revenue_anomalies, scenario_waterfall, store, validators)
 from .models import DATA_FETCHER_MODEL
 from fetchers.company_data import fetch_company_data
 
@@ -33,6 +35,80 @@ def _spend_cap_exceeded(rid):
         if dc >= day_cap:
             return f"Päivän spend cap saavutettu (${dc:.4f} ≥ ${day_cap:.2f})."
     return None
+
+
+def _valuation_integrity_directive(data):
+    if not isinstance(data, dict):
+        return None
+    parts = [
+        "DCF and EVA source outputs must remain distinct. Use the raw EVA value as a reference "
+        "and never claim the two values reconcile unless source components actually prove it. "
+        "A customer target for one year is not evidence of a later terminal-year revenue; "
+        "state any later level or growth path separately as an assumption. "
+        "Capital and affiliated-company loans require their actual terms and priority to be reviewed; "
+        "do not assert their classification or treatment is automatically correct. "
+        "A capital loan may already be included in the source debt deducted in the DCF bridge; "
+        "never subtract it again as a sensitivity without evidence it was excluded. "
+        "Matching aggregate debt alone does not establish the classification of each loan."
+    ]
+    forecast = data.get("forecast") or {}
+    forecast = forecast if isinstance(forecast, dict) else {}
+    income = forecast.get("income_statement") or {}
+    if isinstance(income, dict):
+        _, hidden = financials._forecast_income_for_display(income, len(forecast.get("years") or []))
+        if hidden:
+            years = [forecast["years"][i] for i in hidden]
+            parts.append(f"The forecast gross-profit figures for {years} do not reconcile. "
+                         "Do not present or infer replacements for those figures.")
+    netted = dcf_quality.netted_years(data)
+    if netted:
+        years = [year for year in (forecast.get("years") or []) if year in netted]
+        parts.append(f"For {years}, the source DCF investment line is net of forecast depreciation: "
+                     "the source investing cash flow plus depreciation reconciles to that line. "
+                     "Do not call the DCF line gross capex or add depreciation again without "
+                     "also replacing that line with the source gross investing cash flow. "
+                     "The arithmetic match does not establish all underlying asset movements.")
+    if (data.get("meta") or {}).get("scenario_timing_version") == 2:
+        timing = scenario_waterfall.discount_periods(data)
+        if timing["verified"]:
+            parts.append("Use these source-DCF discount periods (years from the engine's valuation date) "
+                         "for the matching optimistic realization year, not the gap from the last "
+                         "actual year: " + json.dumps({y: round(n, 9) for y, n in timing["periods"].items()}, sort_keys=True) + ". "
+                         "The scenario value, its prose, and weighted expected value must match "
+                         "the deterministic calculation using that fractional period.")
+        else:
+            parts.append("The source DCF discount timing could not be verified. Do not invent "
+                         "a scenario discount period or claim its value is reconciled.")
+    return " ".join(parts)
+
+
+async def prepare_stage0(data, identifier):
+    """Validate a copy of financial inputs before any new report execution."""
+    data = await fiscal_periods.add_legacy_source_periods(data, identifier)
+    fiscal_periods.require_comparable(data)
+    debt_quality.require_review(data)
+    data = await legacy_investing.add_source_investing_cashflow(data, identifier)
+    dcf_quality.require_review(data)
+    meta = data.get("meta") or {}
+    if meta.get("data_source") == "profinder" and meta.get("country_code", "FI") == "FI":
+        actuals = data.get("actuals") or {}
+        totals = (actuals.get("balance_sheet") or {}).get("interest_bearing_debt_source_total")
+        bridge = (((data.get("valuation_engine") or {}).get("dcf") or {}).get("bridge") or {}).get("interest_bearing_debt")
+        index = len(actuals.get("years") or []) - 1
+        total = totals[index] if isinstance(totals, list) and 0 <= index < len(totals) else None
+        def finite(value):
+            return (isinstance(value, (int, float)) and not isinstance(value, bool)
+                    and math.isfinite(value))
+        if not finite(total) or not finite(bridge):
+            raise ValueError("Arvonmäärityksen korollisia velkoja ei voitu varmistaa lähteestä.")
+        meta["scenario_timing_version"] = 2
+        data["meta"] = meta
+    if meta.get("scenario_timing_version") == 2:
+        timing = scenario_waterfall.discount_periods(data)
+        if not timing["verified"]:
+            raise ValueError("DCF-skenaarion diskonttausajankohtaa ei voitu varmistaa lähteestä: " + timing["reason"])
+    return data
+
 
 def _correction_model(stage):
     """Self-heal retry on the whole-report writer would re-pay the full Fable
@@ -280,6 +356,7 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
                     "Stage 0: ei input_dataa eikä tunnistetta. Liitä FAKTAT-JSON "
                     "tai anna Y-tunnus."
                 )
+            data = await prepare_stage0(data, identifier)
             res["raw_response"] = json.dumps(data, ensure_ascii=False, indent=2)
             res["parsed_json"] = data
             res["finish_reason"] = "stop"
@@ -307,6 +384,9 @@ async def _execute_stage(stage, context, run_input_data, identifier, params,
 
     locale_args = {}
     directive = report_context.system_directive(locale)
+    integrity = _valuation_integrity_directive(context.get("input_data") or run_input_data) if stage["order"] >= 2 else None
+    if integrity:
+        directive = (directive + " " if directive else "") + integrity
     if directive:
         locale_args["system_prompt"] = directive
 
@@ -567,6 +647,27 @@ async def _run_stages(run, stages, only=None, from_order=None):
                 out = _output_value(prev)
                 if s["order"] == 0 and isinstance(out, dict):
                     out = report_context.normalize_input(out, params)
+                    try:
+                        out = await prepare_stage0(out, identifier)
+                        if out != _output_value(prev):
+                            store.upsert_result(rid, {**prev, "parsed_json": out,
+                                                      "raw_response": json.dumps(out, ensure_ascii=False, indent=2)})
+                    except ValueError as exc:
+                        target = next((item for item in stages if in_scope(item["order"])), None)
+                        if target:
+                            msg = str(exc)
+                            store.upsert_result(rid, {**_base(target), "status": "error",
+                                                      "error_message": msg, "finished_at": _now()})
+                            yield _ev("stage", order=target["order"], status="error",
+                                      name=target["name"], error_message=msg)
+                        store.set_run_status(rid, "error")
+                        run_after = store.get_run(rid) or run
+                        if (run_after.get("access_key") and not run_after.get("parent_run_id")
+                                and not (run_after.get("params") or {}).get("_credit_refunded")):
+                            store.refund_generation(run_after["access_key"])
+                            store.mark_credit_refunded(rid)
+                        yield _ev("done", status="error", total_cost_usd=run_after.get("total_cost_usd", 0.0))
+                        return
                 _contribute(context, s, out)
                 # A writer-only rerun skips enrichment, and with it the peer
                 # resolution below — so take the peers that run already
@@ -707,7 +808,7 @@ async def _run_stages(run, stages, only=None, from_order=None):
             error_message=res.get("error_message"),
         )
 
-        if stop_on_failure and res["status"] in ("error", "validation_failed"):
+        if (stop_on_failure or s["order"] == 0) and res["status"] in ("error", "validation_failed"):
             halted = True
 
     run_after = store.get_run(rid)

@@ -585,7 +585,7 @@ def get_run(rid):
 
 def report_readiness(rid):
     """Is this run safe to hand a client? Gate the report endpoints on it."""
-    from . import assemble
+    from . import assemble, dcf_quality
     from .runner import SECTION_ORDER
 
     run = get_run(rid)
@@ -595,13 +595,17 @@ def report_readiness(rid):
     if run["status"] != "ok":
         issues.append(f"run status is '{run['status']}', not 'ok'")
     for r in run["results"]:
-        if r["order"] == 0:
-            continue
         if r["status"] == "error":
             issues.append(f"stage {r['order']} ({r['name']}) errored")
         elif r["status"] == "validation_failed" or r.get("validator_passed") is False:
             issues.append(f"stage {r['order']} ({r['name']}) failed its number/consistency checks")
+        if r["order"] == 0 and isinstance(r.get("parsed_json"), dict):
+            data = r["parsed_json"]
+            if (data.get("meta") or {}).get("scenario_timing_version") == 2:
+                issues.extend(dcf_quality.blockers(data))
     rep = assemble.assemble(run)
+    if rep:
+        issues.extend(rep.get("_release_blockers") or [])
     present = {str(s.get("id")) for s in (rep or {}).get("sections", [])} if rep else set()
     missing = [s for s in SECTION_ORDER if s not in present]
     if missing:

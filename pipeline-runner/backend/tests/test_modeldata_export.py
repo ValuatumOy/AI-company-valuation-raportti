@@ -109,13 +109,8 @@ def test_split_row_is_none_when_every_component_is_missing():
     assert bs["loans_from_fin_institutions"] == [None]
 
 
-def test_interest_bearing_debt_excludes_capital_loans():
-    """liab_ib_total, not interest_bearing_liabilities_calc.
-
-    The two differ by exactly the capital loans. The valuation engine treats a
-    capital loan as equity-like (singlewriter.txt rule 25), so using the
-    including-variant would double-count it in the net-debt bridge.
-    """
+def test_interest_bearing_debt_source_series_remain_distinct():
+    """Keep the model bridge series and the reported debt total separately."""
     bs = _actuals(
         liab_ib_total=0.225,
         interest_bearing_liabilities_calc=0.471,
@@ -123,6 +118,7 @@ def test_interest_bearing_debt_excludes_capital_loans():
     )["balance_sheet"]
 
     assert bs["interest_bearing_debt"] == [225]
+    assert bs["interest_bearing_debt_source_total"] == [471]
     assert bs["capital_loans"] == [246]
 
 
@@ -325,15 +321,16 @@ def test_foreign_missing_eva_is_not_filled_with_dcf_and_zero_adjustments_do_not_
     assert payload["valuation_engine"]["eva"]["equity_value_before_floor"] is None
 
 
-def test_finland_capex_dividend_and_eva_contract_stays_unchanged_with_foreign_aliases():
+def test_finland_preserves_source_eva_with_existing_capex_and_dividend_mapping():
     model = _model(ns=1.0)
     model["dataMap"]["2025"] = {
         "gross_cap_expenditure_nega": -5, "cr_cf_gross_capex_nega": -12,
         "cr_dcf_dividends": -195, "value_of_equity_fcff": 855, "value_of_equity_eva": 355}
     payload = export.build_payload(model)
     assert payload["valuation_engine"]["dcf"]["gross_capex"] == [-5000]
+    assert payload["valuation_engine"]["dcf"]["investing_cash_flow"] == [-12000]
     assert payload["valuation_engine"]["dcf"]["bridge"]["prev_year_dividends"] is None
-    assert payload["valuation_engine"]["eva"]["equity_value_before_floor"] == 855000
+    assert payload["valuation_engine"]["eva"]["equity_value_before_floor"] == 355000
     assert payload["valuation_engine"]["eva"]["equity_value_before_floor_raw"] == 355000
 
 

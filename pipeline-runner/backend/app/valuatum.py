@@ -263,6 +263,68 @@ async def modeldata(fids: list[int], var_poses: list[dict], country="FI") -> dic
     return resp.json() or {}
 
 
+async def preflight_fiscal_periods(fid: int) -> None:
+    """Read source fiscal dates before changing estimates or calling an LLM."""
+    from . import dcf_quality, debt_quality, fiscal_periods
+    from valuatum_kit.export_modeldata_json import arr, arr_sum, fiscal_periods as source_periods, scalar
+
+    names = ("cr_fiscal_year_start", "cr_fiscal_year_end", "ns", "ebit", "bs_total_assets",
+             "interest_bearing_liabilities_calc", "liab_ib_total", "cr_capital_loan_lt", "cr_capital_loan_st")
+    poses = [{"varName": name, "relPos": f"Y-{offset}"}
+             for name in names for offset in range(1, 10)]
+    poses.append({"varName": "ib_debt_nega_prev_year", "relPos": "Y+0"})
+    poses.extend({"varName": name, "relPos": f"Y+{offset}"}
+                 for name in ("cr_depreciation", "dep_total_nega", "free_cash_flow_to_firm",
+                              "gross_cap_expenditure_nega", "cr_cf_gross_capex_nega", "operating_cash_flow",
+                              "ebit", "taxes_paid", "tax_fin_expenses", "tax_fin_income",
+                              "change_in_wc_nega", "change_in_lt_liab_nib", "other_items_fcf")
+                 for offset in range(10))
+    response = await modeldata([fid], poses)
+    model = response.get(str(fid)) or {}
+    source = model.get("dataMap") or {}
+    try:
+        current = int(model["currentYear"])
+        years = sorted(int(y) for y in source if str(y).isdigit() and int(y) < current)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Tilikausien lähdetietoja ei voitu varmistaa.") from exc
+    if not years:
+        raise ValueError("Tilikausien lähdetietoja ei voitu varmistaa.")
+    bridge = scalar(source, current, "ib_debt_nega_prev_year", money=True)
+    if bridge is None:
+        historical_debt = scalar(source, years[-1], "liab_ib_total", money=True)
+        bridge = -historical_debt if historical_debt is not None else None
+    data = {"actuals": {"years": years, "periods": source_periods(source, years),
+                        "income_statement": {"net_sales": arr(source, years, "ns", money=True),
+                                             "ebit": arr(source, years, "ebit", money=True)},
+                        "balance_sheet": {"total_assets": arr(source, years, "bs_total_assets", money=True),
+                                          "interest_bearing_debt_source_total": arr(source, years, "interest_bearing_liabilities_calc", money=True),
+                                          "capital_loans": arr_sum(source, years, ["cr_capital_loan_lt", "cr_capital_loan_st"], money=True)}},
+            "valuation_engine": {"dcf": {"bridge": {"interest_bearing_debt": bridge}}}}
+    fiscal_periods.require_comparable(data)
+    if (data["actuals"]["balance_sheet"]["interest_bearing_debt_source_total"][-1] is None
+            or data["valuation_engine"]["dcf"]["bridge"]["interest_bearing_debt"] is None):
+        raise ValueError("Arvonmäärityksen korollisia velkoja ei voitu tarkistaa lähteestä.")
+    debt_quality.require_review(data)
+    forecast_years = sorted(int(y) for y in source if str(y).isdigit() and int(y) >= current)
+    data["forecast"] = {"years": forecast_years, "income_statement": {
+        "depreciation_total": arr(source, forecast_years, "cr_depreciation", money=True)}}
+    data["valuation_engine"]["dcf"].update({
+        "years": forecast_years,
+        "depreciation_total": arr(source, forecast_years, "dep_total_nega", money=True),
+        "fcff": arr(source, forecast_years, "free_cash_flow_to_firm", money=True),
+        "gross_capex": arr(source, forecast_years, "gross_cap_expenditure_nega", money=True),
+        "investing_cash_flow": arr(source, forecast_years, "cr_cf_gross_capex_nega", money=True),
+        "operating_cash_flow": arr(source, forecast_years, "operating_cash_flow", money=True),
+        "ebit": arr(source, forecast_years, "ebit", money=True),
+        "taxes_paid": arr(source, forecast_years, "taxes_paid", money=True),
+        "tax_fin_expenses": arr(source, forecast_years, "tax_fin_expenses", money=True),
+        "tax_fin_income": arr(source, forecast_years, "tax_fin_income", money=True),
+        "change_in_working_capital": arr(source, forecast_years, "change_in_wc_nega", money=True),
+        "change_in_non_interest_bearing_financial_liabilities": arr(source, forecast_years, "change_in_lt_liab_nib", money=True),
+        "other_items_fcf": arr(source, forecast_years, "other_items_fcf", money=True)})
+    dcf_quality.require_review(data)
+
+
 async def lookup_company_metadata(
     fid: int,
     company_name: str | None = None,
@@ -395,6 +457,8 @@ async def export_stream(
     tmp = Path(tempfile.mkdtemp(prefix="valu_"))
     base = tmp / "base.json"
     try:
+        if country_code == "FI":
+            await preflight_fiscal_periods(fid)
         if skip_estimate_generation:
             yield {"step": "estimates",
                    "label": "Skipping estimate generation (edited forecast model)"}

@@ -69,7 +69,9 @@ def _wacc_growth_matrix(fcff, disc, cum, equity_gt, wacc_base, bridge_adj):
         return None
 
     exps = _year_exponents(fcff, disc, wacc_base)
-    t_terminal = exps[-1] + 1.0
+    # Gordon's numerator already advances FCFF one year; the resulting value
+    # belongs to the final explicit forecast date, not the following year.
+    t_terminal = exps[-1]
     tv_undiscounted_base = pv_terminal_base * (1 + wacc_base / 100.0) ** t_terminal
     g_base = _implied_growth_pct(tv_undiscounted_base, wacc_base, fcff_last)
     if g_base is None or g_base >= wacc_base:

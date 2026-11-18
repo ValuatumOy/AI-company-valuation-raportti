@@ -10,6 +10,8 @@ A row with no data in any year is dropped rather than shown empty. The balance
 sheet is a selection of the export's rows, not a balancing statement — hence
 "päärivit"; vastaavaa does not foot to vastattavaa here.
 """
+from math import isfinite
+
 from .report_i18n import t as _t, tf as _tf, localized_input, current, number
 
 INCOME_ROWS = [
@@ -75,6 +77,37 @@ def _drop_empty_years(years, rows):
             [[r[0]] + [r[i + 1] for i in keep] for r in rows])
 
 
+def _forecast_income_for_display(block, n):
+    """Hide only material, fully checkable gross-profit discrepancies."""
+    hidden = []
+    keys = ("gross_profit", "personnel_costs", "other_operating_costs",
+            "other_operating_income", "ebitda")
+    for i in range(n):
+        values = [block.get(key) for key in keys]
+        if not all(isinstance(xs, list) and i < len(xs) for xs in values):
+            continue
+        values = [xs[i] for xs in values]
+        if not all(_is_num(v) and isfinite(v) for v in values):
+            continue
+        gross, personnel, costs, other_income, ebitda = values
+        # Source costs may be signed or positive expense amounts, and gross
+        # profit may already include other operating income. Accept either.
+        subtotals = (gross + personnel + costs,
+                     gross - abs(personnel) - abs(costs))
+        gap = min(abs(ebitda - subtotal - income)
+                  for subtotal in subtotals for income in (0, other_income))
+        tolerance = max(2, 0.05 * max(abs(v) for v in values))
+        if gap > tolerance:
+            hidden.append(i)
+    if not hidden:
+        return block, hidden
+    displayed = dict(block)
+    displayed["gross_profit"] = list(block["gross_profit"])
+    for i in hidden:
+        displayed["gross_profit"][i] = None
+    return displayed, hidden
+
+
 def _statement_blocks(source, suffix, title_suffix, id_suffix):
     years = (source or {}).get("years")
     if not isinstance(years, list) or not years:
@@ -89,7 +122,11 @@ def _statement_blocks(source, suffix, title_suffix, id_suffix):
         # their forecast block carries net_sales / ebitda / ebit / equity /
         # interest_bearing_debt under those same names — so an old run still
         # gets a per-year forecast table, just a shorter one.
-        rows = _rows(source.get(key) or source, spec, n)
+        statement = source.get(key) or source
+        hidden = []
+        if key == "income_statement" and id_suffix == "_forecast":
+            statement, hidden = _forecast_income_for_display(statement, n)
+        rows = _rows(statement, spec, n)
         shown, rows = _drop_empty_years(years, rows)
         columns = [_t('Erä')] + [f"{y}{suffix}" for y in shown]
         if rows:
@@ -101,6 +138,25 @@ def _statement_blocks(source, suffix, title_suffix, id_suffix):
                 "columns": columns,
                 "rows": rows,
             })
+            if hidden:
+                affected = ", ".join(f"{years[i]}{suffix}" for i in hidden)
+                english = current().language == "en"
+                blocks.append({
+                    "type": "callout", "variant": "info",
+                    "table_id": "deterministic_forecast_gross_profit_quality",
+                    "title": "Forecast gross profit" if english else "Ennusteen myyntikate",
+                    "text": (
+                        f"Gross-profit figures for {affected} are omitted because they do not reconcile "
+                        "with source EBITDA, personnel costs and other operating costs, even allowing "
+                        "for other operating income and rounding. No replacement figures are inferred. "
+                        "The source forecast and valuation are unchanged."
+                        if english else
+                        f"Myyntikateluvut {affected} on jätetty näyttämättä, koska ne eivät täsmää "
+                        "lähteen käyttökatteeseen, henkilöstökuluihin ja liiketoiminnan muihin kuluihin "
+                        "huomioitaessa myös muut tuotot ja pyöristys. Korvaavia lukuja ei ole päätelty. "
+                        "Lähde-ennustetta ja arvonmääritystä ei ole muutettu."
+                    ),
+                })
     return blocks
 
 

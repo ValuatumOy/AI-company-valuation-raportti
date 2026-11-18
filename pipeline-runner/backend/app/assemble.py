@@ -7,6 +7,8 @@ arrays from every stage into one list sorted by the canonical section order
 1,2,3,4,5,6,8,9,10,11,12,13,14,15,16 (there is no section 7), and returns the
 final report object that feeds the renderer.
 """
+import copy
+
 from .report_i18n import t as _t, current, report_context, locale_from
 from . import (dcf_detail, financials, headcount_efficiency, peers, scenario_compare,
                scenario_waterfall, sensitivity, valuation_equivalence)
@@ -313,21 +315,22 @@ def _inject_financial_statement_blocks(sections, input_data):
     for sec in sections:
         if not isinstance(sec, dict):
             continue
-        blocks = by_section.get(str(sec.get("id")))
-        if not blocks:
+        section_id = str(sec.get("id"))
+        if section_id not in {"5", "6"}:
             continue
-        current = list(sec.get("blocks") or [])
-        have = {b.get("table_id") for b in current if isinstance(b, dict)}
-        fresh = [b for b in blocks if b.get("table_id") not in have]
-        if fresh:
-            sec["blocks"] = current + fresh
+        generated_ids = {"deterministic_income_statement", "deterministic_income_statement_forecast",
+                         "deterministic_balance_sheet", "deterministic_balance_sheet_forecast",
+                         "deterministic_forecast_gross_profit_quality"}
+        current = [b for b in (sec.get("blocks") or [])
+                   if not isinstance(b, dict) or b.get("table_id") not in generated_ids]
+        sec["blocks"] = current + (by_section.get(section_id) or [])
     return sections
 
 
 def assemble(run):
     outputs = _ok_outputs_by_order(run)
     with report_context(outputs.get(0)):
-        return _assemble(run)
+        return _assemble(copy.deepcopy(run))
 
 
 def _assemble(run):
@@ -381,13 +384,12 @@ def _assemble(run):
         wrapper.setdefault("_scenarios", s4)
     # Deterministic optimistic value BEFORE the comparison table + cover derive
     # from the scenarios, so they all show the recomputed figure.
+    wrapper["_release_blockers"] = scenario_waterfall.review_writer_values(wrapper, outputs.get(0))
     wf = scenario_waterfall.apply(wrapper, outputs.get(0))
     _inject_scenario_comparison_block(sections, wrapper)
     if wf is not None:
         _inject_optimistic_waterfall_blocks(sections, wf)
+    _surface_method_scoring(sections)
     valuation_equivalence.normalize_report(wrapper, outputs.get(0))
     peers.strip_model_multiples(sections)
-    # AFTER normalize: section 8's cleanup strips method/weight tables, and the
-    # surfaced scoring table must survive it.
-    _surface_method_scoring(sections)
     return wrapper

@@ -148,6 +148,7 @@ def test_export_stream_skips_gate_for_edited_forecast(monkeypatch):
         return 0, "", ""
 
     monkeypatch.setattr(valuatum.estimate_trigger, "trigger_and_wait", forbidden_trigger)
+    monkeypatch.setattr(valuatum, "preflight_fiscal_periods", lambda fid: _async_value(None))
     monkeypatch.setattr(valuatum, "_run", fake_run)
     monkeypatch.setattr(valuatum, "lookup_company_metadata", lambda **kwargs: _async_value({}))
 

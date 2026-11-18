@@ -194,6 +194,9 @@ def test_export_stream_generates_before_modeldata(monkeypatch):
     monkeypatch.delenv("VALUATUM_MCP_URL", raising=False)
     order = []
 
+    async def fake_preflight(fid):
+        order.append(("preflight", fid))
+
     async def fake_trigger(fid):
         order.append(("trigger", fid))
 
@@ -205,13 +208,14 @@ def test_export_stream_generates_before_modeldata(monkeypatch):
         return 0, "", ""
 
     monkeypatch.setattr(valuatum.estimate_trigger, "trigger_and_wait", fake_trigger)
+    monkeypatch.setattr(valuatum, "preflight_fiscal_periods", fake_preflight)
     monkeypatch.setattr(valuatum, "_run", fake_run)
     monkeypatch.setattr(valuatum, "lookup_company_metadata", lambda **kwargs: _async_value({}))
 
     events = _run(_collect_export_events())
 
     assert [event["step"] for event in events] == ["estimates", "fetch", "ready"]
-    assert order == [("trigger", 42), ("modeldata", 42)]
+    assert order == [("preflight", 42), ("trigger", 42), ("modeldata", 42)]
 
 
 async def _async_value(value):
@@ -222,6 +226,7 @@ def test_export_stream_hard_fails_before_modeldata(monkeypatch):
     _inline_export_threads(monkeypatch)
     monkeypatch.setenv("VALUATUM_TOKEN", "tok")
     monkeypatch.setenv("VALUATUM_API_BASE_URL", "https://valu.test/rest")
+    monkeypatch.setattr(valuatum, "preflight_fiscal_periods", lambda fid: _async_value(None))
 
     async def fail_trigger(fid):
         raise estimate_trigger.EstimateGenerationError("ValuBuild testivirhe")
@@ -246,6 +251,9 @@ def test_export_stream_generates_with_default_api_when_url_is_unset(monkeypatch)
     monkeypatch.delenv("VALUATUM_MCP_URL", raising=False)
     order = []
 
+    async def fake_preflight(fid):
+        order.append(("preflight", fid))
+
     async def fake_trigger(fid):
         order.append(("trigger", fid))
 
@@ -257,13 +265,14 @@ def test_export_stream_generates_with_default_api_when_url_is_unset(monkeypatch)
         return 0, "", ""
 
     monkeypatch.setattr(valuatum.estimate_trigger, "trigger_and_wait", fake_trigger)
+    monkeypatch.setattr(valuatum, "preflight_fiscal_periods", fake_preflight)
     monkeypatch.setattr(valuatum, "_run", fake_run)
     monkeypatch.setattr(valuatum, "lookup_company_metadata", lambda **kwargs: _async_value({}))
 
     events = _run(_collect_export_events())
 
     assert [event["step"] for event in events] == ["estimates", "fetch", "ready"]
-    assert order == [("trigger", 42), ("modeldata", 42)]
+    assert order == [("preflight", 42), ("trigger", 42), ("modeldata", 42)]
 
 
 def test_fetch_company_data_preserves_ready_warnings(monkeypatch):

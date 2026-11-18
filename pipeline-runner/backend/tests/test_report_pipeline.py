@@ -788,10 +788,10 @@ def test_assemble_normalizes_dcf_eva_equivalence_in_sections_and_scoring():
     assert methods["DCF"]["weight_pct"] == 100
     assert methods["EVA"]["status"] == "viite"
     assert methods["EVA"]["weight_pct"] == 0
-    assert methods["EVA"]["value_teur"] == 450.0
+    assert methods["EVA"]["value_teur"] is None
     assert rep["_scoring"]["weighted_base_case_teur"] == 450.0
     sec8 = next(s for s in rep["sections"] if s["id"] == "8")
-    assert any(b.get("table_id") == "deterministic_dcf_eva_equivalence"
+    assert any(b.get("table_id") == "deterministic_valuation_source_methods"
                for b in sec8["blocks"] if isinstance(b, dict))
     assert not any(b.get("title") == "Menetelmien antamat arvot" for b in sec8["blocks"] if isinstance(b, dict))
     sec10 = next(s for s in rep["sections"] if s["id"] == "10")
@@ -810,8 +810,7 @@ def test_section8_keeps_range_paragraph_and_drops_emptied_headings():
     rendered with nothing under it. Same for "Painotettu lopputulos" once its
     table and weighting paragraph were stripped."""
     from app import valuation_equivalence as veq
-    range_text = ("Menetelmäkohtainen hajonta ei muodosta käyttökelpoista arvostusväliä, "
-                  "koska DCF ja raportoitu EVA-arvo ovat samat 1 199 tEUR.")
+    range_text = "Arvostusväli kuvaa skenaarioiden hajontaa; DCF on päämenetelmä ja EVA vertailuarvo."
     sections = [{"id": "8", "blocks": [
         {"type": "heading", "text": "Painotettu lopputulos"},
         {"type": "table", "columns": ["Menetelmä", "Arvo", "Paino"], "rows": []},
@@ -874,7 +873,9 @@ def test_eva_reconciliation_uses_source_terminal_when_present():
         "dcf": {"equity_value_before_floor": 500.0},
         "eva": {
             "invested_capital": 300.0,
+            "years": [2026, 2027],
             "discounted_eva": [50.0, 50.0],
+            "bridge": {"interest_bearing_debt": 0, "cash": 0},
             "pv_of_trm_eva": 100.0,
             "equity_value_before_floor_raw": 500.0,
         },
@@ -900,6 +901,7 @@ def test_eva_reconciliation_derives_terminal_from_cumulative_row():
         "dcf": {"equity_value_before_floor": 2880.8},
         "eva": {
             "invested_capital": 1258.8,
+            "years": list(range(2025, 2035)),
             "discounted_eva": disc,
             "cumulative_discounted_eva": cum,
             "pv_of_trm_eva": None,
@@ -971,6 +973,7 @@ def test_eva_reconciliation_hides_sum_when_components_do_not_close():
         "dcf": {"equity_value_before_floor": 500.0},
         "eva": {
             "invested_capital": 300.0,
+            "years": [2026, 2027],
             "discounted_eva": [50.0, 50.0],
             "cumulative_discounted_eva": [200.0],
             "pv_of_trm_eva": None,

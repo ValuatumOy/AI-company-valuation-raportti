@@ -165,6 +165,11 @@ class OrderIn(BaseModel):
     website: str = ""  # honeypot — humans leave it empty
 
 
+class ValuationPreflightIn(BaseModel):
+    business_id: str = Field(min_length=5, max_length=30)
+    fid: int = Field(ge=1)
+
+
 class CheckoutGenerateIn(BaseModel):
     # Public, post-payment intake from the client site's Stripe success page.
     # Unauthenticated like OrderIn — same length caps + honeypot + IP rate

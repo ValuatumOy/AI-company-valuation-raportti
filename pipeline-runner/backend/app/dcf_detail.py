@@ -7,6 +7,7 @@ the Valuatum input data so the report can show the drivers without inventing
 missing components.
 """
 from .report_i18n import t as _t, tf as _tf, localized_input, current, number
+from . import dcf_quality
 
 
 def _is_num(x):
@@ -290,7 +291,16 @@ def build_dcf_detail_blocks(input_data):
         _t('+ Korottomien rahoitusvelkojen muutos'),
         _get_list(dcf, "change_in_non_interest_bearing_financial_liabilities"),
     )
-    add(_t('- Bruttoinvestoinnit'), _get_list(dcf, "gross_capex"))
+    netted = dcf_quality.netted_years(input_data)
+    net_investment = bool(years) and all(year in netted for year in years)
+    mixed_investment = bool(netted) and not net_investment
+    investment_label = (
+        ("- Net investment (source model)" if current().language == "en" else "- Nettoinvestoinnit (lähdemalli)")
+        if net_investment else
+        (("- Investment line (source model)" if current().language == "en" else "- Investointierä (lähdemalli)")
+         if mixed_investment else _t('- Bruttoinvestoinnit'))
+    )
+    add(investment_label, _get_list(dcf, "gross_capex"))
     add(_t('Operatiivinen vapaa kassavirta'), _get_list(dcf, "free_operating_cash_flow"))
     add(_t('+/- Muut erät'), _get_list(dcf, "other_items_fcf"))
     add(_t('Vapaa kassavirta (FCFF)'), _first_available_list((dcf, "fcff"), (forecast, "free_cash_flow_to_firm")))
@@ -348,4 +358,19 @@ def build_dcf_detail_blocks(input_data):
             ),
         },
     ]
+    if netted:
+        net_years = ", ".join(str(year) for year in years if year in netted)
+        blocks.append({
+            "type": "callout", "variant": "info",
+            "title": "Net investment and depreciation" if current().language == "en" else "Nettoinvestoinnit ja poistot",
+            "text": (
+                f"For {net_years}, the source investment cash flow and forecast depreciation reconcile with the DCF's net investment line. "
+                "Adding depreciation again without changing the investment line would count it twice. "
+                "Other changes in asset values still require review."
+                if current().language == "en" else
+                f"Vuosina {net_years} lähteen investointikassavirta ja ennusteen poistot täsmäävät DCF:n nettoinvestointierään. "
+                "Poistojen lisääminen uudelleen investointierää muuttamatta laskisi saman vaikutuksen kahdesti. "
+                "Muut käyttöomaisuuden arvomuutokset voivat silti vaatia tarkistusta."
+            ),
+        })
     return blocks

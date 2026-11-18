@@ -26,7 +26,7 @@ from . import (  # noqa: E402
 from .models import (  # noqa: E402
     AccessKeyIn, AccessKeyLimitIn, CheckoutGenerateIn, CompareIn, ExpertGenerateIn, FetchIn,
     ForecastEdit, ForecastPreviewIn, GenerateForecastIn, OrderIn, OrderStatusIn, PipelineIn,
-    RedeemRoundIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn,
+    RedeemRoundIn, ReorderIn, Round2In, RunIn, StageIn, ValidateIn, ValuatumExportIn, ValuationPreflightIn,
 )
 from fetchers.company_data import fetch_company_data  # noqa: E402
 from valuatum_kit.config import require_danish_orders  # noqa: E402
@@ -196,7 +196,7 @@ async def auth_gate(request, call_next):
             return await call_next(request)
         # POST /api/public/checkout-generate: same public/unauthenticated shape,
         # called by the client site right after a verified Stripe payment.
-        if path == "/api/public/checkout-generate" and request.method == "POST":
+        if path in {"/api/public/checkout-generate", "/api/public/valuation-preflight"} and request.method == "POST":
             return await call_next(request)
         # GET /api/public/company-search: public homepage search, no invite key.
         if path in {"/api/public/company-search", "/api/public/company-readiness", "/api/public/capabilities"} and request.method == "GET":
@@ -464,6 +464,7 @@ _RATE_RULES = {
     # Cheap LLM interpretation call. This does not consume a report credit or
     # import anything, but a runaway preview loop should still be bounded.
     "forecast_preview": (20, 60.0),
+    "valuation_preflight": (120, 60.0),
 }
 
 
@@ -563,6 +564,28 @@ async def public_company_readiness(request: Request, country: str, fid: int, cod
         raise HTTPException(422, str(exc)) from exc
     except httpx.HTTPError:
         raise HTTPException(503, "Danish source could not be verified")
+
+
+@app.post("/api/public/valuation-preflight")
+async def public_valuation_preflight(body: ValuationPreflightIn, request: Request):
+    """Verify the selected Finnish model and source data before checkout."""
+    if not _rate_ok("valuation_preflight", _client_ip(request)):
+        raise HTTPException(429, "Liian monta tarkistusta; yritä hetken kuluttua uudelleen.")
+    code = re.sub(r"[^0-9]", "", body.business_id)
+    if len(code) != 8:
+        raise HTTPException(422, "Yrityksen tunnistetta ei voitu varmistaa.")
+    try:
+        candidates = await valuatum.search_company(code)
+        if not any(c.get("fid") == body.fid and
+                   re.sub(r"[^0-9]", "", str(c.get("company_code") or "")) == code
+                   for c in candidates):
+            raise HTTPException(422, "Valittua yritystä ja mallia ei voitu yhdistää.")
+        await valuatum.preflight_fiscal_periods(body.fid)
+    except ValueError as exc:
+        raise HTTPException(422, "Yrityksen lähtötiedot vaativat lisätarkistuksen.") from exc
+    except (httpx.HTTPError, RuntimeError, KeyError, TypeError) as exc:
+        raise HTTPException(503, "Lähtötietoja ei voitu tarkistaa juuri nyt.") from exc
+    return {"ready": True}
 
 
 # ---- internal alerts ---------------------------------------------------------
@@ -812,6 +835,7 @@ async def stream_run(rid: str, request: Request):
 # GET /api/runs/{rid}. This means a run survives the tab closing / backgrounding
 # (e.g. iOS Safari) and the progress UI never depends on fetch-stream buffering.
 _RUN_TASKS: dict[str, asyncio.Task] = {}
+_REFINEMENT_IN_PROGRESS: set[str] = set()
 
 
 async def _drive_run(rid: str, only=None, from_order=None, completion_status=None):
@@ -951,6 +975,21 @@ async def round2_run(rid: str, body: Round2In, request: Request):
     re-run from stage 0 against its fresh data."""
     _check_not_paused()
     parent = _require_run_access(rid, request)
+    family = store.family_run_ids(rid)
+    root = family[0] if family else rid
+    # Like _RUN_TASKS, this reservation is process-local. Keep the family
+    # reserved across source checks and paid imports until the clone exists.
+    if root in _REFINEMENT_IN_PROGRESS:
+        raise HTTPException(409, "Tarkennuskierroksen käynnistys on jo kesken.")
+    _REFINEMENT_IN_PROGRESS.add(root)
+    try:
+        return await _round2_run_reserved(rid, body, request, parent)
+    finally:
+        _REFINEMENT_IN_PROGRESS.discard(root)
+
+
+async def _round2_run_reserved(rid, body, request, parent):
+    await _require_reusable_source(parent)
     # Round-2 is credit-free, so cap refinements per report — otherwise one key
     # can spam unlimited Opus-priced full-report rewrites ($6-runs incident).
     # Family-wide count, not path depth or per-node children: the emailed
@@ -1103,6 +1142,38 @@ def _extract_stage0_forecast(run) -> dict | None:
     return forecast if isinstance(forecast, dict) else None
 
 
+async def _require_reusable_source(run):
+    """Check the saved snapshot and current source before creating a paid round."""
+    from . import report_context
+    source = next((r.get("parsed_json") for r in (run.get("results") or [])
+                   if r.get("order") == 0 and r.get("status") == "ok"), None)
+    supplied = run.get("input_data")
+    supplied_meta = (supplied.get("meta") or {}) if isinstance(supplied, dict) else {}
+    meta = (source.get("meta") or {}) if isinstance(source, dict) else {}
+    country = ((run.get("params") or {}).get("country_code")
+               or meta.get("country_code") or supplied_meta.get("country_code") or "FI")
+    finnish_fid = country == "FI" and str(run.get("identifier") or "").strip().isdigit()
+    if not isinstance(source, dict) or not source:
+        if finnish_fid:
+            raise HTTPException(422, "Raportilta puuttuu hyväksytty lähtötietojen tarkistus.")
+        return
+    manual_input = isinstance(supplied, dict) and bool(supplied) and supplied_meta.get("data_source") != "profinder"
+    if finnish_fid and meta.get("data_source") != "profinder" and not manual_input:
+        raise HTTPException(422, "Raportin lähtötietojen alkuperää ei voitu varmistaa.")
+    if meta.get("data_source") != "profinder" or country != "FI":
+        return
+    data = report_context.normalize_input(source, run.get("params") or {})
+    try:
+        await runner.prepare_stage0(data, run.get("identifier"))
+        meta = data.get("meta") or {}
+        if meta.get("data_source") == "profinder" and meta.get("country_code", "FI") == "FI":
+            await valuatum.preflight_fiscal_periods(int(run.get("identifier")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, "Raportin lähtötiedot vaativat tarkistuksen ennen jatkamista.") from exc
+    except (httpx.HTTPError, RuntimeError) as exc:
+        raise HTTPException(503, "Raportin lähtötietoja ei voitu varmistaa juuri nyt.") from exc
+
+
 def _forecast_value_teur(forecast: dict, varname: str, year: int):
     years = forecast.get("years") or []
     series_name = {"ns": "net_sales", "ebit": "ebit"}.get(varname)
@@ -1232,9 +1303,11 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
     if task and not task.done():
         raise HTTPException(409, "Runin taustatehtävä on vielä käynnissä.")
 
+    await _require_reusable_source(run)
+
     edits = body.forecast_edits or []
     if not edits:
-        store.set_run_status(rid, "running")
+        _claim_awaiting_forecast(rid, "running")
         started = _start_bg(rid, from_order=1)
         if not started:
             store.set_run_status(rid, "awaiting_forecast")
@@ -1254,10 +1327,9 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
         for edit in edits
     ]
 
-    # Claim the awaiting run synchronously before the first await. A concurrent
-    # duplicate request then sees importing_forecast and cannot launch a second
-    # paid, uncancellable ValuBuild import.
-    store.set_run_status(rid, "importing_forecast")
+    # Preflight yielded control. Only one caller, including another worker,
+    # may still claim the awaiting run before the paid import begins.
+    _claim_awaiting_forecast(rid, "importing_forecast")
     try:
         new_fid = await forecast_import.import_and_wait(base_fid, payload, country="DK") if (run.get("params") or {}).get("country_code") == "DK" else await forecast_import.import_and_wait(base_fid, payload)
     except forecast_import.ForecastImportError as exc:
@@ -1287,6 +1359,18 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
         "forecast_edited": True,
         "identifier": str(new_fid),
     }
+
+
+def _claim_awaiting_forecast(rid, status):
+    task = _RUN_TASKS.get(rid)
+    if task and not task.done():
+        raise HTTPException(409, "Runin taustatehtävä on vielä käynnissä.")
+    claimed = store.db.execute(
+        "UPDATE runs SET status=? WHERE id=? AND status='awaiting_forecast'",
+        (status, rid),
+    ).rowcount
+    if not claimed:
+        raise HTTPException(409, "Run ei enää odota ennusteiden hyväksyntää.")
 
 
 async def _forecast_import_failed(rid: str, payload: list[dict],
@@ -1357,6 +1441,7 @@ async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
     refinement round re-fid'd to it (stage 0 onward, gate bypassed). Any
     clarification answers submitted alongside the edits ride along — the round
     re-runs stage 1 anyway, which is where they get folded in."""
+    await _require_reusable_source(parent)
     _validate_forecast_edits(edits)
     try:
         parent_fid = int(str(parent.get("identifier")).strip())
@@ -1388,9 +1473,10 @@ async def round2_checkout(rid: str, body: Round2In, request: Request):
     extra refinement. The clarification answers are staged server-side
     (Stripe metadata is far too small to hold them); metadata only carries a
     lookup token, redeemed by round2_redeem after payment succeeds."""
-    _require_run_access(rid, request)
+    parent = _require_run_access(rid, request)
     if not STRIPE_SECRET_KEY:
         raise HTTPException(503, "Lisäkierrosten maksut eivät ole vielä käytössä.")
+    await _require_reusable_source(parent)
     # Validate forecast edits before taking payment — a bad edit must fail here,
     # not after the user has paid for a round that can't run.
     if body.forecast_edits:
@@ -1446,13 +1532,14 @@ async def round2_redeem(rid: str, body: RedeemRoundIn, request: Request):
     if (session.get("payment_status") != "paid"
             or (session.get("metadata") or {}).get("token") != body.token):
         raise HTTPException(402, "Maksua ei voitu vahvistaa.")
+    parent = store.get_run(rid)
+    await _require_reusable_source(parent)
     # Claim the token atomically (guards a concurrent double-redeem), but roll
     # the claim back if the round fails to start: the forecast branch calls
     # ValuBuild AFTER the payment check and can fail or time out there, and a
     # burned token would mean money taken with no round and no way to retry.
     if not store.claim_pending_round(body.token):
         raise HTTPException(409, "Tämä tarkennuskierros on jo käytetty.")
-    parent = store.get_run(rid)
     forecast_edits = pending.get("forecast_edits")
     try:
         if forecast_edits:
@@ -1655,7 +1742,7 @@ def report_html(rid: str, request: Request, force: int = 0):
     j = store.final_report_json(rid)
     if j is None:
         raise HTTPException(400, "ei valmista loppuvaiheen JSONia tälle ajolle")
-    _require_ready(rid, force)
+    _require_ready(rid, force if not getattr(request.state, "access_key", None) else 0)
     try:
         path = report.generate_html(rid, j)
     except Exception as e:
@@ -1670,7 +1757,7 @@ def report_pdf(rid: str, request: Request, force: int = 0):
     j = store.final_report_json(rid)
     if j is None:
         raise HTTPException(400, "ei valmista loppuvaiheen JSONia tälle ajolle")
-    _require_ready(rid, force)
+    _require_ready(rid, force if not getattr(request.state, "access_key", None) else 0)
     try:
         path = report.generate_pdf(rid, j)
     except Exception as e:

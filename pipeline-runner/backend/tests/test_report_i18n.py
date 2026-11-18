@@ -71,7 +71,7 @@ def test_english_assembly_keeps_numbers_and_localizes_all_injected_blocks(curren
     assert '<html lang="en">' in text
     assert "Odotusarvo &amp; Sons &lt;Test&gt;" in text
     assert "Forecast origin" in text
-    assert ("Primary valuation method and reconciliation" if country == "FI" else "Source method values") in text
+    assert "Source method values" in text
     assert "Where discounted FCFF comes from" in text
     assert "Discount rate and credit risk" in text
     assert "Annual EVA calculation" in text
