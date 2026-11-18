@@ -1241,6 +1241,7 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
             raise HTTPException(409, "Raportin generointi on jo käynnissä.")
         return {"run_id": rid, "started": True, "forecast_edited": False}
 
+    source = _forecast_source(run)
     _validate_forecast_edits(edits)
     _forecast_preview_rows(forecast, edits)
     try:
@@ -1259,7 +1260,7 @@ async def generate_forecast(rid: str, body: GenerateForecastIn, request: Request
     # paid, uncancellable ValuBuild import.
     store.set_run_status(rid, "importing_forecast")
     try:
-        new_fid = await forecast_import.import_and_wait(base_fid, payload, country="DK") if (run.get("params") or {}).get("country_code") == "DK" else await forecast_import.import_and_wait(base_fid, payload)
+        new_fid = await forecast_import.import_and_wait(base_fid, payload, country="DK") if source == "DK" else await forecast_import.import_and_wait(base_fid, payload)
     except forecast_import.ForecastImportError as exc:
         store.set_run_status(rid, "awaiting_forecast")
         raise await _forecast_import_failed(rid, payload, exc)
@@ -1349,6 +1350,16 @@ def _forecast_import_message(cells: list[dict], reason: str) -> str:
     )
 
 
+def _forecast_source(run) -> str:
+    """Forecast edits import a new model into the run's own source. Only the FI and
+    DK sources are writable: other countries read customers' PDF-service uploads,
+    which must never be written to."""
+    country = (run.get("params") or {}).get("country_code") or "FI"
+    if country not in ("FI", "DK"):
+        raise HTTPException(409, "Forecast edits are not available for this report's source.")
+    return country
+
+
 async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
                                        clarifications_free_text="",
                                        show_old_numbers=False,
@@ -1357,6 +1368,7 @@ async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
     refinement round re-fid'd to it (stage 0 onward, gate bypassed). Any
     clarification answers submitted alongside the edits ride along — the round
     re-runs stage 1 anyway, which is where they get folded in."""
+    source = _forecast_source(parent)
     _validate_forecast_edits(edits)
     try:
         parent_fid = int(str(parent.get("identifier")).strip())
@@ -1369,7 +1381,7 @@ async def _start_forecast_import_round(rid, parent, edits, clarifications=None,
         for e in edits
     ]
     try:
-        new_fid = await forecast_import.import_and_wait(parent_fid, payload, country="DK") if (parent.get("params") or {}).get("country_code") == "DK" else await forecast_import.import_and_wait(parent_fid, payload)
+        new_fid = await forecast_import.import_and_wait(parent_fid, payload, country="DK") if source == "DK" else await forecast_import.import_and_wait(parent_fid, payload)
     except forecast_import.ForecastImportError as exc:
         # Import failed → no round starts, no quota/lineage consumed.
         raise await _forecast_import_failed(rid, payload, exc)
@@ -1388,12 +1400,13 @@ async def round2_checkout(rid: str, body: Round2In, request: Request):
     extra refinement. The clarification answers are staged server-side
     (Stripe metadata is far too small to hold them); metadata only carries a
     lookup token, redeemed by round2_redeem after payment succeeds."""
-    _require_run_access(rid, request)
+    run = _require_run_access(rid, request)
     if not STRIPE_SECRET_KEY:
         raise HTTPException(503, "Lisäkierrosten maksut eivät ole vielä käytössä.")
     # Validate forecast edits before taking payment — a bad edit must fail here,
     # not after the user has paid for a round that can't run.
     if body.forecast_edits:
+        _forecast_source(run)
         _validate_forecast_edits(body.forecast_edits)
     key = getattr(request.state, "access_key", None)
     token = store.create_pending_round(

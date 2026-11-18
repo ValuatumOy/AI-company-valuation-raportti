@@ -62,3 +62,29 @@ def test_norwegian_model_exports_in_nok_with_source_verification():
     with pytest.raises(ValueError, match="Complete source cashflow reconciliation is missing"):
         export.build_payload(model, country_code="NO", report_language="en", source_currency="NOK",
                              verify_cashflows=True)
+
+
+def test_norwegian_run_refuses_forecast_edits_through_the_endpoint(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import main, seed, store
+    monkeypatch.setattr(main, "_APP_TOKEN", "admin-only")
+    seed.ensure_seeded()
+    rid = store.create_run(store.list_pipelines()[0]["id"], None, True, identifier="123456",
+        params={"country_code": "NO", "source_currency": "NOK", "report_language": "en",
+                "company_name": "2TAL AS", "forecast_mode": True})
+    store.upsert_result(rid, {"order": 0, "name": "FAKTAT", "status": "ok",
+        "parsed_json": {"forecast": {"years": [2026], "net_sales": [180000000], "ebit": [8000000]}}})
+    store.set_run_status(rid, "awaiting_forecast")
+    calls = []
+    async def imported(*args, **kwargs):
+        calls.append((args, kwargs))
+        return 777
+    monkeypatch.setattr(forecast_import, "import_and_wait", imported)
+    client = TestClient(main.app)
+    edit = {"forecast_edits": [{"varname": "ns", "year": 2026, "value": 190.0}]}
+    response = client.post(f"/api/runs/{rid}/generate-forecast", headers={"Authorization": "Bearer admin-only"}, json=edit)
+    assert response.status_code == 409 and "not available for this report's source" in response.text
+    assert store.get_run(rid)["status"] == "awaiting_forecast"
+    response = client.post(f"/api/runs/{rid}/round2", headers={"Authorization": "Bearer admin-only"}, json=edit)
+    assert response.status_code == 409 and "not available for this report's source" in response.text
+    assert calls == []
