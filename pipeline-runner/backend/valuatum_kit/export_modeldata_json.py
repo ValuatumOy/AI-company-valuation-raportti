@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .config import api_base_url
+    from .config import COUNTRIES, CURRENCIES, LANGUAGES, SOURCE_VERIFIED_COUNTRIES, api_base_url
 except ImportError:  # Direct script execution.
-    from config import api_base_url
+    from config import COUNTRIES, CURRENCIES, LANGUAGES, SOURCE_VERIFIED_COUNTRIES, api_base_url
 
 
 EXTRA_VARS = [
@@ -466,21 +466,21 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
     currency = currency or source_currency
     if currency is None and country_code in (None, "FI"):
         currency = "EUR"  # Existing Finland export contract.
-    if currency not in {"EUR", "DKK", "USD"}:
-        raise ValueError("Raw model requires verified EUR, DKK or USD currency")
+    if currency not in CURRENCIES:
+        raise ValueError("Raw model requires a verified currency: " + ", ".join(CURRENCIES))
     if country_code is None:
         if currency != "EUR":
             raise ValueError("Foreign currency requires explicit country_code")
         country_code = "FI"
-    if report_language not in {"fi", "en"} or country_code not in {"FI", "DK", "US"}:
+    if report_language not in LANGUAGES or country_code not in COUNTRIES:
         raise ValueError("Unsupported report_language or country_code")
     unit = "t" + currency
     data_map = model.get("dataMap", {})
-    if country_code == "DK":
+    if country_code in SOURCE_VERIFIED_COUNTRIES:
         data_map = {str(year): row for year, row in data_map.items()
                     if str(year).isdigit() and len(str(year)) == 4 and 1900 <= int(year) <= 2100}
         if not data_map:
-            raise ValueError("Danish source contains no annual financial years")
+            raise ValueError("Source contains no annual financial years")
     years = sorted((int(year) for year in data_map), key=int)
     current_year = int(model.get("currentYear") or min(years))
     actual_years = [year for year in years if year < current_year]
@@ -597,7 +597,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
                 ),
                 "gross_capex": arr(
                     data_map, forecast_years,
-                    ["gross_cap_expenditure_nega", "cr_cf_gross_capex_nega"] if country_code == "DK" and verify_cashflows else
+                    ["gross_cap_expenditure_nega", "cr_cf_gross_capex_nega"] if country_code in SOURCE_VERIFIED_COUNTRIES and verify_cashflows else
                     ["cr_cf_gross_capex_nega", "gross_cap_expenditure_nega"] if country_code != "FI" else "gross_cap_expenditure_nega",
                     money=True),
                 "free_operating_cash_flow": arr(data_map, forecast_years, "free_operating_cash_flow", money=True),
@@ -676,7 +676,7 @@ def build_payload(model: dict[str, Any], payment_defaults: list[dict[str, Any]] 
         "client_reported_signals": [],
         "flags": build_flags(data_map, years),
     }
-    if country_code == "DK" and verify_cashflows:
+    if country_code in SOURCE_VERIFIED_COUNTRIES and verify_cashflows:
         _verify_danish_cashflows(payload, data_map)
     return payload
 
@@ -739,9 +739,9 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--company-code-override", default=None)
     parser.add_argument("--company-name-override", default=None)
-    parser.add_argument("--country-code", choices=["FI", "DK", "US"], default="FI")
-    parser.add_argument("--report-language", choices=["fi", "en"], default="fi")
-    parser.add_argument("--source-currency", choices=["EUR", "DKK", "USD"], default=None)
+    parser.add_argument("--country-code", choices=COUNTRIES, default="FI")
+    parser.add_argument("--report-language", choices=LANGUAGES, default="fi")
+    parser.add_argument("--source-currency", choices=CURRENCIES, default=None)
     args = parser.parse_args()
 
     module = load_fetch_module(args.fetch_script)
@@ -753,6 +753,8 @@ def main() -> None:
             raise ValueError("Danish source model must match the paid CVR and source currency")
         if model.get("countryCode") not in (None, "DK"):
             raise ValueError("Danish source model country mismatch")
+    elif args.country_code in SOURCE_VERIFIED_COUNTRIES and model.get("currency") != args.source_currency:
+        raise ValueError("Source model currency must match --source-currency")
     if args.company_code_override or args.company_name_override:
         model = dict(model)
         if args.company_code_override:
@@ -764,7 +766,7 @@ def main() -> None:
     payment_defaults = rest_payment_defaults(str(model.get("companyCode") or ""), token) if args.country_code == "FI" else []
     payload = build_payload(model, payment_defaults, country_code=args.country_code,
                             report_language=args.report_language, source_currency=args.source_currency,
-                            verify_cashflows=args.country_code == "DK")
+                            verify_cashflows=args.country_code in SOURCE_VERIFIED_COUNTRIES)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

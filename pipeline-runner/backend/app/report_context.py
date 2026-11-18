@@ -4,10 +4,7 @@ import json
 import re
 
 from . import fiscal_periods
-
-LANGUAGES = {"fi", "en"}
-COUNTRIES = {"FI", "DK", "US"}
-CURRENCIES = {"EUR", "DKK", "USD"}
+from valuatum_kit.config import COUNTRIES, CURRENCIES, LANGUAGES
 
 
 def has_report_context(input_data=None, params=None):
@@ -38,13 +35,13 @@ def resolve_context(input_data=None, params=None):
     if not isinstance(language, str) or language not in LANGUAGES:
         raise ValueError("report_language must be fi or en")
     if not isinstance(country, str) or country not in COUNTRIES:
-        raise ValueError("country_code must be FI, DK or US")
+        raise ValueError("country_code must be one of " + ", ".join(COUNTRIES))
     if currency is None:
         if country != "FI":
             raise ValueError("Foreign reports require verified source_currency")
         currency = "EUR"
     if not isinstance(currency, str) or currency not in CURRENCIES:
-        raise ValueError("source_currency must be EUR, DKK or USD")
+        raise ValueError("source_currency must be one of " + ", ".join(CURRENCIES))
     for key, value in (("country_code", country), ("currency", currency)):
         if meta.get(key) is not None and meta[key] != value:
             raise ValueError(f"Conflicting input_data.meta.{key}")
@@ -164,7 +161,7 @@ def system_directive(context):
         "keys ending _teur. Preserve supplied numbers; no FX conversion or currency relabelling. "
         "Use spaces for thousands grouping and a decimal point for English decimals. "
         "Keep the supplied country and currency in report metadata. Use the supplied company "
-        "identifier (CVR for Denmark, issuer/CIK/ISIN for US), not a fabricated Finnish business ID. "
+        "identifier (CVR for Denmark, organisation number for Norway or Sweden, register number for Germany, issuer/CIK/ISIN for US), not a fabricated Finnish business ID. "
         "Ground identity, market geography and research in this company and its actual markets. "
         "Do not assume Finnish market size or Finnish peers for foreign companies. "
         + ("Do not apply Finnish corporate tax, Finnish tax-authority valuation rules or "

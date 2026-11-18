@@ -62,6 +62,8 @@ def _normalize_query(query: str, country="FI") -> tuple[str, str]:
     if country == "DK":
         clean = re.sub(r"^DK\s*", "", query.strip().upper())
         return ("code", clean) if re.fullmatch(r"\d{8}", clean) else ("name", query.strip())
+    if country == "PDF":  # Uploaded statements of any country: digits are a code as stored.
+        return ("code", clean) if clean.isdigit() else ("name", query.strip())
     if country != "FI":
         raise ValueError("Unsupported company country")
     code = clean[:-1] if clean.endswith("K") else clean
@@ -175,7 +177,7 @@ async def aclose_client() -> None:
 
 
 async def _company_rows(param: str, value: str, country="FI") -> list[dict]:
-    token = api_token(country) if country == "DK" else os.environ.get("VALUATUM_TOKEN")
+    token = api_token(country) if country != "FI" else os.environ.get("VALUATUM_TOKEN")
     if not token:
         raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
     key = (api_base_url(country), country, param, value)
@@ -246,11 +248,11 @@ async def modeldata(fids: list[int], var_poses: list[dict], country="FI") -> dic
     a synchronous CLI keyed to a single fid. Peer resolution asks for several
     models with a short varlist, so it reads them here through the shared async
     client instead of shelling out once per peer. Response: {"<fid>": model}."""
-    token = api_token(country) if country == "DK" else os.environ.get("VALUATUM_TOKEN")
+    token = api_token(country) if country != "FI" else os.environ.get("VALUATUM_TOKEN")
     if not token:
         raise RuntimeError("VALUATUM_TOKEN puuttuu backendin ymparistosta.")
     resp = await _client().post(
-        api_base_url("DK") + "/modeldata" if country == "DK" else modeldata_url(),
+        api_base_url(country) + "/modeldata" if country != "FI" else modeldata_url(),
         json={
             "fids": list(fids),
             "varPoses": var_poses,
@@ -299,8 +301,8 @@ async def lookup_company_metadata(
 
 def _run(cmd: list[str], country="FI") -> tuple[int, str, str]:
     env = os.environ.copy()
-    if country == "DK":
-        env.update(VALUATUM_API_BASE_URL=api_base_url("DK"), VALUATUM_TOKEN=api_token("DK"))
+    if country != "FI":
+        env.update(VALUATUM_API_BASE_URL=api_base_url(country), VALUATUM_TOKEN=api_token(country))
     proc = subprocess.run(
         cmd, capture_output=True, text=True, cwd=str(KIT), env=env,
         timeout=180,

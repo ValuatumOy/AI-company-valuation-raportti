@@ -1156,7 +1156,7 @@ async def forecast_preview(rid: str, body: ForecastPreviewIn, request: Request):
         raise HTTPException(429, "Liian monta ennusteiden esikatselupyyntöä. Yritä hetken kuluttua.")
 
     try:
-        proposal = await forecast_interpret.interpret(text, forecast, currency=run["params"]["source_currency"], language="en") if (run.get("params") or {}).get("country_code") == "DK" else await forecast_interpret.interpret(text, forecast)
+        proposal = await forecast_interpret.interpret(text, forecast, currency=run["params"]["source_currency"], language="en") if ((run.get("params") or {}).get("country_code") or "FI") != "FI" else await forecast_interpret.interpret(text, forecast)
     except forecast_interpret.ForecastInterpretError as exc:
         raise HTTPException(502, str(exc))
     try:
@@ -1168,7 +1168,7 @@ async def forecast_preview(rid: str, body: ForecastPreviewIn, request: Request):
     rows = _forecast_preview_rows(forecast, edits)
 
     notes = list(proposal.get("notes") or [])
-    if (run.get("params") or {}).get("country_code") == "DK":
+    if ((run.get("params") or {}).get("country_code") or "FI") != "FI":
         notes.extend(forecast_interpret.magnitude_notes(forecast, edits, currency=run["params"]["source_currency"], language="en"))
     else:
         notes.extend(forecast_interpret.magnitude_notes(forecast, edits))
@@ -1407,7 +1407,7 @@ async def round2_checkout(rid: str, body: Round2In, request: Request):
         ),
     )
     run = store.get_run(rid) or {}
-    foreign = (run.get("params") or {}).get("country_code") == "DK"
+    foreign = ((run.get("params") or {}).get("country_code") or "FI") != "FI"
     site = (os.getenv("INTERNATIONAL_CLIENT_SITE_URL" if foreign else "CLIENT_SITE_URL") or "").rstrip("/")
     path = "/report" if foreign else email_delivery.REPORT_PATH
     key_q = f"&key={key}" if key else ""

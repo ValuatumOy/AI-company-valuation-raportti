@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from functools import wraps
 import re
 
+from valuatum_kit.config import COUNTRIES, CURRENCIES, LANGUAGES
+
+_CURRENCY_RE = "|".join(CURRENCIES)
+
 
 @dataclass(frozen=True)
 class ReportLocale:
@@ -32,7 +36,7 @@ def locale_from(data):
     language = meta.get("report_language", "fi")
     country = meta.get("country_code", "FI")
     currency = meta.get("currency", "EUR")
-    if language not in ("fi", "en") or country not in ("FI", "DK", "US") or currency not in ("EUR", "DKK", "USD"):
+    if language not in LANGUAGES or country not in COUNTRIES or currency not in CURRENCIES:
         raise ValueError("Unsupported report language, country or currency")
     ctx = ReportLocale(language, country, currency)
     for unit in (data.get("unit"), meta.get("unit")):
@@ -103,7 +107,7 @@ def tf(text, *values):
 
 def validate_report_units(report, currency=None):
     currency = currency or current().currency
-    pattern = re.compile(r"\b(?:t|M\s*|bn\s*)(EUR|DKK|USD)\b|\b(EUR|DKK|USD)/employee\b|(?P<euro>€)", re.I)
+    pattern = re.compile(rf"\b(?:t|M\s*|bn\s*)({_CURRENCY_RE})\b|\b({_CURRENCY_RE})/employee\b|(?P<euro>€)", re.I)
 
     def check(value, path="report"):
         if isinstance(value, dict):
@@ -112,7 +116,7 @@ def validate_report_units(report, currency=None):
                 if key in ("company_name", "url", "source", "source_url", "industry", "industry_display_en",
                            "domicile", "source_id", "source_identifier", "identifier", "business_id", "y_tunnus"):
                     continue
-                if key in ("currency", "unit") and val in ("EUR", "DKK", "USD") and val != currency:
+                if key in ("currency", "unit") and val in CURRENCIES and val != currency:
                     raise ValueError(f"Report currency {currency} conflicts with {val} label at {path}.{key}")
                 check(val, path + "." + str(key))
         elif isinstance(value, list):

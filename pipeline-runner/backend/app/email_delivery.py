@@ -94,7 +94,7 @@ def _report_link(rid: str, run: dict) -> str | None:
     key = run.get("access_key")
     if not key:
         return None
-    foreign = (run.get("params") or {}).get("country_code") == "DK"
+    foreign = ((run.get("params") or {}).get("country_code") or "FI") != "FI"
     site = (os.getenv("INTERNATIONAL_CLIENT_SITE_URL" if foreign else "CLIENT_SITE_URL") or "").strip().rstrip("/")
     if not site:
         return None

@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.report_context import normalize_input
 from app.sec_report_input import selected_facts_input
+from valuatum_kit.config import COUNTRIES, CURRENCIES, LANGUAGES
 from valuatum_kit.export_modeldata_json import build_payload
 
 
@@ -111,9 +112,9 @@ def main():
     parser.add_argument("--input-format", required=True,
                         choices=["valuatum-model", "normalized", "sec-companyfacts"])
     parser.add_argument("--pipeline-id", required=True)
-    parser.add_argument("--country-code", required=True, choices=["FI", "DK", "US"])
-    parser.add_argument("--source-currency", required=True, choices=["EUR", "DKK", "USD"])
-    parser.add_argument("--report-language", default="en", choices=["fi", "en"])
+    parser.add_argument("--country-code", required=True, choices=COUNTRIES)
+    parser.add_argument("--source-currency", required=True, choices=CURRENCIES)
+    parser.add_argument("--report-language", default="en", choices=LANGUAGES)
     parser.add_argument("--minimum-actual-year", type=int)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--readiness-output", type=Path)

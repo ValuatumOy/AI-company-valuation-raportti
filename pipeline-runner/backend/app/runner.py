@@ -523,7 +523,7 @@ async def _run_stages(run, stages, only=None, from_order=None):
         else "ÄLÄ mainitse edellisen kierroksen lukuja, niiden muutoksia tai "
              "vertailua aiempaan — esitä vain päivitetyt, ajantasaiset arvot."
     )
-    if (params or {}).get("country_code") == "DK":
+    if ((params or {}).get("country_code") or "FI") != "FI":
         context["old_numbers_directive"] = context["old_numbers_directive"].replace("tEUR", "t" + params["source_currency"])
     # Round-2 only: user-set scenario probabilities override the profile-based
     # defaults the writer would otherwise pick (singlewriter.txt "Todennäköisyydet").

@@ -20,6 +20,9 @@ import subprocess
 import tempfile
 
 from .runner import APPENDIX_SECTION_IDS, SECTION_ORDER
+from valuatum_kit.config import CURRENCIES
+
+_CURRENCY_RE = "|".join(CURRENCIES)
 
 REPORTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "_reports"))
 _CHROME_CANDIDATES = [
@@ -296,7 +299,7 @@ def _fmt_teur(n):
 # largest figure on the cover: tEUR up to ~10 M€, then M€, then mrd. €. Without
 # this a large-cap report prints a seven-digit tEUR number on the 50pt cover
 # ("5 100 000 tEUR"), which reads as broken. Detail tables stay in tEUR.
-_PURE_TEUR_RE = re.compile(r"^\s*(-?\d[\d,\s  ]*(?:[.,]\d+)?)\s*t(?:EUR|DKK|USD)\s*$", re.I)
+_PURE_TEUR_RE = re.compile(rf"^\s*(-?\d[\d,\s  ]*(?:[.,]\d+)?)\s*t(?:{_CURRENCY_RE})\s*$", re.I)
 
 
 def _scale_from_teur(teur):
@@ -355,7 +358,7 @@ def _scaled_cover_str(s, scale):
 
 
 _TEUR_RANGE_RE = re.compile(
-    r"^\s*(-?\d[\d,\s  ]*(?:[.,]\d+)?)\s*[–-]\s*(-?\d[\d,\s  ]*(?:[.,]\d+)?)\s*t(?:EUR|DKK|USD)\s*$")
+    rf"^\s*(-?\d[\d,\s  ]*(?:[.,]\d+)?)\s*[–-]\s*(-?\d[\d,\s  ]*(?:[.,]\d+)?)\s*t(?:{_CURRENCY_RE})\s*$")
 
 
 def _scaled_card_str(s, scale):
