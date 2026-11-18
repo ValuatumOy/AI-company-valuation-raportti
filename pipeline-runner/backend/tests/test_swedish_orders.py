@@ -1,5 +1,7 @@
 """Swedish automatic orders: own source, organisation-number identity, SEK end to end."""
 import asyncio
+import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -160,3 +162,40 @@ def test_swedish_forecast_import_writes_only_to_the_swedish_source(monkeypatch):
     assert asyncio.run(forecast_import.import_and_wait(52623,
         [{"varname": "ns", "year": 2026, "value": 30.0}], country="SE")) == 99
     assert urls == ["https://swedish-source.example/rest/estimates/import"]
+
+
+def test_paid_swedish_run_exports_from_the_swedish_source(monkeypatch):
+    _enabled(monkeypatch)
+    calls = []
+    async def generate(fid, country="FI"):
+        calls.append(("generate", fid, country))
+    def run(cmd, country="FI"):
+        flag = lambda name: cmd[cmd.index(name) + 1]
+        calls.append(("export", country, flag("--country-code"), flag("--source-currency"), flag("--company-code-override")))
+        payload = exporter.build_payload(_model(), [], report_language="en", country_code="SE",
+                                         source_currency="SEK", verify_cashflows=True)
+        Path(flag("--output")).write_text(json.dumps(payload), encoding="utf-8")
+        return 0, "", ""
+    async def inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    monkeypatch.setattr(valuatum.asyncio, "to_thread", inline)
+    monkeypatch.setattr(estimate_trigger, "trigger_and_wait", generate)
+    monkeypatch.setattr(valuatum, "_run", run)
+    from fetchers.company_data import fetch_company_data
+    data = asyncio.run(fetch_company_data("52623", {
+        "company_name": "Husqvarna Stockholm Aktiebolag", "company_code": "556983-9805",
+        "country_code": "SE", "report_language": "en", "source_currency": "SEK"}))
+    assert calls == [("generate", 52623, "SE"), ("export", "SE", "SE", "SEK", "556983-9805")]
+    assert data["unit"] == "tSEK" and data["actuals"]["years"] == [2024, 2025]
+
+
+def test_estimate_generating_source_check_has_its_own_tight_limit(monkeypatch):
+    _enabled(monkeypatch)
+    async def readiness(country, fid, code, generate=False):
+        assert generate is True
+        return {"eligible": True}
+    monkeypatch.setattr(valuatum, "company_readiness", readiness)
+    client = TestClient(main.app)
+    query = {"country": "SE", "fid": 52623, "code": "556983-9805"}
+    statuses = [client.get("/api/public/company-readiness", params=query).status_code for _ in range(11)]
+    assert statuses == [200] * 10 + [429]

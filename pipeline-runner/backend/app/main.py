@@ -418,15 +418,18 @@ def del_company(fid: int):
 
 
 @app.get("/api/company-search")
-async def company_search(q: str):
+async def company_search(q: str, country: str = "FI"):
     """Resolve a company name or y-tunnus to Valuatum FID(s) so self-serve
     generation isn't limited to the operator's pre-fetched company list (the
-    long-standing FID blocker)."""
+    long-standing FID blocker). Admin-only; `country` reads an order country's
+    own source without its order gates."""
     q = (q or "").strip()
+    if country not in {"FI", *ORDER_COUNTRIES}:
+        raise HTTPException(422, "Country must be FI, DK or SE")
     if len(q) < valuatum.MIN_QUERY_LENGTH:
         return []
     try:
-        return await valuatum.search_company(q)
+        return await valuatum.search_company(q, **_source(country))
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, e.response.text[:500])
     except RuntimeError as e:
@@ -464,6 +467,9 @@ _RATE_RULES = {
     # Cheap LLM interpretation call. This does not consume a report credit or
     # import anything, but a runaway preview loop should still be bounded.
     "forecast_preview": (20, 60.0),
+    # Public pre-checkout check that generates source estimates (Sweden): a write
+    # of about 40 s per call, so far tighter than search.
+    "source_check": (10, 3600.0),
 }
 
 
@@ -566,11 +572,11 @@ async def public_company_readiness(request: Request, country: str, fid: int, cod
     if country not in ORDER_COUNTRIES:
         raise HTTPException(422, "This readiness check supports countries DK and SE")
     _require_order_checkout(country)
-    if not _rate_ok("search", _client_ip(request)):
+    generate = ORDER_COUNTRIES[country]["generate_on_check"]
+    if not _rate_ok("source_check" if generate else "search", _client_ip(request)):
         raise HTTPException(429, "Too many source checks; try again shortly")
     try:
-        return await valuatum.company_readiness(country, fid, code,
-                                                generate=ORDER_COUNTRIES[country]["generate_on_check"])
+        return await valuatum.company_readiness(country, fid, code, generate=generate)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except (httpx.HTTPError, estimate_trigger.EstimateGenerationError):
