@@ -83,6 +83,7 @@ def test_search_and_estimates_use_only_the_swedish_source(monkeypatch):
 
 def test_readiness_generates_estimates_before_reading_the_model(monkeypatch):
     _enabled(monkeypatch)
+    monkeypatch.setattr(valuatum, "_GENERATED", {})
     calls = []
     async def search(query, country="FI"):
         calls.append(("search", query, country))
@@ -99,7 +100,17 @@ def test_readiness_generates_estimates_before_reading_the_model(monkeypatch):
     result = asyncio.run(valuatum.company_readiness("SE", 52623, "556983-9805", generate=True))
     assert result["eligible"], result["reason"]
     assert result["currency"] == "SEK" and result["actual_year"] == 2025
+    assert result["actual_years"] == [2024, 2025] and result["negative_equity"] is False
     assert calls == [("search", "556983-9805", "SE"), ("generate", 52623, "SE"), ("modeldata", 52623, "SE")]
+    # The confirmation after the pre-purchase notices re-checks without generating again.
+    asyncio.run(valuatum.company_readiness("SE", 52623, "556983-9805", generate=True))
+    assert [c[0] for c in calls].count("generate") == 1
+    distressed = _model()
+    distressed["dataMap"]["2026"].update(ib_debt_nega_prev_year=-100, value_of_equity_fcff=-59, value_of_equity_eva=-59)
+    async def distressed_data(fids, var_poses, country="FI"):
+        return {"52623": distressed}
+    monkeypatch.setattr(valuatum, "modeldata", distressed_data)
+    assert asyncio.run(valuatum.company_readiness("SE", 52623, "556983-9805"))["negative_equity"] is True
     with pytest.raises(ValueError, match="organisation number"):
         asyncio.run(valuatum.company_readiness("SE", 52623, "5569839805"))
 

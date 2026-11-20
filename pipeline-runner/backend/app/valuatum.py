@@ -470,6 +470,9 @@ async def export_stream(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+_GENERATED: dict[tuple[str, int], float] = {}
+
+
 async def company_readiness(country: str, fid: int, code: str, generate: bool = False) -> dict:
     """Check the source model before checkout. Never imports edits; generates
     estimates only when asked, for sources whose models carry none until then."""
@@ -488,8 +491,11 @@ async def company_readiness(country: str, fid: int, code: str, generate: bool = 
         return {**result, "reason": f"Followed model does not belong to the selected {name} company"}
     if not isinstance(candidate.get("company_name"), str) or not candidate["company_name"].strip():
         return {**result, "reason": f"{name} source company name is missing"}
-    if generate:
+    # The customer's notice confirmation re-runs this check; one generation per hour is enough.
+    # ponytail: in-process memo, single-instance deploy.
+    if generate and time.monotonic() - _GENERATED.get((country, fid), -3600.0) >= 3600.0:
         await estimate_trigger.trigger_and_wait(fid, country=country)
+        _GENERATED[(country, fid)] = time.monotonic()
     var_poses = fetcher.build_var_poses(9, 10)
     positions = [f"Y-{i}" for i in range(1, 10)] + [f"Y+{i}" for i in range(10)]
     var_poses += [{"varName": var, "relPos": pos} for var in exporter.EXTRA_VARS for pos in positions]
@@ -530,5 +536,9 @@ async def company_readiness(country: str, fid: int, code: str, generate: bool = 
                for v in (cumulative_eva, terminal_eva)):
         blockers.append("Source EVA terminal reconciliation is missing")
     actual_years = (data.get("actuals") or {}).get("years") or []
+    equity = dcf.get("equity_value_before_floor")
     return {**result, "eligible": not blockers, "actual_year": max(actual_years) if actual_years else None,
-            "forecast_years": forecast_years, "reason": "; ".join(blockers) if blockers else None}
+            "actual_years": actual_years, "forecast_years": forecast_years,
+            # The report floors a negative equity value at 0; the buyer is told before paying.
+            "negative_equity": isinstance(equity, (int, float)) and not isinstance(equity, bool) and equity < 0,
+            "reason": "; ".join(blockers) if blockers else None}
