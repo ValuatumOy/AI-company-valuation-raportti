@@ -9,9 +9,10 @@ source and gates. The order countries and their rules live in
 - `VALUATUM_SE_API_BASE_URL=https://sweden.valuatum.com/rest` (asp 116,
   company-valuation-se) and `VALUATUM_SE_TOKEN`.
 - `VALUATUM_SE_ORDERS_ENABLED=1`.
-- `VALUATUM_SE_FORECASTS_VERIFIED=1` only after one forecast import has been
-  run and checked on asp 116. Estimate generation was verified on 2026-11-18
-  (Husqvarna Stockholm AB, fid 52623); import has not been run yet.
+- `VALUATUM_SE_FORECASTS_VERIFIED=1`. Verified on asp 116: estimate generation
+  on 2026-11-18 and forecast import on 2026-11-20 (Husqvarna Stockholm AB, fid
+  52623: 2026 net sales 28.64 → 30.074 MSEK gave new fid 585240 with the edited
+  value, EBIT recalculated, base model unchanged, readiness passed).
 - `VALUATUM_SE_SOURCE_UNIT=millions`. Checked on 2026-11-18: H & M Hennes &
   Mauritz GBC AB net sales 121 023 (MSEK) and Husqvarna Stockholm AB 25.0.
 - `STRIPE_SECRET_KEY` and `INTERNATIONAL_CLIENT_SITE_URL`, as for Denmark.

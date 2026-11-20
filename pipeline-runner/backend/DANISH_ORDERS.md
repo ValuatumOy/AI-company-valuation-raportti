@@ -53,6 +53,14 @@ comparison rows use **thousands** (`tDKK` or `tEUR`). The factor is 1,000, not a
 exchange rate. Country/currency survive edited model imports and refinements.
 Customer emails are English and use the international `/report?key=...&rid=...` link.
 
+## Source verification (2026-11-20)
+
+The asp 1233 credential (company-valuation-dk) generates estimates (2026-11-18)
+and imports forecasts (2026-11-20): Novo Nordisk fid 349862, 2026 net sales
+346 177 → 363 485 MDKK gave new fid 848621 with the edited value, EBIT
+recalculated, base model unchanged and readiness passed. This satisfies
+`VALUATUM_DK_FORECASTS_VERIFIED`.
+
 ## Known source limits (2026-10-14)
 
 The production JYSK model resolves but its stored estimates lack complete EBIT
