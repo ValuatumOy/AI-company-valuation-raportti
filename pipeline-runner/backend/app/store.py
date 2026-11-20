@@ -808,6 +808,15 @@ def get_order_by_session(stripe_session_id):
     )
 
 
+def get_live_paid_order_for_run(run_id):
+    """Resolve the verified live-Stripe order that created this run."""
+    return db.query_one(
+        "SELECT * FROM orders WHERE run_id=? AND stripe_session_id LIKE 'cs_live_%' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (run_id,),
+    )
+
+
 def create_paid_order(company, email, user_input, stripe_session_id, fid, access_key,
                       run_id, amount_total_cents=None, currency=None):
     """A paid, auto-generated order (client-site checkout -> instant pipeline

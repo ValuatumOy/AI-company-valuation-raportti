@@ -6,7 +6,9 @@ surprise emails by itself. Boto3 resolves credentials through its normal
 provider chain (environment, session token, profile, or compute role).
 """
 import asyncio
+import hashlib
 import html
+import logging
 import os
 import re
 import unicodedata
@@ -36,6 +38,8 @@ SES_CONFIG = Config(
     # though its response never reached us.
     retries={"total_max_attempts": 3, "mode": "standard"},
 )
+
+QA_S3_CONFIG = Config(connect_timeout=1, read_timeout=2, retries={"total_max_attempts": 1})
 
 
 def _truthy_env(name: str, default: str = "1") -> bool:
@@ -122,6 +126,31 @@ def _send_with_ses(
     )
 
 
+def _store_paid_pdf_for_qa(rid: str, pdf: bytes) -> None:
+    """Best-effort private QA copy of a PDF sent to a live paid customer."""
+    bucket = (os.getenv("QA_DELIVERY_BUCKET") or "").strip()
+    if not bucket:
+        return
+    try:
+        order = store.get_live_paid_order_for_run(rid)
+        if not order:
+            return
+        fid = str(order.get("fid") or "")
+        session_id = order.get("stripe_session_id") or ""
+        if not re.fullmatch(r"[0-9]{1,18}", fid) or not session_id.startswith("cs_live_"):
+            return
+        digest = hashlib.sha256(("valuation:" + rid).encode("utf-8")).hexdigest().upper()[:26]
+        key = f"reports/valuation/{digest}/{fid}.pdf"
+        client = boto3.client("s3", region_name="eu-west-1", config=QA_S3_CONFIG)
+        client.put_object(Bucket=bucket, Key=key, Body=pdf, ContentType="application/pdf",
+                          IfNoneMatch="*")
+    except ClientError as exc:
+        if exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412:
+            logging.getLogger(__name__).warning("Valuation PDF QA handoff failed")
+    except Exception:
+        logging.getLogger(__name__).warning("Valuation PDF QA handoff failed")
+
+
 async def _dispatch(message: EmailMessage, *, region: str, sender: str,
                     to: str, rid: str) -> dict:
     """Send a built message via SES, normalising provider errors to sent=False.
@@ -192,12 +221,14 @@ async def send_report_ready(rid: str) -> dict:
     version = _report_version(run)
     safe = _safe_filename(f"{company}-{version}")
 
+    is_pdf = True
     try:
         pdf_path = await asyncio.to_thread(report.generate_pdf, rid, report_json)
         attachment_data = Path(pdf_path).read_bytes()
         attachment_name = f"{safe}.pdf"
         attachment_type = ("application", "pdf")
     except Exception:
+        is_pdf = False
         html_path = await asyncio.to_thread(report.generate_html, rid, report_json)
         attachment_data = Path(html_path).read_bytes()
         attachment_name = f"{safe}.html"
@@ -243,7 +274,10 @@ async def send_report_ready(rid: str) -> dict:
         filename=attachment_name,
     )
 
-    return await _dispatch(message, region=region, sender=sender, to=to, rid=rid)
+    result = await _dispatch(message, region=region, sender=sender, to=to, rid=rid)
+    if result.get("sent") and is_pdf:
+        await asyncio.to_thread(_store_paid_pdf_for_qa, rid, attachment_data)
+    return result
 
 
 async def send_forecast_ready(rid: str) -> dict:

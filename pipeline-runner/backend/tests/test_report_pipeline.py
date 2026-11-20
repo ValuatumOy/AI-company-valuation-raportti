@@ -2873,6 +2873,81 @@ def test_email_delivery_sends_pdf_attachment_with_ses(monkeypatch, tmp_path):
     assert attachments[0].get_payload(decode=True) == b"%PDF-1.4 test"
 
 
+def test_email_delivery_mirrors_only_live_paid_pdf_after_ses(monkeypatch, tmp_path):
+    import asyncio
+    from app import email_delivery
+
+    pdf_bytes = b"%PDF exact customer attachment"
+    pdf = tmp_path / "report.pdf"
+    pdf.write_bytes(pdf_bytes)
+    monkeypatch.setenv("REPORT_EMAIL_ENABLED", "1")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    monkeypatch.setenv("REPORT_EMAIL_FROM", "reports@example.com")
+    monkeypatch.setenv("QA_DELIVERY_BUCKET", "qa-bucket")
+    monkeypatch.setattr(email_delivery.store, "get_run", lambda rid: {
+        "id": rid, "params": {"delivery_email": "buyer@example.com"},
+    })
+    monkeypatch.setattr(email_delivery.store, "final_report_json", lambda rid: {
+        "meta": {"company_name": "Example Oy"},
+    })
+    monkeypatch.setattr(email_delivery.report, "generate_pdf", lambda *_: str(pdf))
+    monkeypatch.setattr(email_delivery, "_send_with_ses", lambda **_: {"MessageId": "sent"})
+    async def inline_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    monkeypatch.setattr(email_delivery.asyncio, "to_thread", inline_to_thread)
+    uploads = []
+
+    class S3:
+        def put_object(self, **kwargs):
+            uploads.append(kwargs)
+
+    monkeypatch.setattr(email_delivery.store, "get_live_paid_order_for_run", lambda rid: {
+        "stripe_session_id": "cs_live_verified", "fid": 123456,
+    })
+    monkeypatch.setattr(email_delivery.boto3, "client", lambda *a, **kw: S3())
+    result = asyncio.run(email_delivery.send_report_ready("run123"))
+    assert result["sent"] is True
+    assert uploads == [{
+        "Bucket": "qa-bucket",
+        "Key": "reports/valuation/" + __import__("hashlib").sha256(b"valuation:run123").hexdigest().upper()[:26] + "/123456.pdf",
+        "Body": pdf_bytes,
+        "ContentType": "application/pdf",
+        "IfNoneMatch": "*",
+    }]
+
+
+def test_email_delivery_qa_mirror_skips_nonlive_and_html(monkeypatch, tmp_path):
+    import asyncio
+    from app import email_delivery
+
+    html_path = tmp_path / "report.html"
+    html_path.write_bytes(b"<html>not the PDF</html>")
+    monkeypatch.setenv("REPORT_EMAIL_ENABLED", "1")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    monkeypatch.setenv("REPORT_EMAIL_FROM", "reports@example.com")
+    monkeypatch.setenv("QA_DELIVERY_BUCKET", "qa-bucket")
+    monkeypatch.setattr(email_delivery.store, "get_run", lambda rid: {
+        "id": rid, "params": {"delivery_email": "buyer@example.com"},
+    })
+    monkeypatch.setattr(email_delivery.store, "final_report_json", lambda rid: {"meta": {}})
+    def fail_pdf(*_):
+        raise RuntimeError("no PDF")
+    monkeypatch.setattr(email_delivery.report, "generate_pdf", fail_pdf)
+    monkeypatch.setattr(email_delivery.report, "generate_html", lambda *_: str(html_path))
+    monkeypatch.setattr(email_delivery, "_send_with_ses", lambda **_: {"MessageId": "sent"})
+    async def inline_to_thread(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+    monkeypatch.setattr(email_delivery.asyncio, "to_thread", inline_to_thread)
+    monkeypatch.setattr(email_delivery.store, "get_live_paid_order_for_run", lambda rid: {
+        "stripe_session_id": "cs_test_not_live", "fid": 123456,
+    })
+    def unexpected_s3(*args, **kwargs):
+        raise AssertionError("non-live HTML delivery must not access S3")
+    monkeypatch.setattr(email_delivery.boto3, "client", unexpected_s3)
+    result = asyncio.run(email_delivery.send_report_ready("run123"))
+    assert result["sent"] is True
+
+
 def test_forecast_email_sends_link_without_attachment(monkeypatch):
     import asyncio
     from email import policy
