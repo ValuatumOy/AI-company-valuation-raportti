@@ -225,6 +225,10 @@ async def search_company(query: str, country="FI") -> list[dict]:
             fid = m.get("followedModelId")
             if fid is None:
                 continue
+            # Forecast imports (customers' edits) are saved by the import user as
+            # sibling models of the same company; only source models are sold.
+            if spec and "user_estimates_saver" in str(m.get("analystName") or ""):
+                continue
             try:
                 fid = int(fid)
             except (TypeError, ValueError):

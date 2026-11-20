@@ -66,7 +66,8 @@ def test_search_and_estimates_use_only_the_swedish_source(monkeypatch):
             assert request.url.params["code"] == "556983-9805"
             return httpx.Response(200, json=[
                 {"companyCode": "556983-9805", "companyName": "Husqvarna Stockholm Aktiebolag",
-                 "models": [{"followedModelId": 52623}]},
+                 "models": [{"followedModelId": 585240, "analystName": "user_estimates_saver user_estimates_saver"},
+                            {"followedModelId": 52623, "analystName": "Data Import"}]},
                 {"companyCode": "5569839805", "companyName": "Malformed", "models": [{"followedModelId": 1}]}])
         return httpx.Response(202, json={"jobId": 5, "status": "OK"})
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
