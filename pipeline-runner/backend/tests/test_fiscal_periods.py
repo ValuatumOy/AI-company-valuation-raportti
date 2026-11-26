@@ -102,3 +102,13 @@ def test_young_company_charts_and_headcount_table_drop_empty_leading_slots():
     forecast = {**chart, "x_axis": ["2024", "2025", "2026e"],
                 "series": [{"type": "bar", "values": [1, 2, 3]}]}
     assert "ennuste alkaa" in render._chart_svg(forecast)
+
+
+def test_writer_table_drops_leading_empty_year_columns():
+    from app import render
+    cols = ["Mittari", "P1", "P2", "6.7.2021–31.10.2022", "1.11.2024–31.10.2025"]
+    rows = [["Liikevaihto", "–", None, "2 578", "1 817"], ["Kassa", "", "—", "6", ""]]
+    assert render._drop_leading_empty_columns(cols, rows) == (
+        ["Mittari", "6.7.2021–31.10.2022", "1.11.2024–31.10.2025"],
+        [["Liikevaihto", "2 578", "1 817"], ["Kassa", "6", ""]])
+    assert render._drop_leading_empty_columns(["A", "B"], [["x", ""]]) == (["A", "B"], [["x", ""]])

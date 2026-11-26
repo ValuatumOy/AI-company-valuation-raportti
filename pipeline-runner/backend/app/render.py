@@ -1570,7 +1570,26 @@ def _block_table(b):
         values = [_to_num(v) for row in rows or [] for v in row[1:]]
         div, unit, dec = _scale_from_teur(max((abs(v) for v in values if v is not None), default=0))
         rows = [[row[0]] + [_fmt(_to_num(v) / div, dec) if _to_num(v) is not None else v for v in row[1:]] for row in rows or []]
-    return _render_table(b.get("columns"), rows, b.get("title"), unit)
+    columns, rows = _drop_leading_empty_columns(b.get("columns"), rows)
+    return _render_table(columns, rows, b.get("title"), unit)
+
+
+def _drop_leading_empty_columns(columns, rows):
+    """Writer tables copy the model's empty leading years for a young company
+    (Ville Paananen round 2: P1–P5) — drop columns empty on every row."""
+    if not isinstance(columns, list) or not rows or not all(isinstance(r, list) for r in rows):
+        return columns, rows
+
+    def empty(c):
+        return c is None or str(c).strip() in ("", "–", "—", "-")
+    lead = 0
+    while (lead + 2 < len(columns)
+           and all(len(r) <= lead + 1 or empty(r[lead + 1]) for r in rows)):
+        lead += 1
+    if not lead:
+        return columns, rows
+    return ([columns[0]] + columns[lead + 1:],
+            [[r[0]] + r[lead + 1:] for r in rows])
 
 
 def _block_chart(b):
