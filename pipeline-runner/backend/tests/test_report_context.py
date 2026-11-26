@@ -365,3 +365,20 @@ def test_readiness_rejects_nonfinite_forecasts_and_valuation_values(invalid):
     assert readiness["numerical_input_ready"] is False
     assert "Complete source forecast net_sales is missing" in readiness["blockers"]
     assert "Source DCF equity value is missing" in readiness["blockers"]
+
+
+def test_report_qa_flags_pipeline_jargon_without_blocking():
+    from app import report_qa
+    rep = {"sections": [
+        {"id": "2", "blocks": [{"type": "paragraph", "text":
+            "Rikastuksessa nimetyt kilpailijat; kassaa ei ollut saatavilla lähdedatassa."}]},
+        {"id": "8", "blocks": [{"type": "table", "table_id": "peer_table",
+            "columns": ["Yhtiö", "Lähde"], "rows": [["Konemertsi Oy", "Valuatum /modeldata (fid 170764)"]]}]},
+        {"id": "9", "blocks": [{"type": "paragraph", "text":
+            "Yritysarvosta vähennetään korolliset velat. Tietoa ei ollut saatavilla."}]},
+    ]}
+    found = report_qa._internal_jargon(rep)
+    assert len(found) == 2
+    assert "rikastuksessa" in found[0] and "lähdedatassa" in found[0]
+    assert "fid 170764" in found[1] and "peer_table" not in found[1]
+    assert any("sisäisiä termejä" in w for w in report_qa.warnings(rep))

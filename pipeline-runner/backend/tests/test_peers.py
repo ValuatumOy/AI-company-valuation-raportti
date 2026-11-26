@@ -167,7 +167,7 @@ def test_listed_peer_lands_in_report_units(monkeypatch):
     assert peer["listed"] is True
     assert peer["segment"] == "ohjelmisto"
     assert peer["y_tunnus"] == "1927398-8"
-    assert "fid 555" in peer["source"] and peer["fetched"]
+    assert peer["fid"] == 555 and "fid" not in peer["source"] and peer["fetched"]
 
 
 def test_sentinel_cells_never_reach_the_peer_table(monkeypatch):

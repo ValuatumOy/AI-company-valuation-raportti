@@ -68,6 +68,9 @@ def writer_directive(data):
         "Do not annualize partial-period revenue or invent missing data. "
         "Leave out leading model slots that have no source period or values: "
         "do not give them chart axis labels and do not mention them in the text. "
+        "In the report call every period a fiscal year (tilikausi) and every forecast "
+        "year an ennustevuosi; never write 'lähdekausi', 'mallipaikka', "
+        "'ennustetunniste' or anything about model slots or keys. "
     )
     if not forecast_baseline_comparable(actuals, (data or {}).get("forecast") or {}):
         directive += (

@@ -295,6 +295,42 @@ def _degenerate_optimistic_scenario(rep):
     return []
 
 
+# Pipeline-internal names the writer copies from its prompt and inputs
+# ("rikastus", "lähdedata", field names). A reader cannot parse them.
+# ponytail: warning only — "rikastus"/"moottori" are real words for a mine or
+# a garage, so a hit is a prompt to look, never a delivery gate.
+_JARGON_RE = re.compile(
+    r"\b(?:verkko)?rikastu(?:s|ksen|ksessa|ksesta|kseen|kset|sta)\b"
+    r"|\blähdedat\w*|\binput-dat\w*|\b\w*moottori\w*"
+    r"|\blähdekau\w*|\bmallipaik\w*|\bennustetunnist\w*|\bkoneluettav\w*"
+    r"|\bliputet\w*|\bjärjestelmäennuste\w*|\blähde-ennuste\w*"
+    r"|\bfid \d+|/modeldata|\b[a-z]+_[a-z_]+\b",
+    re.I,
+)
+
+
+def _strings(obj):
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            if k not in ("type", "table_id", "chart_id", "chart_type", "status", "variant"):
+                yield from _strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _strings(v)
+
+
+def _internal_jargon(rep):
+    found = {}
+    for sec, b in _iter_blocks(rep):
+        for text in _strings(b):
+            for m in _JARGON_RE.findall(text):
+                found.setdefault(str(sec.get("id")), []).append(m.lower())
+    return [f"osio {sid}: sisäisiä termejä raportissa: {', '.join(dict.fromkeys(terms))}"
+            for sid, terms in found.items()]
+
+
 def warnings(rep):
     """Non-blocking QA warnings over the assembled report. Never raises."""
     try:
@@ -303,7 +339,8 @@ def warnings(rep):
                 + _scenario_and_anchor_consistency(rep)
                 + _restated_derived_figures(rep)
                 + _degenerate_optimistic_scenario(rep)
-                + _prose_number_reconciliation(rep))
+                + _prose_number_reconciliation(rep)
+                + _internal_jargon(rep))
     except Exception as e:  # QA must never break report delivery
         return [f"report_qa-tarkistus epäonnistui: {e}"]
 

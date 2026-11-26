@@ -2233,7 +2233,7 @@ def _eva_waterfall_html(report):
 
     # --- per-year EVA ------------------------------------------------------
     hy, hv = f.get("hist_years") or [], f.get("hist_eva") or []
-    labels = [str(v) for v in hy] + [str(v) for v in yrs] + ["TRM"]
+    labels = [str(v) for v in hy] + [str(v) for v in yrs] + [_t("Jatkuva")]
     vals = list(hv) + list(f["discounted_eva"]) + [f["terminal"]]
     nh, m = len(hv), len(vals)
     W2, H2, pt2, pb2 = 600, 150, 22, 20

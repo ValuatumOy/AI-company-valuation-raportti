@@ -141,7 +141,7 @@ def test_nested_source_unit_contradiction_fails_before_relabeling():
 def test_english_partial_dcf_notice_and_reporting_level_are_localized():
     data = _input()
     data["valuation_engine"]["dcf"].pop("fcff")
-    assert "missing the year, FCFF" in dcf_detail.build_dcf_detail_blocks(data)[0]["text"]
+    assert "no annual free cash flow" in dcf_detail.build_dcf_detail_blocks(data)[0]["text"]
     report = assemble.assemble(_run())
     report["meta"]["level"] = "consolidated"
     report["meta"]["industry"] = "Ohjelmistokehitys"
@@ -213,7 +213,7 @@ def test_optimistic_waterfall_uses_source_currency_without_changing_math():
     scenarios = report["machine_readable"]["scenarios"]
     assert scenarios[-1]["value_teur"] == round(expected, 1)
     text = render.render_html(report)
-    assert "Optimistic scenario value derivation" in text
+    assert "Optimistic scenario value calculation" in text
     assert "tDKK" in text
     assert "tEUR" not in text
 

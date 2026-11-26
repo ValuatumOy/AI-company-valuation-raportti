@@ -167,7 +167,7 @@ def build_headcount_efficiency_blocks(input_data):
             "variant": "info",
             "title": _t('Henkilöstömäärä korjattu'),
             "text": (
-                _tf('Lähdedatan ilmoittama henkilöstömäärä vuosilta {0} on epäuskottava suhteessa henkilöstökuluihin. Ilmoitettu määrä näytetään sellaisenaan; henkilöä kohden lasketut tunnusluvut näiltä vuosilta perustuvat henkilöstökuluista johdettuun arvioon (noin {1} tEUR/henkilö).', f'{yrs}', f'{_fmt_num(COST_PER_HEAD_TEUR)}')
+                _tf('Tilinpäätöstiedoissa ilmoitettu henkilöstömäärä vuosilta {0} on epäuskottava suhteessa henkilöstökuluihin. Ilmoitettu määrä näytetään sellaisenaan; henkilöä kohden lasketut tunnusluvut näiltä vuosilta perustuvat henkilöstökuluista johdettuun arvioon (noin {1} tEUR/henkilö).', f'{yrs}', f'{_fmt_num(COST_PER_HEAD_TEUR)}')
             ),
         })
     return blocks

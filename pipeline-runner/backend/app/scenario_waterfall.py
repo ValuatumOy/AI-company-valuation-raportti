@@ -81,7 +81,7 @@ def compute(assumptions, input_data):
     if dilution:
         steps.append([_tf('− Laimennusvaikutus {0} %', f'{_fmt(dilution, 1)}'), _fmt(value)])
     if floored != value:
-        steps.append([_t('Omistaja-arvon lattia'), "0"])
+        steps.append([_t('Omistaja-arvon alaraja'), "0"])
     steps.append([_t('Optimistinen omistaja-arvo'), _fmt(floored)])
     return {"value_teur": floored, "steps": steps, "realization_year": int(year),
             "wacc_pct": wacc, "n": n}
@@ -151,14 +151,14 @@ def derivation_blocks(result):
     return [{
         "type": "table",
         "table_id": "deterministic_optimistic_waterfall",
-        "title": _t('Optimistisen skenaarion arvon johto (deterministinen)'),
+        "title": _t('Optimistisen skenaarion arvon laskenta'),
         "unit": _t('tEUR'),
         "columns": [_t('Erä'), _t('Arvo')],
         "rows": result["steps"],
     }, {
         "type": "paragraph",
         "text": (
-            _t('Optimistisen skenaarion arvo on laskettu deterministisesti yllä olevista oletuksista: oman pääoman arvo muodostetaan toteutumisvuonna (jatkuva arvo miinus saman vuoden ennustettu nettovelka) ja diskontataan kokonaisuutena nykyhetkeen. Välivuosien rahoitustarvetta ei vähennetä erikseen, koska toteutumisvuoden nettovelka sisältää jo sen rahoituksen. Oletukset ovat AI:n muodostamia ja käyttäjän muokattavissa.')
+            _t('Optimistisen skenaarion arvo on laskettu suoraan yllä olevista oletuksista: oman pääoman arvo muodostetaan toteutumisvuonna (jatkuva arvo miinus saman vuoden ennustettu nettovelka) ja diskontataan kokonaisuutena nykyhetkeen. Välivuosien rahoitustarvetta ei vähennetä erikseen, koska toteutumisvuoden nettovelka sisältää jo sen rahoituksen. Oletukset ovat AI:n muodostamia ja käyttäjän muokattavissa.')
         ),
     }]
 

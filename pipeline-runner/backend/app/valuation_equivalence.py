@@ -194,7 +194,7 @@ def _normalize_scoring(scoring, value, source_eva=None, independent=False):
         m["status"] = "accepted" if current().language == "en" else "hyväksytty"
         m["value_teur"] = value
         m["rationale"] = (
-            _t('Päämenetelmä: vapaat kassavirrat ja terminaaliarvo Valuatumin DCF-moottorista.')
+            _t('Päämenetelmä: vapaat kassavirrat ja terminaaliarvo Valuatumin DCF-laskelmasta.')
         )
 
     for m in eva_rows:
@@ -281,7 +281,7 @@ def _normalize_section8(sections, input_data, value):
              "title": _t("Lähdemallien arvot"), "unit": current().unit,
              "columns": [_t("Menetelmä"), _t("Arvo"), _t("Rooli")],
              "rows": [["DCF", _fmt_num(value), _t("Päämenetelmä")],
-                      ["EVA", _fmt_num(raw) if _is_num(raw) else _t("ei saatavilla lähdedatassa"),
+                      ["EVA", _fmt_num(raw) if _is_num(raw) else _t("ei saatavilla"),
                        _t("Erillinen lähdemallin vertailuarvo")]]},
         ]
         if _is_num(raw) and abs(raw - value) > max(1.0, 0.005 * abs(value)):
@@ -397,7 +397,7 @@ def _normalize_section10(sections, input_data, value):
         rows.append([_t('Investoitu pääoma'), _fmt_num(ic)])
     rows.append([_t('PV, diskontatut EVA:t (ennustejakso)'), _fmt_num(pv_exp)])
     rows.append([_t('Jatkuvan arvon (terminaali-EVA) nykyarvo'),
-                 _fmt_num(pv_term) if _is_num(pv_term) else _t('ei saatavilla lähdedatassa')])
+                 _fmt_num(pv_term) if _is_num(pv_term) else _t('ei saatavilla')])
     if _is_num(cap_change):
         rows.append([_t('Pääomapohjan muutoksen nykyarvo'), _fmt_num(cap_change)])
     bridge_row_start = len(rows)
@@ -434,16 +434,16 @@ def _normalize_section10(sections, input_data, value):
     if complete:
         rows.append([_t("Komponenttien summa"), _fmt_num(total)])
     if _is_num(raw):
-        rows.append([_t('EVA-moottorin oma arvo ennen normalisointia'), _fmt_num(raw)])
+        rows.append([_t('EVA-laskelman oma arvo'), _fmt_num(raw)])
     rows.append([_t('Oman pääoman arvo (DCF, käytetty raportissa)'), _fmt_num(value)])
 
     if complete:
         intro = (
-            _t('EVA rakentaa oman pääoman arvon eri suunnasta kuin DCF: yhtiöön jo sitoutunut pääoma (investoitu pääoma) plus tulevien EVA-erien nykyarvo (ennustejakso ja terminaali) on yritysarvo, josta korolliset velat ja kassa vievät oman pääoman arvoon. Alla olevat erät ovat laskentamoottorin tuottamia sellaisenaan.')
+            _t('EVA rakentaa oman pääoman arvon eri suunnasta kuin DCF: yhtiöön jo sitoutunut pääoma (investoitu pääoma) plus tulevien EVA-erien nykyarvo (ennustejakso ja terminaali) on yritysarvo, josta korolliset velat ja kassa vievät oman pääoman arvoon. Alla olevat erät ovat Valuatumin laskentamallin lukuja sellaisenaan.')
         )
     else:
         intro = (
-            _t('EVA-erittelyn komponentit eivät täsmää EVA-moottorin omaan arvoon tai jokin komponentti puuttuu lähdedatasta, joten täsmäytyssummaa ei esitetä. Raportin arvostus perustuu DCF-menetelmään; EVA on tässä raportissa DCF:n rinnakkaisnäkymä, ei itsenäinen menetelmäarvo.')
+            _t('EVA-erittelyn komponentit eivät täsmää EVA-laskelman omaan arvoon tai jokin komponentti puuttuu, joten täsmäytyssummaa ei esitetä. Raportin arvostus perustuu DCF-menetelmään; EVA on tässä raportissa DCF:n rinnakkaisnäkymä, ei itsenäinen menetelmäarvo.')
         )
     if current().country != "FI":
         intro = _t("EVA-erät esitetään lähdemallin arvoina. Summa esitetään vain, jos erät täsmäävät lähteen omaan EVA-arvoon. Raportin ensisijainen arvonmääritys perustuu DCF:ään; mallien vastaavuutta ei oleteta.")
@@ -454,7 +454,7 @@ def _normalize_section10(sections, input_data, value):
             "variant": "warning",
             "title": _t('EVA- ja DCF-mallin ero'),
             "text": (
-                _tf('EVA-moottorin oma arvo ({0} tEUR) poikkeaa DCF:n oman pääoman arvosta ({1} tEUR). Ero kertoo mallien välisestä erosta lähdedatassa — se ei ole raportissa tasattu piiloon.', f'{_fmt_num(raw)}', f'{_fmt_num(value)}')
+                _tf('EVA-laskelman oma arvo ({0} tEUR) poikkeaa DCF:n oman pääoman arvosta ({1} tEUR). Ero johtuu laskentamallien välisestä erosta — se ei ole raportissa tasattu piiloon.', f'{_fmt_num(raw)}', f'{_fmt_num(value)}')
             ),
         }
     blocks = [
@@ -550,7 +550,7 @@ def _eva_year_blocks(input_data):
         running.append(acc)
     rows.append(row(_t('Kumulatiivinen diskontattu EVA'), running, cum0))
 
-    note = (_t('Sijoitetun pääoman rivi on laskentamoottorin pääomakustannus jaettuna WACCilla. Viimeisen sarakkeen kumulatiivinen summa on tulevien EVA-erien nykyarvo yhteensä (ennustejakso ja terminaali).'))
+    note = (_t('Sijoitetun pääoman rivi on laskentamallin pääomakustannus jaettuna WACCilla. Viimeisen sarakkeen kumulatiivinen summa on tulevien EVA-erien nykyarvo yhteensä (ennustejakso ja terminaali).'))
     if current().country != "FI":
         note = _t("Viimeisen sarakkeen kumulatiivinen summa on lähteen tulevien EVA-erien nykyarvo yhteensä.")
         if capital:
@@ -562,7 +562,7 @@ def _eva_year_blocks(input_data):
         {"type": "table", "table_id": "deterministic_eva_years",
          "title": _t('EVA-laskelma vuosittain'), "unit": unit,
          "columns": [_t('Erä')] + [str(y) for y in years]
-                    + ([str(eva.get("terminal") or "TRM")] if has_t else []),
+                    + ([str(eva.get("terminal") or "TRM").replace("TRM", _t("Jatkuva"))] if has_t else []),
          "rows": rows},
         {"type": "paragraph", "text": note},
     ]

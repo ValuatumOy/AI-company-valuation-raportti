@@ -90,7 +90,7 @@ def _bridge_rows(dcf, pv_forecast, fmt=_fmt_num):
     if _is_num(bridge.get("prev_year_dividends")):
         rows.append([_t('Edellisen vuoden osingot'), fmt(bridge.get("prev_year_dividends"))])
     if _is_num(equity):
-        rows.append([_t('Oman pääoman arvo ennen lattiaa'), fmt(equity)])
+        rows.append([_t('Oman pääoman arvo ennen alarajaa'), fmt(equity)])
     return rows
 
 
@@ -201,7 +201,7 @@ def build_wacc_risk_caveat_blocks(input_data):
         param_bits.append(_tf('likviditeettipreemio {0}', f'{_fmt_pct(liq)}'))
 
     text = (
-        _t('Diskonttokorko (WACC) tulee valuaatiomoottorista, eikä sitä ole tässä raportissa oikaistu yhtiön luottoriskillä. Huomioi jännite: ')
+        _t('Diskonttokorko (WACC) tulee Valuatumin laskentamallista, eikä sitä ole tässä raportissa oikaistu yhtiön luottoriskillä. Huomioi jännite: ')
         + (", ".join(risk_bits) or _t('kohonnut luottoriski'))
         + _t(', mutta ') + ("; ".join(param_bits) or _t('diskonttokoron komponentit'))
         + _t(' ovat maltilliset tähän riskitasoon nähden')
@@ -240,10 +240,8 @@ def build_dcf_detail_blocks(input_data):
                 "variant": "warning",
                 "title": _t('DCF-erittelyä ei voitu koota'),
                 "text": _t(
-                    "Valuaatiomoottorin dcf-lohkosta puuttuu vuosi-, FCFF- tai "
-                    "diskontattu FCFF -sarja, joten vuosittaista FCFF-erittelyä ei "
-                    "voitu rakentaa. Tarkista vaiheen 0 datan "
-                    "valuation_engine.dcf-kentät."
+                    "Laskelmasta puuttuu vuosittainen vapaa kassavirta tai sen nykyarvo, "
+                    "joten vuosittaista FCFF-erittelyä ei voitu esittää."
                 ),
             }]
         return []
@@ -251,7 +249,7 @@ def build_dcf_detail_blocks(input_data):
     n = min(len(years), len(fcff), len(discounted))
     years = years[:n]
     terminal_pv = _terminal_pv(dcf, discounted, n)
-    terminal_label = str(dcf.get("terminal") or "TRM")
+    terminal_label = str(dcf.get("terminal") or "TRM").replace("TRM", _t("Jatkuva"))
     cols = [_t('Erä')] + [str(y) for y in years]
     if _is_num(terminal_pv):
         cols.append(terminal_label)
@@ -344,7 +342,7 @@ def build_dcf_detail_blocks(input_data):
             "variant": "info",
             "title": _t('Mistä diskontattu FCFF tulee?'),
             "text": (
-                _tf('Taulukko seuraa Valuatumin DCF-rivejä: EBITistä edetään veroihin, käyttöpääoman muutokseen, investointeihin ja muihin eriin, joista muodostuu vapaa kassavirta (FCFF). Diskontattu FCFF on saman DCF-taulukon nykyarvorivi, ja ennustejakson diskontattujen FCFF:ien summa on {0} {1}. Tekoäly ei laske DCF:ää uudelleen, vaan esittää Valuatum-moottorin antamat rivit. Miinusmerkillä (−) alkavat rivit vähennetään kassavirrasta; tappiollisena vuonna rivi “− Maksetut verot” voi silti näyttää positiivista lukua, jolloin kyse on verohyödystä, joka kasvattaa vapaata kassavirtaa.', f'{fmt(pv_forecast)}', f'{unit}')
+                _tf('Taulukko seuraa Valuatumin DCF-rivejä: EBITistä edetään veroihin, käyttöpääoman muutokseen, investointeihin ja muihin eriin, joista muodostuu vapaa kassavirta (FCFF). Diskontattu FCFF on saman DCF-taulukon nykyarvorivi, ja ennustejakson diskontattujen FCFF:ien summa on {0} {1}. Tekoäly ei laske DCF:ää uudelleen, vaan esittää Valuatumin laskentamallin rivit. Miinusmerkillä (−) alkavat rivit vähennetään kassavirrasta; tappiollisena vuonna rivi “− Maksetut verot” voi silti näyttää positiivista lukua, jolloin kyse on verohyödystä, joka kasvattaa vapaata kassavirtaa.', f'{fmt(pv_forecast)}', f'{unit}')
             ),
         },
     ]

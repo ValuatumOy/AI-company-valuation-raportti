@@ -169,7 +169,7 @@ def build_forecast_origin_block(input_data, params=None):
             "type": "callout", "variant": "info", "table_id": text_id,
             "title": _t('Mistä ennuste tulee'),
             "text": (
-                _tf('Liikevaihto- ja EBIT-ennuste on tilaajan antama: Valuatumin perusuraa on muokattu tilaajan omilla luvuilla, ja laskentamoottori on johtanut niistä muut rivit (kassavirta, tase, verot). Viimeisen ennustevuoden {0} EBIT-marginaali {1} jatkuu terminaalissa muuttumattomana, joten se painaa arvossa enemmän kuin yksikään muu yksittäinen vuosi.', f'{yn}', f'{_pct(m[-1])}')
+                _tf('Liikevaihto- ja EBIT-ennuste on tilaajan antama: Valuatumin perusuraa on muokattu tilaajan omilla luvuilla, ja Valuatumin laskentamalli on johtanut niistä muut rivit (kassavirta, tase, verot). Viimeisen ennustevuoden {0} EBIT-marginaali {1} jatkuu terminaalissa muuttumattomana, joten se painaa arvossa enemmän kuin yksikään muu yksittäinen vuosi.', f'{yn}', f'{_pct(m[-1])}')
             ),
         }
 
@@ -195,7 +195,7 @@ def build_forecast_origin_block(input_data, params=None):
             cap = (pairs[0][1], pairs[-1][1])
 
     parts = [
-        _t('Ennuste on Valuatumin laskentamoottorin deterministinen perusura — ei tekoälyn eikä yhtiön johdon näkemys.')
+        _t('Ennuste on Valuatumin laskentamallin perusura — ei tekoälyn eikä yhtiön johdon näkemys.')
     ]
     if last_act:
         parts.append(_tf('Lähtökohta on viimeisin toteutunut tilikausi {0} (EBIT-% {1}).', f'{last_act[0]}', f'{_pct(last_act[1])}'))

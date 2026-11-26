@@ -440,7 +440,7 @@ def test_assemble_refreshes_stale_baked_dcf_detail_blocks():
 def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
     blocks = dcf_detail.build_dcf_detail_blocks(_engine_input_data())
     table = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_fcff_drivers")
-    assert table["columns"] == ["Erä", "2026", "2027", "TRM"]
+    assert table["columns"] == ["Erä", "2026", "2027", "Jatkuva"]
     labels = [r[0] for r in table["rows"]]
     assert "EBIT" in labels
     assert "- Maksetut verot" in labels
@@ -452,7 +452,7 @@ def test_dcf_detail_table_uses_years_as_columns_and_explains_discounting():
     assert next(r for r in table["rows"] if r[0] == "Diskontattu FCFF")[-1] == "218"
     bridge = next(b for b in blocks if b.get("table_id") == "deterministic_dcf_equity_bridge")
     assert ["Yritysarvo (EV)", "400"] in bridge["rows"]
-    assert ["Oman pääoman arvo ennen lattiaa", "450"] in bridge["rows"]
+    assert ["Oman pääoman arvo ennen alarajaa", "450"] in bridge["rows"]
     callout = next(b for b in blocks if b.get("type") == "callout")
     assert "diskontattu FCFF" in callout["title"]
     assert "EBITistä" in callout["text"]
@@ -800,7 +800,7 @@ def test_assemble_normalizes_dcf_eva_equivalence_in_sections_and_scoring():
     assert ["Oman pääoman arvo (DCF, käytetty raportissa)", "450"] in rows
     # missing terminal EVA shown as missing — never backsolved to make a sum fit
     assert ["Jatkuvan arvon (terminaali-EVA) nykyarvo",
-            "ei saatavilla lähdedatassa"] in rows
+            "ei saatavilla"] in rows
     assert not any(r[0] == "Komponenttien summa" for r in rows)
 
 
@@ -861,8 +861,8 @@ def test_eva_reconciliation_never_fabricates_terminal_component():
     flat = str(table["rows"])
     assert "3 891" not in flat and "3 890" not in flat
     assert ["Jatkuvan arvon (terminaali-EVA) nykyarvo",
-            "ei saatavilla lähdedatassa"] in table["rows"]
-    assert any(r[0].startswith("EVA-moottorin oma arvo") for r in table["rows"])
+            "ei saatavilla"] in table["rows"]
+    assert any(r[0].startswith("EVA-laskelman oma arvo") for r in table["rows"])
     warn = next(b for b in sections[0]["blocks"]
                 if b.get("variant") == "warning" and "EVA- ja DCF" in str(b.get("title")))
     assert "ei ole raportissa tasattu piiloon" in warn["text"]
@@ -4153,7 +4153,7 @@ def test_eva_year_table_traces_each_year_to_terminal():
     sections = [{"id": "10", "blocks": []}]
     veq._normalize_section10(sections, data, 2880.8)
     t = next(b for b in sections[0]["blocks"] if b.get("table_id") == "deterministic_eva_years")
-    assert t["columns"][-1] == "TRM" and len(t["columns"]) == 12
+    assert t["columns"][-1] == "Jatkuva" and len(t["columns"]) == 12
     rows = {r[0]: r for r in t["rows"]}
     assert rows["Diskontattu EVA"][-1] == "276"
     assert rows["Kumulatiivinen diskontattu EVA"][-1] == "866"

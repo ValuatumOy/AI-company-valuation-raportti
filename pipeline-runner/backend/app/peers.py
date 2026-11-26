@@ -283,7 +283,7 @@ def _entry(model: dict, resolved: dict, segment: str, fetched: str,
         "segment": segment or None,
         "listed": priced,
         "fiscal_year": int(year),
-        "source": f"Valuatum /modeldata (fid {fid})",
+        "source": "Valuatum",
         "fetched": fetched,
         **figures,
     }
@@ -358,8 +358,7 @@ def summarize(peer_list: list[dict], input_data: dict | None = None) -> dict:
         "revenue_teur_min": min(revenues) if revenues else None,
         "revenue_teur_max": max(revenues) if revenues else None,
         "medians": medians,
-        "source": "Valuatum /modeldata, mediaani lasketaan koodissa verrokkien "
-                  "toteutuneista luvuista",
+        "source": "Valuatum",
     }
     if isinstance(input_data, dict):
         target = target_figures(input_data)
