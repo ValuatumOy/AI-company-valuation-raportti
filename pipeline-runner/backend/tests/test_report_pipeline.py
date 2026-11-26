@@ -2261,7 +2261,7 @@ def test_single_writer_seed_is_research_writer_split():
 
     stages = seed._single_writer_stages()
     assert [s["order"] for s in stages] == [0, 1, 2]
-    assert stages[1]["model"] == "google/gemini-3.1-pro-preview"
+    assert stages[1]["model"] == "google/gemini-4-hydrogen"
     assert stages[1]["web_search"] is True
     assert stages[1]["prompt_template"] == seed._load_prompt("1_enrichment.txt")
     assert stages[2]["model"] == "openai/gpt-6.2-sol"
@@ -2399,7 +2399,7 @@ def test_legacy_single_writer_web_stage_migrates_to_research_writer_split():
     migrated_by_order = {s["order"]: s for s in migrated["stages"]}
 
     assert sorted(migrated_by_order) == [0, 1, 2]
-    assert migrated_by_order[1]["model"] == "google/gemini-3.1-pro-preview"
+    assert migrated_by_order[1]["model"] == "google/gemini-4-hydrogen"
     assert migrated_by_order[1]["web_search"] is True
     assert "business_thesis" in migrated_by_order[1]["prompt_template"]
     assert migrated_by_order[2]["model"] == "openai/gpt-6.2-sol"

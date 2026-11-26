@@ -167,7 +167,7 @@ def _single_writer_stages():
         {
             "order": 1,
             "name": "Vaihe 1 - Enrichment (web haku)",
-            "model": "google/gemini-3.1-pro-preview",
+            "model": "google/gemini-4-hydrogen",
             "prompt_template": _load_prompt("1_enrichment.txt"),
             "expects_json": True,
             "web_search": True,

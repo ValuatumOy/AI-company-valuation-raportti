@@ -17,6 +17,13 @@ _price_index: dict[str, dict] = {}
 
 _DIRECT_GOOGLE_MODELS = [
     {
+        "id": "google/gemini-4-hydrogen",
+        "name": "Google Gemini 4 Hydrogen (direct)",
+        "context_length": None,
+        "prompt_price": 0.0,
+        "completion_price": 0.0,
+    },
+    {
         "id": "google/gemini-3.1-pro-preview",
         "name": "Google Gemini 3.1 Pro Preview (direct)",
         "context_length": None,
