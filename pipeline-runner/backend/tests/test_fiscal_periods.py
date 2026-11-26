@@ -64,3 +64,41 @@ def test_missing_accounting_dates_do_not_stop_report_preparation():
     table = financials.build_financial_statement_blocks(prepared)["5"][0]
     assert table["columns"][1] == "—"
     assert next(row for row in table["rows"] if row[0] == "Liikevaihto")[1] == "2 000"
+
+
+def test_young_company_charts_and_headcount_table_drop_empty_leading_slots():
+    from app import headcount_efficiency, render
+
+    empty = [None] * 5
+    periods = [{"start": None, "end": None}] * 5 + [
+        {"start": "2021-07-06", "end": "2022-10-31"},
+        {"start": "2022-11-01", "end": "2023-10-31"},
+        {"start": "2023-11-01", "end": "2024-10-31"},
+        {"start": "2024-11-01", "end": "2025-10-31"},
+    ]
+    years = list(range(2017, 2026))
+    data = {
+        "actuals": {"years": years, "periods": periods,
+                    "income_statement": {"net_sales": empty + [2578, 1791, 1701, 1817],
+                                         "ebit": empty + [67, 72, 18, 23]},
+                    "per_employee": {"net_sales": empty + [644.5, 447.75, 582.534, 605.667]}},
+        "headcount": {"years": years, "values": empty + [4, 4, None, 3]},
+    }
+    table = headcount_efficiency.build_headcount_efficiency_blocks(data)[0]
+    assert table["columns"][1:] == [fiscal_periods.label(data["actuals"], i) for i in range(5, 9)]
+    assert all(len(r) == 5 for r in table["rows"])
+
+    chart = {
+        "type": "chart", "chart_type": "bar_line", "unit": "tEUR / %",
+        "x_axis": [f"Lähdekausi puuttuu, paikka {i}" for i in range(1, 6)]
+                  + ["6.7.2021–31.10.2022", "1.11.2022–31.10.2023",
+                     "1.11.2023–31.10.2024", "1.11.2024–31.10.2025"],
+        "series": [{"name": "Liikevaihto", "type": "bar", "values": empty + [2578, 1791, 1701, 1817]},
+                   {"name": "EBIT-%", "type": "line", "values": empty + [2.6, 4.02, 1.06, 1.27]}],
+    }
+    svg = render._chart_svg(chart)
+    assert "paikka" not in svg
+    assert "ennuste alkaa" not in svg
+    forecast = {**chart, "x_axis": ["2024", "2025", "2026e"],
+                "series": [{"type": "bar", "values": [1, 2, 3]}]}
+    assert "ennuste alkaa" in render._chart_svg(forecast)

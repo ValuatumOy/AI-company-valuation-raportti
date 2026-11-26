@@ -7,6 +7,7 @@ guessing a varname. Never invented — a row is dropped entirely if none of its
 years have data.
 """
 from . import fiscal_periods
+from .financials import _drop_empty_years
 from .report_i18n import t as _t, tf as _tf, localized_input, current, number
 
 
@@ -149,13 +150,14 @@ def build_headcount_efficiency_blocks(input_data):
 
     if len(rows) <= 1:  # only headcount, no ratio actually has data
         return []
+    shown, rows = _drop_empty_years(labels, rows)
 
     blocks = [{
         "type": "table",
         "table_id": "deterministic_headcount_efficiency",
         "title": _t('Henkilöstötehokkuus'),
         "unit": _t('Henkilöstö: lkm, muut rivit €/henkilö'),
-        "columns": [_t('Erä')] + labels,
+        "columns": [_t('Erä')] + shown,
         "rows": rows,
     }]
     if corrected:

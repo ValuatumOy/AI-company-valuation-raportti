@@ -1594,16 +1594,24 @@ def _chart_svg(b):
     ctype = b.get("chart_type", "bar")
     x = b.get("x_axis") or []
     series = [s for s in (b.get("series") or []) if isinstance(s, dict)]
-    forecast = None
-    for i, lab in enumerate(x):
-        if "e" in str(lab).lower() and any(ch.isdigit() for ch in str(lab)):
-            forecast = i
-            break
     try:
         if ctype == "heatmap_or_matrix":
             return _svg_heatmap(x, series)
         if ctype == "waterfall":
             return _svg_waterfall(b.get("steps"))
+        # A company younger than the 9 model years has leading slots with no
+        # value in any series (Ville Paananen: 5 of 9) — drop them, same as
+        # financials._drop_empty_years does for the statement tables.
+        vals = [_nums(s.get("values")) for s in series]
+        lead = next((i for i in range(len(x))
+                     if any(i < len(v) and v[i] is not None for v in vals)), 0)
+        if lead:
+            x = x[lead:]
+            series = [{**s, "values": v[lead:]} for s, v in zip(series, vals)]
+        # "2026e" marks the forecast start; a bare "e" + digit also matched
+        # labels like "Lähdekausi puuttuu, paikka 1" and put the marker at 0.
+        forecast = next((i for i, lab in enumerate(x)
+                         if re.search(r"\d\s*e\b", str(lab), re.I)), None)
         if ctype == "bar_line":
             bar = next((s for s in series if s.get("type", "bar") == "bar"), None)
             line = next((s for s in series if s.get("type") == "line"), None)

@@ -66,6 +66,8 @@ def writer_directive(data):
         "If source dates are unavailable, say so and avoid assigning a calendar year. "
         "Only calculate historical annual growth across consecutive full fiscal years. "
         "Do not annualize partial-period revenue or invent missing data. "
+        "Leave out leading model slots that have no source period or values: "
+        "do not give them chart axis labels and do not mention them in the text. "
     )
     if not forecast_baseline_comparable(actuals, (data or {}).get("forecast") or {}):
         directive += (
