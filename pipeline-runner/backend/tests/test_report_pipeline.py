@@ -2264,7 +2264,8 @@ def test_single_writer_seed_is_research_writer_split():
     assert stages[1]["model"] == "google/gemini-3.1-pro-preview"
     assert stages[1]["web_search"] is True
     assert stages[1]["prompt_template"] == seed._load_prompt("1_enrichment.txt")
-    assert stages[2]["model"] == "openai/gpt-6.1-sol"
+    assert stages[2]["model"] == "openai/gpt-6.2-sol"
+    assert stages[2]["reasoning_effort"] == "high"
     assert stages[2]["web_search"] is False
     assert stages[2]["input_mapping"]["enrichment"] == "Vaihe 1 enrichment"
     assert "{{enrichment}}" in stages[2]["prompt_template"]
@@ -2275,9 +2276,9 @@ def test_single_writer_seed_is_research_writer_split():
 
 
 @pytest.mark.parametrize("old_model,effort,expected_model,expected_effort", [
-    ("openai/gpt-5.6-sol", "medium", "openai/gpt-6.1-sol", "medium"),
-    ("openai/gpt-5.6-sol", "none", "openai/gpt-6.1-sol", "low"),
-    ("openai/gpt-5.6-sol", "minimal", "openai/gpt-6.1-sol", "low"),
+    ("openai/gpt-5.6-sol", "medium", "openai/gpt-6.2-sol", "medium"),
+    ("openai/gpt-5.6-sol", "none", "openai/gpt-6.2-sol", "low"),
+    ("openai/gpt-5.6-sol", "minimal", "openai/gpt-6.2-sol", "low"),
     ("anthropic/claude-fable-5", "high", "anthropic/claude-fable-5", "high"),
 ])
 def test_writer_model_upgrade_preserves_operator_settings(
@@ -2307,6 +2308,7 @@ def test_writer_model_upgrade_preserves_operator_settings(
 
 @pytest.mark.parametrize("model,has_temperature", [
     ("openai/gpt-6.1-sol", False),
+    ("openai/gpt-6.2-sol", False),
     ("anthropic/claude-sonnet-5.5", False),
     ("deepseek/deepseek-v4-pro", True),
 ])
@@ -2400,7 +2402,7 @@ def test_legacy_single_writer_web_stage_migrates_to_research_writer_split():
     assert migrated_by_order[1]["model"] == "google/gemini-3.1-pro-preview"
     assert migrated_by_order[1]["web_search"] is True
     assert "business_thesis" in migrated_by_order[1]["prompt_template"]
-    assert migrated_by_order[2]["model"] == "openai/gpt-6.1-sol"
+    assert migrated_by_order[2]["model"] == "openai/gpt-6.2-sol"
     assert migrated_by_order[2]["web_search"] is False
     assert "{{enrichment}}" in migrated_by_order[2]["prompt_template"]
 

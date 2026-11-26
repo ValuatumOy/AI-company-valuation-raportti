@@ -180,7 +180,7 @@ def _single_writer_stages():
         {
             "order": 2,
             "name": "Vaihe 2 - Koko raportti (yksi kirjoittaja)",
-            "model": "openai/gpt-6.1-sol",
+            "model": "openai/gpt-6.2-sol",
             # Fable ran with no reasoning_effort set (Claude has no such param).
             # Sol defaults to "medium" if omitted — set it explicitly so it's
             # visible/swappable in the admin "thinking" dropdown. "low" is
@@ -191,7 +191,9 @@ def _single_writer_stages():
             # Try "high" if Sol's prose/judgment quality disappoints — avoid
             # "xhigh" for now: its hidden reasoning tokens eat into the 96k
             # max_tokens cap that already exists to avoid a truncation re-run.
-            "reasoning_effort": "medium",
+            # 2026-11-26: "high" on Sol 6.2 (user decision). Watch for a
+            # finish_reason=length truncation against the 96k cap below.
+            "reasoning_effort": "high",
             "prompt_template": _load_prompt("singlewriter.txt"),
             "expects_json": True,
             "web_search": False,
